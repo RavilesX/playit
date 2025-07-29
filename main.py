@@ -2,13 +2,7 @@ import re
 import os
 import traceback
 from pathlib import Path
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
-    torch = None
-from demucs.pretrained import get_model
+TORCH_AVAILABLE = False
 import subprocess
 import sys
 import json
@@ -346,38 +340,121 @@ class AudioPlayer(QMainWindow):
         # Conexión para detectar cierre manual de la Playlist
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
 
-
     def _check_dependencies(self):
-        try:
-            # Verificar Demucs
-            from demucs.pretrained import get_model
-            get_model('htdemucs_ft')
+        """Verifica que las dependencias requeridas están instaladas"""
+        missing = []
 
-        except Exception as e:
-            print(f"ERROR: {str(e)}")
-            QMessageBox.warning(
-                self,
-                "Error crítico",
-                f"Faltan dependencias requeridas:\n{str(e)}"
-            )
-            #sys.exit(1)
+        # Verificar Demucs instalado globalmente
+        try:
+            subprocess.run(["demucs", "--help"],
+                           check=True,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            missing.append("Demucs no está instalado o no está en el PATH")
+
+        # Verificar FFmpeg (requerido por Demucs)
+        try:
+            subprocess.run(["ffmpeg", "-version"],
+                           check=True,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            missing.append("FFmpeg no está instalado o no está en el PATH")
+
+        if missing:
+            msg = "Faltan dependencias requeridas:\n\n" + "\n".join(missing)
+            msg += "\n\nPor favor instale:\n1. Python 3.8+\n2. Demucs (pip install demucs)\n3. FFmpeg"
+            QMessageBox.critical(self, "Error crítico", msg)
+            sys.exit(1)
 
     def load_demucs_model(self):
-        if not self.demucs_available:
-            return
-
-        if getattr(sys, 'frozen', False):
-            bundle_dir = sys._MEIPASS
-        else:
-            bundle_dir = os.path.dirname(os.path.abspath(__file__))
-
-        os.environ["DEMUCS_DATA_DIR"] = os.path.join(bundle_dir, "demucs")
-
+        """Solo verifica que demucs está instalado, no carga el modelo"""
         try:
-            self.demucs_model = get_model(name='htdemucs_ft')
-            self.demucs_model.eval()
+            # Primero verifica el PATH del sistema
+            self._log_system_path()
+
+            # Intenta encontrar demucs en Python
+            self._check_python_environment()
+
+            # Verificación directa con subprocess
+            result = subprocess.run(
+                ['demucs', '--help'],
+                capture_output=True,
+                text=True,
+                shell=True  # Importante para Windows
+            )
+
+            # Debug: Escribe la salida en un archivo
+            with open("demucs_debug.log", "w") as f:
+                f.write(f"Return code: {result.returncode}\n")
+                f.write(f"Stdout: {result.stdout}\n")
+                f.write(f"Stderr: {result.stderr}\n")
+
+            if result.returncode != 0:
+                raise RuntimeError(f"Demucs returned error: {result.stderr}")
+
+            self.demucs_available = True
+
+
         except Exception as e:
-            QMessageBox.warning(self, "Error Demucs", f"No se pudo cargar el modelo: {str(e)}")
+
+            error_msg = f"Error checking Demucs: {str(e)}"
+            print(error_msg)  # Para ver en consola si ejecutas con --console
+            with open("demucs_error.log", "w") as f:
+                f.write(error_msg)
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"No se pudo acceder a Demucs:\n{error_msg}\n\n"
+                "Asegúrese que:\n"
+                "1. Demucs está instalado (pip install demucs)\n"
+                "2. Python está en el PATH del sistema\n"
+                "3. El ejecutable se usa en la misma terminal donde funciona demucs"
+            )
+            self.demucs_available = False
+
+    def _log_system_path(self):
+        """Registra el PATH del sistema para debugging"""
+        try:
+            path = subprocess.run(
+                ['cmd', '/c', 'echo', '%PATH%'],
+                capture_output=True,
+                text=True,
+                shell=True
+            ).stdout
+
+            with open("system_path.log", "w") as f:
+                f.write(f"System PATH:\n{path}\n")
+        except Exception as e:
+            with open("system_path.log", "w") as f:
+                f.write(f"Error getting PATH: {str(e)}\n")
+
+    def _check_python_environment(self):
+        """Verifica la instalación de Python"""
+        try:
+            # Verifica donde está instalado Python
+            python_path = subprocess.run(
+                ['where', 'python'],
+                capture_output=True,
+                text=True,
+                shell=True
+            ).stdout
+
+            # Verifica si demucs está en los paquetes
+            pip_list = subprocess.run(
+                ['pip', 'list'],
+                capture_output=True,
+                text=True,
+                shell=True
+            ).stdout
+
+            with open("python_environment.log", "w") as f:
+                f.write(f"Python paths:\n{python_path}\n")
+                f.write(f"Installed packages:\n{pip_list}\n")
+        except Exception as e:
+            with open("python_environment.log", "w") as f:
+                f.write(f"Error checking Python: {str(e)}\n")
 
 
     def normalized_path(self, path):
@@ -802,13 +879,56 @@ class AudioPlayer(QMainWindow):
         QMessageBox.information(self, "Éxito", "Separación finalizada correctamente")
 
     def _handle_demucs_error(self, error_msg):
+        """Muestra el log de errores al usuario"""
+        try:
+            # Busca el archivo de log más reciente
+            log_files = list(Path("music_library").rglob("debuggin_demucs.log"))
+            if log_files:
+                latest_log = max(log_files, key=os.path.getmtime)
+
+                with open(latest_log, 'r', encoding='utf-8') as f:
+                    log_content = f.read()
+
+            # Crear diálogo personalizado para mostrar logs
+                log_dialog = QDialog(self)
+                log_dialog.setWindowTitle("Error en Proceso Demucs")
+                log_dialog.resize(800, 600)
+
+                layout = QVBoxLayout()
+
+            # Mensaje de error
+                error_label = QLabel(f"Error: {error_msg}")
+                layout.addWidget(error_label)
+
+                # Área de texto para el log
+                text_edit = QTextEdit()
+                text_edit.setPlainText(log_content)
+                text_edit.setReadOnly(True)
+                layout.addWidget(text_edit)
+
+                # Botón para copiar
+                btn_copy = QPushButton("Copiar Log")
+                btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(log_content))
+                layout.addWidget(btn_copy)
+
+                # Botón para cerrar
+                btn_close = QPushButton("Cerrar")
+                btn_close.clicked.connect(log_dialog.close)
+                layout.addWidget(btn_close)
+
+                log_dialog.setLayout(layout)
+                log_dialog.exec()
+
+            else:
+                QMessageBox.critical(self, "Error",
+                                     f"{error_msg}\n\nNo se encontró archivo de log.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error",
+                                 f"{error_msg}\n\nError al leer log: {str(e)}")
+
         self.demucs_active = False
         self.update_status()
-        """Manejo unificado de errores"""
-        self.processing = False
-        QMessageBox.critical(self, "Error", error_msg)
-        if self.split_dialog:
-            self.split_dialog.show()  # Reabrir diálogo en caso de error
 
     def _update_progress(self, value):
         self.progress_song.setValue(value)
@@ -1365,60 +1485,87 @@ class DemucsWorker(QObject):
 
 
     def run(self):
+        log_file = self.base_path / "debuggin_demucs.log"
         try:
-            self.check_cuda()
-            # Paso 1: Crear estructura de carpetas
-            self.progress.emit(5)
-            self.base_path.mkdir(parents=True, exist_ok=True)
+            # Configuración para Windows
+            if os.name == 'nt':
+                kwargs = {
+                    'creationflags': subprocess.CREATE_NO_WINDOW,
+                    'stdout': subprocess.PIPE,
+                    'stderr': subprocess.PIPE
+                }
+            else:  # Para otros sistemas operativos
+                kwargs = {
+                    'stdout': subprocess.PIPE,
+                    'stderr': subprocess.PIPE,
+                    'start_new_session': True
+                }
+            with open(log_file, 'w', encoding='utf-8') as log:
+            # Escribe información inicial
+                log.write(f"Demucs Process Log - {datetime.now()}\n")
+                log.write(f"Source: {self.src_path}\n")
+                log.write(f"Destination: {self.base_path}\n\n")
 
-            # Paso 2: Copiar archivo original
-            self.progress.emit(10)
-            dest_file = self.base_path / f"{self.song}.mp3"
-            shutil.copy(self.src_path, dest_file)
+                self.check_cuda()
+                # Paso 1: Crear estructura de carpetas
+                self.progress.emit(5)
+                self.base_path.mkdir(parents=True, exist_ok=True)
 
-            # Paso 3: Extraer portada
-            self.progress.emit(15)
-            self._extract_cover(dest_file)
+                # Paso 2: Copiar archivo original
+                self.progress.emit(10)
+                dest_file = self.base_path / f"{self.song}.mp3"
+                shutil.copy(self.src_path, dest_file)
 
-            # Paso 4: Generar JSON
-            self.progress.emit(17)
-            self._create_json()
+                # Paso 3: Extraer portada
+                self.progress.emit(15)
+                self._extract_cover(dest_file)
 
-            # Paso 5: Ejecutar Demucs
-            self.progress.emit(26)
-            try:
+                # Paso 4: Generar JSON
+                self.progress.emit(17)
+                self._create_json()
+
+                # Paso 5: Ejecutar Demucs
+                self.progress.emit(26)
+                    # Usa el comando de terminal directamente
                 cmd = [
                     "demucs",
                     "-n", "htdemucs_ft",
                     "-o", str(self.base_path / "separated"),
                     "--mp3",
-                    "--device", "cuda" if (self.use_gpu and torch.cuda.is_available()) else "cpu",
-                    str(dest_file)
+                    str(self.src_path)
                 ]
+                log.write(f"Command: {' '.join(cmd)}\n\n")
+                log.flush()
 
-                with open("demucs_last_command.txt", "w") as f:
-                    f.write(" ".join(cmd))  # Escribe el comando en una línea
+                # Ejecuta el comando
+                #subprocess.run(cmd, check=True)
+                with open(log_file, 'a') as f:
+                    result = subprocess.run(
+                        cmd,
+                        **kwargs,
+                        text=True,
+                        encoding='utf-8',
+                        timeout=3600,  # 1 hora máximo
+                        check=True
+                    )
 
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+
+                # Paso 6: Organizar archivos generados
+                self.progress.emit(83)
+                self._organize_output()
+
+                self.progress.emit(100)
+                self.finished.emit()
 
 
-            except Exception as e:
-                with open("error_log.txt", "w") as f:
-                    f.write(traceback.format_exc())
-                raise
 
-
-            # Paso 6: Organizar archivos generados
-            self.progress.emit(83)
-            self._organize_output()
-
-            self.progress.emit(100)
-            self.finished.emit()
-
+        except subprocess.TimeoutExpired:
+            error_msg = "Demucs excedió el tiempo límite (1 hora)"
+            self.error.emit(error_msg)
+        except subprocess.CalledProcessError as e:
+            self.error.emit(f"Demucs failed with code {e.returncode}")
         except Exception as e:
-            self.error.emit(f"Error en proceso: {str(e)}")
-            raise
-
+            self.error.emit(f"Error: {str(e)}")
 
     def _extract_cover(self, mp3_path):
         try:
@@ -1449,15 +1596,31 @@ class DemucsWorker(QObject):
             json.dump(data, f, indent=4)
 
     def _organize_output(self):
+        input_stem = self.src_path.stem
+
+        demucs_dir = (
+                self.base_path / "separated" / "htdemucs_ft" /
+                input_stem  # Nombre exacto del archivo de entrada sin extensión
+        )
+
+        if not demucs_dir.exists():
+            # Fallback: intentar con solo el nombre de la canción
+            demucs_dir = self.base_path / "separated" / "htdemucs_ft" / self.song
+            if not demucs_dir.exists():
+                raise FileNotFoundError(
+                    f"No se encontró la carpeta de Demucs en: {demucs_dir}"
+                )
+
+
         # Mover archivos desde la salida de Demucs
-        demucs_dir = self.base_path / "separated" / "htdemucs_ft" / self.song
         target_dir = self.base_path / "separated"
         target_dir.mkdir(exist_ok=True)
 
         for stem in ["drums", "bass", "other", "vocals"]:
             src = demucs_dir / f"{stem}.mp3"
-            dest = target_dir / f"{stem}.mp3"
-            shutil.move(str(src), str(dest))
+            if not src.exists():
+                raise FileNotFoundError(f"Archivo no encontrado: {src}")
+            shutil.move(str(src), str(target_dir / f"{stem}.mp3"))
 
         shutil.rmtree(demucs_dir.parent)
 
