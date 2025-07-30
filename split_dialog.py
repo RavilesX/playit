@@ -2,14 +2,14 @@ import os
 import string
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-                             QCheckBox, QRadioButton, QButtonGroup, QPushButton,
+                             QCheckBox, QPushButton,
                              QFileDialog, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal
 from pathlib import Path
 
 
 class SplitDialog(QDialog):
-    process_started = pyqtSignal(str, str, dict, bool, str)
+    process_started = pyqtSignal(str, str, bool, str)
     dialog_closed = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -26,14 +26,14 @@ class SplitDialog(QDialog):
         self.song = QLineEdit()
         self.file_path = QLineEdit()
         self.file_path.setPlaceholderText("Presiona 'Enter'...")
-        self.drums_check = QCheckBox("Batería")
-        self.drums_check.setChecked(True)
-        self.vocals_check = QCheckBox("Voces")
-        self.vocals_check.setChecked(True)
-        self.bass_check = QCheckBox("Bajo")
-        self.bass_check.setChecked(True)
-        self.guitar_radio = QRadioButton("Guitarra")
-        self.keyboard_radio = QRadioButton("Teclados")
+        # self.drums_check = QCheckBox("Batería")
+        # self.drums_check.setChecked(True)
+        # self.vocals_check = QCheckBox("Voces")
+        # self.vocals_check.setChecked(True)
+        # self.bass_check = QCheckBox("Bajo")
+        # self.bass_check.setChecked(True)
+        # self.guitar_radio = QRadioButton("Guitarra")
+        # self.keyboard_radio = QRadioButton("Teclados")
         self.gpu_check = QCheckBox("Usar GPU (Recomendado)")
         self.gpu_check.setChecked(True)
 
@@ -67,23 +67,23 @@ class SplitDialog(QDialog):
         layout.addWidget(QLabel("Canción*"))
         layout.addWidget(self.song)
 
-        # Opciones de separación
-        layout.addWidget(QLabel("Pistas a incluir:"))
-        layout.addWidget(self.drums_check)
-        layout.addWidget(self.vocals_check)
-        layout.addWidget(self.bass_check)
+        # # Opciones de separación
+        # layout.addWidget(QLabel("Pistas a incluir:"))
+        # layout.addWidget(self.drums_check)
+        # layout.addWidget(self.vocals_check)
+        # layout.addWidget(self.bass_check)
 
         # Grupo de radios
-        radio_group = QButtonGroup(self)
-        radio_group.addButton(self.guitar_radio)
-        radio_group.addButton(self.keyboard_radio)
-        self.guitar_radio.setChecked(True)
+        # radio_group = QButtonGroup(self)
+        # radio_group.addButton(self.guitar_radio)
+        # radio_group.addButton(self.keyboard_radio)
+        # self.guitar_radio.setChecked(True)
 
-        radio_layout = QHBoxLayout()
-        radio_layout.addWidget(QLabel("Armonía:"))
-        radio_layout.addWidget(self.guitar_radio)
-        radio_layout.addWidget(self.keyboard_radio)
-        layout.addLayout(radio_layout)
+        # radio_layout = QHBoxLayout()
+        # radio_layout.addWidget(QLabel("Armonía:"))
+        # radio_layout.addWidget(self.guitar_radio)
+        # radio_layout.addWidget(self.keyboard_radio)
+        # layout.addLayout(radio_layout)
 
         # GPU Checkbox
         layout.addWidget(self.gpu_check)
@@ -139,18 +139,11 @@ class SplitDialog(QDialog):
             self._start_process()
 
     def _start_process(self):
-        config = {
-            "drums": self.drums_check.isChecked(),
-            "vocals": self.vocals_check.isChecked(),
-            "bass": self.bass_check.isChecked(),
-            "guitar": self.guitar_radio.isChecked(),
-            "keyboard": self.keyboard_radio.isChecked()
-        }
+
 
         self.process_started.emit(
             self.artist.text().strip(),
             self.song.text().strip(),
-            config,
             self.gpu_check.isChecked(),
             self.file_path.text()
         )

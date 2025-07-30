@@ -1,6 +1,5 @@
 import re
 import os
-import traceback
 from pathlib import Path
 TORCH_AVAILABLE = False
 import subprocess
@@ -312,7 +311,20 @@ class AudioPlayer(QMainWindow):
         self.volume = 25
         self.mute_states = {"drums": False, "vocals": False, "bass": False, "other": False}
         self.current_channels = []
-        self.guitar_is_true = None #is True cuando en el JSON es True
+
+        # Variables para volumen individual
+        self.individual_volumes = {
+            "drums": 1.0,
+            "vocals": 1.0,
+            "bass": 1.0,
+            "other": 1.0
+        }
+        self.mute_states = {
+            "drums": False,
+            "vocals": False,
+            "bass": False,
+            "other": False
+        }
 
         # Inicializar Pygame Mixer
         if not pygame.mixer.get_init():
@@ -321,7 +333,6 @@ class AudioPlayer(QMainWindow):
 
 
         # Configurar UI
-        self.icon_folder = 1
         self.init_ui()
         self.init_menu()
         self.init_status_bar()
@@ -344,21 +355,37 @@ class AudioPlayer(QMainWindow):
         """Verifica que las dependencias requeridas están instaladas"""
         missing = []
 
+        # Configuración para Windows
+        if os.name == 'nt':
+            kwargs = {
+                'creationflags': subprocess.CREATE_NO_WINDOW,
+                'stdout': subprocess.PIPE,
+                'stderr': subprocess.PIPE
+            }
+        else:  # Para otros sistemas operativos
+            kwargs = {
+                'stdout': subprocess.PIPE,
+                'stderr': subprocess.PIPE,
+                'start_new_session': True
+            }
+
         # Verificar Demucs instalado globalmente
         try:
             subprocess.run(["demucs", "--help"],
+                           **kwargs,
                            check=True,
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE)
+                           text=True,
+                           encoding='utf-8')
         except (subprocess.CalledProcessError, FileNotFoundError):
             missing.append("Demucs no está instalado o no está en el PATH")
 
         # Verificar FFmpeg (requerido por Demucs)
         try:
             subprocess.run(["ffmpeg", "-version"],
+                           **kwargs,
                            check=True,
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE)
+                           text=True,
+                           encoding='utf-8')
         except (subprocess.CalledProcessError, FileNotFoundError):
             missing.append("FFmpeg no está instalado o no está en el PATH")
 
@@ -555,28 +582,54 @@ class AudioPlayer(QMainWindow):
         self.bass_btn.setEnabled(state)
         self.other_btn.setEnabled(state)
         if state:
-            self.drums_btn.setIcon(QIcon(f"images/icons{self.icon_folder:02}/drums.png"))
+            self.drums_btn.setIcon(QIcon(f"images/icons01/drums.png"))
             self.drums_btn.setChecked(False)
-            self.vocals_btn.setIcon(QIcon(f"images/icons{self.icon_folder:02}/vocals.png"))
+            self.vocals_btn.setIcon(QIcon(f"images/icons01/vocals.png"))
             self.vocals_btn.setChecked(False)
-            self.bass_btn.setIcon(QIcon(f"images/icons{self.icon_folder:02}/bass.png"))
+            self.bass_btn.setIcon(QIcon(f"images/icons01/bass.png"))
             self.bass_btn.setChecked(False)
-            self.other_btn.setIcon(QIcon(f"images/icons{self.icon_folder:02}/{'guitar' if self.guitar_is_true else 'keyboard'}.png"))
+            self.other_btn.setIcon(QIcon(f"images/icons01/other.png"))
             self.other_btn.setChecked(False)
 
     def track_buttons(self):
         # Configurar botones
         self.drums_btn = QPushButton()
         self.setup_button(self.drums_btn, 'drums_btn', 'drums')
+        self.drums_slider = QSlider(Qt.Orientation.Horizontal)
+
+        self.setup_slider(self.drums_slider, 'drums')
 
         self.vocals_btn = QPushButton()
         self.setup_button(self.vocals_btn, 'vocals_btn', 'vocals')
+        self.vocals_slider = QSlider(Qt.Orientation.Horizontal)
+        self.setup_slider(self.vocals_slider, 'vocals')
 
         self.bass_btn = QPushButton()
         self.setup_button(self.bass_btn, 'bass_btn', 'bass')
+        self.bass_slider = QSlider(Qt.Orientation.Horizontal)
+        self.setup_slider(self.bass_slider, 'bass')
 
         self.other_btn = QPushButton()
         self.setup_button(self.other_btn, 'other_btn', 'other')
+        self.other_slider = QSlider(Qt.Orientation.Horizontal)
+        self.setup_slider(self.other_slider, 'other')
+
+        # Layout para cada instrumento (botón + slider)
+        drums_layout = QVBoxLayout()
+        drums_layout.addWidget(self.drums_btn)
+        drums_layout.addWidget(self.drums_slider)
+
+        vocals_layout = QVBoxLayout()
+        vocals_layout.addWidget(self.vocals_btn)
+        vocals_layout.addWidget(self.vocals_slider)
+
+        bass_layout = QVBoxLayout()
+        bass_layout.addWidget(self.bass_btn)
+        bass_layout.addWidget(self.bass_slider)
+
+        other_layout = QVBoxLayout()
+        other_layout.addWidget(self.other_btn)
+        other_layout.addWidget(self.other_slider)
 
         # Inicializar lista de botones mute
         self.mute_buttons = [
@@ -586,29 +639,55 @@ class AudioPlayer(QMainWindow):
             self.other_btn
         ]
 
-        # Botón de cambio de íconos
-        self.change_icons_btn = QPushButton()
-        self.change_icons_btn.setObjectName("change_icons_btn")
-        self.change_icons_btn.setFixedSize(40, 40)
-        self.change_icons_btn.clicked.connect(self.change_icons)
-
         # Layout
         buttons_layout = QHBoxLayout()
-        buttons_layout.addWidget(self.drums_btn)
-        buttons_layout.addWidget(self.vocals_btn)
-        buttons_layout.addWidget(self.bass_btn)
-        buttons_layout.addWidget(self.other_btn)
-        buttons_layout.addWidget(self.change_icons_btn)
+        buttons_layout.addLayout(drums_layout)
+        buttons_layout.addLayout(vocals_layout)
+        buttons_layout.addLayout(bass_layout)
+        buttons_layout.addLayout(other_layout)
 
         self.enable_disable_buttons(False)
 
         return buttons_layout
 
+    def setup_slider(self, slider, track_name):
+        """Configura los sliders de volumen individual"""
+        slider.setRange(0, 100)
+        slider.setValue(100)
+        slider.setFixedWidth(120)
+        slider.valueChanged.connect(lambda value: self.set_individual_volume(track_name, value))
+
+    def set_individual_volume(self, track_name, value):
+        """Establece el volumen individual para cada pista"""
+        # Guardar el volumen actual (antes de mute)
+        self.individual_volumes[track_name] = value / 100.0
+
+        # Si no está muteado, aplicar el volumen
+        if not self.mute_states[track_name]:
+            self.apply_volume_to_track(track_name, value / 100.0)
+
+    def apply_volume_to_track(self, track_name, volume):
+        """Aplica el volumen a la pista específica"""
+        if not self.current_channels:
+            return
+
+        track_index = {
+            "drums": 0,
+            "vocals": 1,
+            "bass": 2,
+            "other": 3
+        }.get(track_name)
+
+        if track_index is not None and track_index < len(self.current_channels):
+            self.current_channels[track_index].set_volume(volume * (self.volume / 100.0))
+
+
+
     def setup_button(self, button, object_name, icon_name):
         """Configura botones con parámetros comunes."""
         button.setObjectName(object_name)
         button.setIconSize(QSize(120, 120))
-        icon_path = f'images/icons{self.icon_folder:02}/{icon_name}.png'  # Usa el folder actual
+        icon_path = f'images/icons01/{icon_name}.png'
         button.setIcon(QIcon(icon_path))
         button.setCheckable(True)
         button.clicked.connect(self.toggle_mute)
@@ -835,7 +914,7 @@ class AudioPlayer(QMainWindow):
         self.split_dialog.process_started.connect(self.process_song)  # Conectar al método existente
         self.split_dialog.show()
 
-    def process_song(self, artist, song, config, use_gpu, file_path):
+    def process_song(self, artist, song, use_gpu, file_path):
         """Método existente modificado para trabajo en segundo plano"""
         self.demucs_active = True
         self.demucs_progress = 0
@@ -845,7 +924,7 @@ class AudioPlayer(QMainWindow):
 
             # Crear worker para Demucs
             self.demucs_worker = DemucsWorker(
-                artist, song, config, use_gpu, file_path
+                artist, song, use_gpu, file_path
             )
             self.demucs_thread = QThread()
 
@@ -866,7 +945,7 @@ class AudioPlayer(QMainWindow):
             self.demucs_thread.start()
 
         except Exception as e:
-            self._handle_demucs_error(str(e))
+            pass
 
 
     def _on_demucs_success(self):
@@ -879,56 +958,13 @@ class AudioPlayer(QMainWindow):
         QMessageBox.information(self, "Éxito", "Separación finalizada correctamente")
 
     def _handle_demucs_error(self, error_msg):
-        """Muestra el log de errores al usuario"""
-        try:
-            # Busca el archivo de log más reciente
-            log_files = list(Path("music_library").rglob("debuggin_demucs.log"))
-            if log_files:
-                latest_log = max(log_files, key=os.path.getmtime)
-
-                with open(latest_log, 'r', encoding='utf-8') as f:
-                    log_content = f.read()
-
-            # Crear diálogo personalizado para mostrar logs
-                log_dialog = QDialog(self)
-                log_dialog.setWindowTitle("Error en Proceso Demucs")
-                log_dialog.resize(800, 600)
-
-                layout = QVBoxLayout()
-
-            # Mensaje de error
-                error_label = QLabel(f"Error: {error_msg}")
-                layout.addWidget(error_label)
-
-                # Área de texto para el log
-                text_edit = QTextEdit()
-                text_edit.setPlainText(log_content)
-                text_edit.setReadOnly(True)
-                layout.addWidget(text_edit)
-
-                # Botón para copiar
-                btn_copy = QPushButton("Copiar Log")
-                btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(log_content))
-                layout.addWidget(btn_copy)
-
-                # Botón para cerrar
-                btn_close = QPushButton("Cerrar")
-                btn_close.clicked.connect(log_dialog.close)
-                layout.addWidget(btn_close)
-
-                log_dialog.setLayout(layout)
-                log_dialog.exec()
-
-            else:
-                QMessageBox.critical(self, "Error",
-                                     f"{error_msg}\n\nNo se encontró archivo de log.")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error",
-                                 f"{error_msg}\n\nError al leer log: {str(e)}")
-
         self.demucs_active = False
         self.update_status()
+        """Manejo unificado de errores"""
+        self.processing = False
+        QMessageBox.critical(self, "Error", error_msg)
+        if self.split_dialog:
+            self.split_dialog.show()
 
     def _update_progress(self, value):
         self.progress_song.setValue(value)
@@ -981,8 +1017,8 @@ class AudioPlayer(QMainWindow):
                     data = json.load(f)
                     dir_path = json_file.parent
                     for artist, songs in data.items():
-                        exist = False
-                        for song, tracks in songs.items():
+                        for song, _ in songs.items():
+                            exist = False
                             for track in self.playlist:
                                 if (track['artist'] == artist and track['song']==song):
                                     exist=True
@@ -991,12 +1027,7 @@ class AudioPlayer(QMainWindow):
                                 self.playlist.append({
                                     "artist": artist,
                                     "song": song,
-                                    "path": dir_path,
-                                    "drums": tracks["drums"] == "True",
-                                    "vocals": tracks["vocals"] == "True",
-                                    "bass": tracks["bass"] == "True",
-                                    "guitar": tracks["guitar"] == "True",
-                                    "keyboard": tracks["keyboard"] == "True"
+                                    "path": dir_path
                                 })
                                 item = QListWidgetItem(f"{artist} - {song}")
                                 item.setIcon(icon)
@@ -1123,6 +1154,13 @@ class AudioPlayer(QMainWindow):
             ]
             self.current_channels = [s.play() for s in sounds]
 
+            # Aplicar volúmenes iniciales
+            for i, track_name in enumerate(["drums", "vocals", "bass", "other"]):
+                if not self.mute_states[track_name]:
+                    self.current_channels[i].set_volume(self.individual_volumes[track_name] * (self.volume / 100.0))
+                else:
+                    self.current_channels[i].set_volume(0)
+
             #Iniciar Barra de progreso del track
             length = int(sounds[0].get_length() * 1000)
             self.progress_song.setRange(0, length)
@@ -1144,21 +1182,12 @@ class AudioPlayer(QMainWindow):
         path = song["path"]
 
 
-        # Habilitar botones según JSON
-        self.drums_btn.setEnabled(song["drums"])
-        self.vocals_btn.setEnabled(song["vocals"])
-        self.bass_btn.setEnabled(song["bass"])
-        self.other_btn.setEnabled(song["guitar"] or song["keyboard"])
+        # Habilitar botones
+        self.drums_btn.setEnabled(True)
+        self.vocals_btn.setEnabled(True)
+        self.bass_btn.setEnabled(True)
+        self.other_btn.setEnabled(True)
 
-        if song["guitar"]:
-            self.other_btn.setIcon(QIcon(f"images/icons{self.icon_folder:02}/guitar.png".format(self.icon_folder)))
-            self.guitar_is_true=True
-        elif song["keyboard"]:
-            self.other_btn.setIcon(QIcon(f"images/icons{self.icon_folder:02}/keyboard.png".format(self.icon_folder)))
-            self.guitar_is_true = False
-        else:
-            self.other_btn.setIcon(QIcon(f"images/icons{self.icon_folder:02}/other.png".format(self.icon_folder)))
-            self.guitar_is_true = None
 
         self.update_status()
 
@@ -1373,29 +1402,51 @@ class AudioPlayer(QMainWindow):
 
     def set_volume(self, value):
         self.volume = value
-        vol = value / 100
         try:
-            for i, btn in enumerate(self.mute_buttons):
-                if not btn.isChecked():
-                    self.current_channels[i].set_volume(vol)
+            # Aplicar a todas las pistas no muteadas
+            for track_name in ["drums", "vocals", "bass", "other"]:
+                if not self.mute_states[track_name]:
+                    self.apply_volume_to_track(track_name, self.individual_volumes[track_name])
         except Exception as e:
             pass
 
     def toggle_mute(self):
         try:
             sender = self.sender()
-            idx = self.mute_buttons.index(sender)
-            icon_map = {
-                0: ("drums", "no_drums"),
-                1: ("vocals", "no_vocals"),
-                2: ("bass", "no_bass"),
-                3: ("guitar" if self.guitar_is_true else "keyboard",
-                    f"no_{'guitar' if self.guitar_is_true else 'keyboard'}")
-            }
-            prefix = "no_" if sender.isChecked() else ""
-            icon_name = icon_map[idx][1] if sender.isChecked() else icon_map[idx][0]
-            sender.setIcon(QIcon(f"images/icons{self.icon_folder:02}/{icon_name}.png"))
-            self.current_channels[idx].set_volume(0 if sender.isChecked() else self.volume / 100)
+            track_name=None
+
+            # Determinar qué botón fue presionado
+            if sender == self.drums_btn:
+                track_name = "drums"
+            elif sender == self.vocals_btn:
+                track_name = "vocals"
+            elif sender == self.bass_btn:
+                track_name = "bass"
+            elif sender == self.other_btn:
+                track_name = "other"
+
+            if track_name:
+                # Cambiar estado de mute
+                self.mute_states[track_name] = not self.mute_states[track_name]
+
+                # Cambiar icono
+                icon_map = {
+                    "drums": ("drums", "no_drums"),
+                    "vocals": ("vocals", "no_vocals"),
+                    "bass": ("bass", "no_bass"),
+                    "other": ("other","no_other")
+                }
+
+                prefix = "no_" if self.mute_states[track_name] else ""
+                icon_name = icon_map[track_name][1] if self.mute_states[track_name] else icon_map[track_name][0]
+                sender.setIcon(QIcon(f'images/icons01/{icon_name}.png'))
+
+                # Aplicar mute o volumen guardado
+                if self.mute_states[track_name]:
+                    self.apply_volume_to_track(track_name, 0)
+                else:
+                    self.apply_volume_to_track(track_name, self.individual_volumes[track_name])
+
         except Exception as e:
             pass
 
@@ -1436,32 +1487,16 @@ class AudioPlayer(QMainWindow):
         progress_bar = '■' * filled + '▢' * (bars - filled)
         return f"Separando: {progress_bar} {self.demucs_progress}%"
 
-    def change_icons(self):
-        self.icon_folder += 1
-        if self.icon_folder >7:
-            self.icon_folder=1
-        if self.guitar_is_true:
-            self.other_btn.setIcon(QIcon('images/icons{:02}/guitar.png'.format(self.icon_folder)))
-        elif self.guitar_is_true==False:
-            self.other_btn.setIcon(QIcon('images/icons{:02}/keyboard.png'.format(self.icon_folder)))
-        else:
-            self.other_btn.setIcon(QIcon('images/icons{:02}/other.png'.format(self.icon_folder)))
-        self.bass_btn.setIcon(QIcon('images/icons{:02}/bass.png'.format(self.icon_folder)))
-        self.vocals_btn.setIcon(QIcon('images/icons{:02}/vocals.png'.format(self.icon_folder)))
-        self.drums_btn.setIcon(QIcon('images/icons{:02}/drums.png'.format(self.icon_folder)))
-
-
 
 class DemucsWorker(QObject):
     finished = pyqtSignal()
     error = pyqtSignal(str)
     progress = pyqtSignal(int)  # Nueva señal para progreso
 
-    def __init__(self, artist, song, config, use_gpu, src_path):
+    def __init__(self, artist, song, use_gpu, src_path):
         super().__init__()
         self.artist = artist
         self.song = song
-        self.config = config
         self.use_gpu = use_gpu
         self.src_path = Path(src_path)
         self.base_path = Path("music_library") / artist / song
@@ -1473,19 +1508,9 @@ class DemucsWorker(QObject):
         return torch.cuda.is_available()
 
 
-        # cuda_available = torch.cuda.is_available()
-        #
-        # with open("gpu_status.txt", "w") as f:
-        #     f.write(f"CUDA disponible: {cuda_available}\n")
-        #     if cuda_available:
-        #         f.write(f"Dispositivo: {torch.cuda.get_device_name(0)}\n")
-        #         f.write(f"Versión CUDA: {torch.version.cuda}\n")
-        #
-        # return cuda_available
-
 
     def run(self):
-        log_file = self.base_path / "debuggin_demucs.log"
+        #log_file = self.base_path / "debuggin_demucs.log"
         try:
             # Configuración para Windows
             if os.name == 'nt':
@@ -1500,62 +1525,53 @@ class DemucsWorker(QObject):
                     'stderr': subprocess.PIPE,
                     'start_new_session': True
                 }
-            with open(log_file, 'w', encoding='utf-8') as log:
-            # Escribe información inicial
-                log.write(f"Demucs Process Log - {datetime.now()}\n")
-                log.write(f"Source: {self.src_path}\n")
-                log.write(f"Destination: {self.base_path}\n\n")
 
-                self.check_cuda()
-                # Paso 1: Crear estructura de carpetas
-                self.progress.emit(5)
-                self.base_path.mkdir(parents=True, exist_ok=True)
+            self.check_cuda()
+            # Paso 1: Crear estructura de carpetas
+            self.progress.emit(5)
+            self.base_path.mkdir(parents=True, exist_ok=True)
 
-                # Paso 2: Copiar archivo original
-                self.progress.emit(10)
-                dest_file = self.base_path / f"{self.song}.mp3"
-                shutil.copy(self.src_path, dest_file)
+            # Paso 2: Copiar archivo original
+            self.progress.emit(10)
+            dest_file = self.base_path / f"{self.song}.mp3"
+            shutil.copy(self.src_path, dest_file)
 
-                # Paso 3: Extraer portada
-                self.progress.emit(15)
-                self._extract_cover(dest_file)
+            # Paso 3: Extraer portada
+            self.progress.emit(15)
+            self._extract_cover(dest_file)
 
-                # Paso 4: Generar JSON
-                self.progress.emit(17)
-                self._create_json()
+            # Paso 4: Generar JSON
+            self.progress.emit(17)
+            self._create_json()
 
-                # Paso 5: Ejecutar Demucs
-                self.progress.emit(26)
-                    # Usa el comando de terminal directamente
-                cmd = [
-                    "demucs",
-                    "-n", "htdemucs_ft",
-                    "-o", str(self.base_path / "separated"),
-                    "--mp3",
-                    str(self.src_path)
-                ]
-                log.write(f"Command: {' '.join(cmd)}\n\n")
-                log.flush()
+            # Paso 5: Ejecutar Demucs
+            self.progress.emit(26)
+                # Usa el comando de terminal directamente
+            cmd = [
+                "demucs",
+                "-n", "htdemucs_ft",
+                "-o", str(self.base_path / "separated"),
+                "--mp3",
+                str(self.src_path)
+            ]
 
-                # Ejecuta el comando
-                #subprocess.run(cmd, check=True)
-                with open(log_file, 'a') as f:
-                    result = subprocess.run(
-                        cmd,
-                        **kwargs,
-                        text=True,
-                        encoding='utf-8',
-                        timeout=3600,  # 1 hora máximo
-                        check=True
-                    )
+            # Ejecuta el comando
+            result = subprocess.run(
+                cmd,
+                **kwargs,
+                text=True,
+                encoding='utf-8',
+                timeout=3600,  # 1 hora máximo
+                check=True
+            )
 
 
-                # Paso 6: Organizar archivos generados
-                self.progress.emit(83)
-                self._organize_output()
+            # Paso 6: Organizar archivos generados
+            self.progress.emit(83)
+            self._organize_output()
 
-                self.progress.emit(100)
-                self.finished.emit()
+            self.progress.emit(100)
+            self.finished.emit()
 
 
 
@@ -1584,11 +1600,7 @@ class DemucsWorker(QObject):
         data = {
             self.artist: {
                 self.song: {
-                    "drums": str(self.config["drums"]),
-                    "vocals": str(self.config["vocals"]),
-                    "bass": str(self.config["bass"]),
-                    "guitar": str(self.config["guitar"]),
-                    "keyboard": str(self.config["keyboard"])
+                    "path": str(self.base_path)  # Solo guardamos la ruta
                 }
             }
         }
