@@ -9,7 +9,7 @@ from os.path import expanduser
 from datetime import datetime
 import time
 import pygame
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QPoint, QRect, QObject, QThread,QPointF
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QPoint, QRect, QObject, QThread,QPointF,QDir
 from PyQt6.QtGui import QAction, QPixmap, QIcon, QKeySequence,QColor,QPainter
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
@@ -24,13 +24,15 @@ import math
 import requests
 from urllib.parse import quote
 import unicodedata
+from resources import resource_path
+from resources import bg_image
 
 
 class CustomDial(QDial):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.background = QPixmap("images/dial_bg.png")  # Imagen de fondo
-        self.knob = QPixmap("images/knob.png")  # Imagen del knob
+        self.background = QPixmap(resource_path('images/main_window/dial_bg.png'))  # Imagen de fondo
+        self.knob = QPixmap(resource_path('images/main_window/knob.png'))  # Imagen del knob
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -88,13 +90,13 @@ class TitleBar(QWidget):
 
         # Botones de control
         self.min_btn = QPushButton()
-        self.min_btn.setIcon(QIcon('images/main_window/min.png'))
+        self.min_btn.setIcon(QIcon(resource_path('images/main_window/min.png')))
         self.min_btn.setIconSize(QSize(24, 24))
         self.max_btn = QPushButton()
-        self.max_btn.setIcon(QIcon('images/main_window/max.png'))
+        self.max_btn.setIcon(QIcon(resource_path('images/main_window/max.png')))
         self.max_btn.setIconSize(QSize(24, 24))
         self.close_btn = QPushButton()
-        self.close_btn.setIcon(QIcon('images/main_window/cerrar.png'))
+        self.close_btn.setIcon(QIcon(resource_path('images/main_window/cerrar.png')))
         self.close_btn.setIconSize(QSize(32, 32))
 
         # Estilos de botones
@@ -141,11 +143,11 @@ class TitleBar(QWidget):
     def toggle_maximize(self):
         if self.parent.isMaximized():
             self.parent.showNormal()
-            self.max_btn.setIcon(QIcon('images/main_window/max.png'))
+            self.max_btn.setIcon(QIcon(resource_path('images/main_window/max.png')))
             self.max_btn.setIconSize(QSize(24, 24))
         else:
             self.parent.showMaximized()
-            self.max_btn.setIcon(QIcon('images/main_window/rest.png'))
+            self.max_btn.setIcon(QIcon(resource_path('images/main_window/rest.png')))
             self.max_btn.setIconSize(QSize(24, 24))
 
     def mousePressEvent(self, event):
@@ -172,9 +174,11 @@ class SearchDialog(QDialog):
         self.btn_accept = QPushButton()
         self.btn_accept.setObjectName("aceptar_btn")
         self.btn_accept.setFixedSize(70, 70)
+        bg_image(self.btn_accept,"images/split_dialog/aceptar_btn.png")
         self.btn_accept.clicked.connect(self.accept_search)
         self.btn_cancel = QPushButton()
         self.btn_cancel.setObjectName("cancelar_btn")
+        bg_image(self.btn_cancel, "images/split_dialog/cancelar_btn.png")
         self.btn_cancel.setFixedSize(70, 70)
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_accept.setDefault(True)
@@ -275,17 +279,17 @@ class AudioPlayer(QMainWindow):
         self.demucs_active = False
 
         # Crear contenedor principal con bordes
-        self.main_frame = QFrame()
-        self.main_frame.setStyleSheet("""
-                    QFrame {
-                        background: #2D2D2D;
-                        border: 1px solid #404040;
-                        border-radius: 8px;
-                    }
-                """)
+        # self.main_frame = QFrame()
+        # self.main_frame.setStyleSheet("""
+        #             QFrame {
+        #                 background: #2D2D2D;
+        #                 border: 1px solid #404040;
+        #                 border-radius: 8px;
+        #             }
+        #         """)
 
 
-        self.setWindowIcon(QIcon('images/main_icon.png'))
+        self.setWindowIcon(QIcon(resource_path('images/main_window/main_icon.png')))
         self.resize(1098,813)
         self.center()
 
@@ -302,7 +306,7 @@ class AudioPlayer(QMainWindow):
         #Cargar archivo de estilos css
         with open('estilos.css','r') as file:
             style=file.read()
-        self.setStyleSheet(style) 
+        self.setStyleSheet(style)
 
         # Variables de estado
         self.playlist = []
@@ -331,11 +335,16 @@ class AudioPlayer(QMainWindow):
             pygame.mixer.init()
             pygame.mixer.set_num_channels(6)
 
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
 
         # Configurar UI
         self.init_ui()
+        self._setup_background()
         self.init_menu()
         self.init_status_bar()
+
+
 
         # Temporizador para actualizaciones
         self.timer = QTimer(self)
@@ -350,6 +359,57 @@ class AudioPlayer(QMainWindow):
 
         # Conexión para detectar cierre manual de la Playlist
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
+
+    def _setup_background(self):
+        """Configura el background sin afectar la estructura existente"""
+        # Crear QLabel para el background
+        self.background_label = QLabel(self)
+        self.background_label.setGeometry(0, 0, self.width(), self.height())
+
+        # Cargar imagen
+        bg_path = resource_path('images/main_window/background.png')
+        pixmap = QPixmap(bg_path)
+
+        if not pixmap.isNull():
+            self.background_label.setPixmap(pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            ))
+        else:
+            print(f"No se pudo cargar el background: {bg_path}")
+
+        # Asegurar que el background esté detrás de todo
+        self.background_label.lower()
+
+        # Estilo para el main_frame (transparente)
+        self.main_frame.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+        """)
+
+        # Ajustar cuando cambie el tamaño
+        self.background_label.setScaledContents(True)
+
+    def resizeEvent(self, event):
+        """Redimensiona el background cuando cambia el tamaño de la ventana"""
+        super().resizeEvent(event)
+        if hasattr(self, 'background_label'):
+            self.background_label.resize(self.size())
+
+            # Volver a cargar la imagen para evitar pixelación
+            bg_path = resource_path('images/main_window/background.png')
+            pixmap = QPixmap(bg_path)
+            if not pixmap.isNull():
+                self.background_label.setPixmap(pixmap.scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                ))
+
 
     def _check_dependencies(self):
         """Verifica que las dependencias requeridas están instaladas"""
@@ -521,22 +581,26 @@ class AudioPlayer(QMainWindow):
         self.prev_btn.setObjectName('prev_btn')
         self.prev_btn.setFixedSize(40, 40)
         self.prev_btn.setEnabled(False)
+        bg_image(self.prev_btn,"images/main_window/prev.png")
 
 
         self.play_btn = QPushButton()
         self.play_btn.setObjectName('play_btn')
-        self.play_btn.setFixedSize(60, 60)
+        self.play_btn.setFixedSize(80, 80)
         self.play_btn.setEnabled(False)
+        bg_image(self.play_btn, "images/main_window/play.png")
 
         self.next_btn = QPushButton()
         self.next_btn.setObjectName('next_btn')
         self.next_btn.setFixedSize(40, 40)
         self.next_btn.setEnabled(False)
+        bg_image(self.next_btn, "images/main_window/next.png")
 
         self.stop_btn = QPushButton()
         self.stop_btn.setObjectName('stop_btn')
         self.stop_btn.setFixedSize(40, 40)
         self.stop_btn.setEnabled(False)
+        bg_image(self.stop_btn, "images/main_window/stop.png")
 
         self.volume_dial = CustomDial()
         self.volume_dial.setRange(0, 100)
@@ -574,7 +638,7 @@ class AudioPlayer(QMainWindow):
         self.lyrics_text.setReadOnly(True)
         self.tabs.addTab(self.cover_label, "Portada")
         self.tabs.addTab(self.lyrics_text, "Letras")
-        self.cover_label.setPixmap(QPixmap("images/none.png"))
+        self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
 
     def enable_disable_buttons(self, state):
         self.drums_btn.setEnabled(state)
@@ -582,13 +646,13 @@ class AudioPlayer(QMainWindow):
         self.bass_btn.setEnabled(state)
         self.other_btn.setEnabled(state)
         if state:
-            self.drums_btn.setIcon(QIcon(f"images/icons01/drums.png"))
+            self.drums_btn.setIcon(QIcon(resource_path('images/main_window/icons01/drums.png')))
             self.drums_btn.setChecked(False)
-            self.vocals_btn.setIcon(QIcon(f"images/icons01/vocals.png"))
+            self.vocals_btn.setIcon(QIcon(resource_path('images/main_window/icons01/vocals.png')))
             self.vocals_btn.setChecked(False)
-            self.bass_btn.setIcon(QIcon(f"images/icons01/bass.png"))
+            self.bass_btn.setIcon(QIcon(resource_path('images/main_window/icons01/bass.png')))
             self.bass_btn.setChecked(False)
-            self.other_btn.setIcon(QIcon(f"images/icons01/other.png"))
+            self.other_btn.setIcon(QIcon(resource_path('images/main_window/icons01/other.png')))
             self.other_btn.setChecked(False)
 
     def track_buttons(self):
@@ -687,7 +751,7 @@ class AudioPlayer(QMainWindow):
         """Configura botones con parámetros comunes."""
         button.setObjectName(object_name)
         button.setIconSize(QSize(120, 120))
-        icon_path = f'images/icons01/{icon_name}.png'
+        icon_path = resource_path(f'images/main_window/icons01/{icon_name}.png')
         button.setIcon(QIcon(icon_path))
         button.setCheckable(True)
         button.clicked.connect(self.toggle_mute)
@@ -704,8 +768,6 @@ class AudioPlayer(QMainWindow):
                         border-radius: 8px;
                     }
                 """)
-        #self.setCentralWidget(self.main_frame)
-
         #layout principal
         layout = QVBoxLayout(self.main_frame)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -731,7 +793,7 @@ class AudioPlayer(QMainWindow):
         self.create_tab_widget()
 
         ## Barra de progreso
-        self.progress_song = QSlider(Qt.Orientation.Horizontal)
+        #self.progress_song = QSlider(Qt.Orientation.Horizontal)
         self.progress_song = QProgressBar(self)
         self.progress_song.setGeometry(0,10,100,16)
         self.progress_song.setTextVisible(False)
@@ -854,8 +916,20 @@ class AudioPlayer(QMainWindow):
     def show_search_dialog(self):
         """Muestra el diálogo de búsqueda"""
         dialog = SearchDialog(self)
+
+        bg_image(dialog,'images/split_dialog/split.png')
+        # bg_path = resource_path('images/split_dialog/split.png')
+        # qt_path = QDir.toNativeSeparators(bg_path).replace('\\', '/')
+        # style = f"""
+        #         SearchDialog{{
+        #             background-image: url({qt_path});
+        #         }}
+        #         """
+        # dialog.setStyleSheet(style)
         dialog.search_requested.connect(self.handle_search)
         dialog.exec()
+
+
 
     def handle_search(self, search_text):
         """Maneja búsquedas manteniendo el estado anterior"""
@@ -911,8 +985,10 @@ class AudioPlayer(QMainWindow):
             return
 
         self.split_dialog = SplitDialog(self)
-        self.split_dialog.process_started.connect(self.process_song)  # Conectar al método existente
+        self.split_dialog.process_started.connect(self.process_song)
+        # Conectar al método existente
         self.split_dialog.show()
+
 
     def process_song(self, artist, song, use_gpu, file_path):
         """Método existente modificado para trabajo en segundo plano"""
@@ -1010,7 +1086,7 @@ class AudioPlayer(QMainWindow):
 
     def scan_folder(self, path):
         self.reset_search_indices()
-        icon = QIcon("images/audio_icon.png")
+        icon = QIcon(resource_path('images/main_window/audio_icon.png'))
         for json_file in path.rglob("*.json"):
             with open(json_file, "r") as f:
                 try:
@@ -1173,7 +1249,6 @@ class AudioPlayer(QMainWindow):
         """Actualiza la UI según el estado de reproducción"""
 
         self.stop_btn.setEnabled(state != "Detenido")
-        # self.play_btn.setIcon(QIcon(f"images/{'pause' if state == 'playing' else 'play'}.png"))
         self.progress_song.setEnabled(state != "Detenido")
         self.playback_state = state
 
@@ -1223,7 +1298,7 @@ class AudioPlayer(QMainWindow):
         self._control_channels('stop')
         self._update_playback_ui('Detenido')
         self.playback_state = "Detenido"
-        self.cover_label.setPixmap(QPixmap("images/none.png"))
+        self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
         self.progress_song.setValue(0)
         self.current_channels = []
         self.update_lyrics_menu_state()
@@ -1240,7 +1315,7 @@ class AudioPlayer(QMainWindow):
 
         # Cargar portada
         cover_path = path / "cover.png"
-        self.cover_label.setPixmap(QPixmap(str(cover_path) if cover_path.exists() else QPixmap("images/default.png")))
+        self.cover_label.setPixmap(QPixmap(str(cover_path) if cover_path.exists() else QPixmap(resource_path('images/main_window/default.png'))))
 
         # Cargar letras
         lyrics_path = path / "lyrics.lrc"
@@ -1439,7 +1514,7 @@ class AudioPlayer(QMainWindow):
 
                 prefix = "no_" if self.mute_states[track_name] else ""
                 icon_name = icon_map[track_name][1] if self.mute_states[track_name] else icon_map[track_name][0]
-                sender.setIcon(QIcon(f'images/icons01/{icon_name}.png'))
+                sender.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
 
                 # Aplicar mute o volumen guardado
                 if self.mute_states[track_name]:
@@ -1574,7 +1649,6 @@ class DemucsWorker(QObject):
             self.finished.emit()
 
 
-
         except subprocess.TimeoutExpired:
             error_msg = "Demucs excedió el tiempo límite (1 hora)"
             self.error.emit(error_msg)
@@ -1594,7 +1668,7 @@ class DemucsWorker(QObject):
                     break
         except Exception as e:
             print(f"No se pudo extraer portada: {str(e)}")
-            shutil.copy("images/default.png", self.base_path / "cover.png")
+            shutil.copy(resource_path('images/main_window/default.png'), self.base_path / "cover.png")
 
     def _create_json(self):
         data = {

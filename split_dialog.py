@@ -1,11 +1,14 @@
 import os
 import string
 
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                              QCheckBox, QPushButton,
-                             QFileDialog, QMessageBox)
-from PyQt6.QtCore import Qt, pyqtSignal
+                             QFileDialog, QMessageBox, QFrame)
+from PyQt6.QtCore import Qt, pyqtSignal, QDir
 from pathlib import Path
+from resources import resource_path
+from resources import bg_image
 
 
 class SplitDialog(QDialog):
@@ -15,7 +18,7 @@ class SplitDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Dividir Canción")
-        self.setFixedSize(400, 550)
+        self.setFixedSize(400, 480)
 
         # Cargar archivo de estilos css
         with open('estilos.css', 'r') as file:
@@ -26,18 +29,49 @@ class SplitDialog(QDialog):
         self.song = QLineEdit()
         self.file_path = QLineEdit()
         self.file_path.setPlaceholderText("Presiona 'Enter'...")
-        # self.drums_check = QCheckBox("Batería")
-        # self.drums_check.setChecked(True)
-        # self.vocals_check = QCheckBox("Voces")
-        # self.vocals_check.setChecked(True)
-        # self.bass_check = QCheckBox("Bajo")
-        # self.bass_check.setChecked(True)
-        # self.guitar_radio = QRadioButton("Guitarra")
-        # self.keyboard_radio = QRadioButton("Teclados")
         self.gpu_check = QCheckBox("Usar GPU (Recomendado)")
         self.gpu_check.setChecked(True)
+        check_enable = QDir.toNativeSeparators(resource_path('images/split_dialog/checkbox_checked.png')).replace('\\', '/')
+        check_disabled = QDir.toNativeSeparators(resource_path('images/split_dialog/checkbox_unchecked.png')).replace(
+            '\\', '/')
+        check_enable_hover = QDir.toNativeSeparators(resource_path('images/split_dialog/checkbox_hover01.png')).replace('\\',
+                                                                                                                  '/')
+        check_disabled_hover = QDir.toNativeSeparators(
+            resource_path('images/split_dialog/checkbox_hover02.png')).replace(
+            '\\', '/')
+        check_style = f"""
+                            QCheckBox::indicator:checked{{
+                                image: url({check_enable});
+                            }}
+                            QCheckBox::indicator:unchecked{{
+                                image: url({check_disabled});
+                            }}
+                            QCheckBox::indicator:checked:hover,QCheckBox::indicator:checked:pressed{{
+                                image: url({check_enable_hover});
+                            }}
+                            QCheckBox::indicator:unchecked:hover,QCheckBox::indicator:unchecked:pressed{{
+                                image: url({check_disabled_hover});
+                            }}
+                            """
+        self.gpu_check.setStyleSheet(check_style)
+
 
         self._init_ui()
+        self.bg_label = QLabel(self)
+        self.bg_label.setGeometry(0, 0, self.width(), self.height())
+
+        # Cargar imagen
+        bg_path = resource_path('images/split_dialog/split.png')
+        pixmap = QPixmap(bg_path)
+
+        if not pixmap.isNull():
+            self.bg_label.setPixmap(pixmap)
+        else:
+            print(f"No se pudo cargar el background: {bg_path}")
+        self.bg_label.lower()
+
+
+
 
     def _init_ui(self):
         layout = QVBoxLayout()
@@ -47,10 +81,13 @@ class SplitDialog(QDialog):
         file_btn = QPushButton()
         file_btn.setObjectName("file_btn")
         file_btn.setFixedSize(200,100)
+        bg_image(file_btn,"images/split_dialog/mp3.png")
+
 
         extract_name_btn = QPushButton()
         extract_name_btn.setFixedSize(120, 60)
         extract_name_btn.setObjectName("extract_name_btn")
+        bg_image(extract_name_btn,"images/split_dialog/extract_name_btn.png")
         extract_name_btn.clicked.connect(self.extract_name)
 
 
@@ -67,24 +104,6 @@ class SplitDialog(QDialog):
         layout.addWidget(QLabel("Canción*"))
         layout.addWidget(self.song)
 
-        # # Opciones de separación
-        # layout.addWidget(QLabel("Pistas a incluir:"))
-        # layout.addWidget(self.drums_check)
-        # layout.addWidget(self.vocals_check)
-        # layout.addWidget(self.bass_check)
-
-        # Grupo de radios
-        # radio_group = QButtonGroup(self)
-        # radio_group.addButton(self.guitar_radio)
-        # radio_group.addButton(self.keyboard_radio)
-        # self.guitar_radio.setChecked(True)
-
-        # radio_layout = QHBoxLayout()
-        # radio_layout.addWidget(QLabel("Armonía:"))
-        # radio_layout.addWidget(self.guitar_radio)
-        # radio_layout.addWidget(self.keyboard_radio)
-        # layout.addLayout(radio_layout)
-
         # GPU Checkbox
         layout.addWidget(self.gpu_check)
 
@@ -93,17 +112,30 @@ class SplitDialog(QDialog):
         self.accept_btn = QPushButton()
         self.accept_btn.setObjectName("aceptar_btn")
         self.accept_btn.setFixedSize(70, 70)
+        path_enable = QDir.toNativeSeparators(resource_path('images/split_dialog/aceptar_btn.png')).replace('\\', '/')
+        path_disabled = QDir.toNativeSeparators(resource_path('images/split_dialog/aceptar_btn_disabled.png')).replace('\\', '/')
+        style = f"""
+                    QPushButton#aceptar_btn{{
+                        image: url({path_enable});
+                    }}
+                    QPushButton#aceptar_btn:disabled{{
+                        image: url({path_disabled});
+                    }}
+                    """
+        self.accept_btn.setStyleSheet(style)
+
         self.accept_btn.clicked.connect(self._validate)
         cancel_btn = QPushButton()
         cancel_btn.setObjectName("cancelar_btn")
         cancel_btn.setFixedSize(70, 70)
-
+        bg_image(cancel_btn,"images/split_dialog/cancelar_btn.png")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.accept_btn)
         btn_layout.addWidget(cancel_btn)
 
         layout.addLayout(btn_layout)
         self.setLayout(layout)
+
 
         # Validación en tiempo real
         self.artist.textChanged.connect(self._enable_accept)
@@ -139,8 +171,6 @@ class SplitDialog(QDialog):
             self._start_process()
 
     def _start_process(self):
-
-
         self.process_started.emit(
             self.artist.text().strip(),
             self.song.text().strip(),

@@ -1,24 +1,18 @@
-QPushButton#change_icons_btn{
-    image: url(images/change_icon02.png);
-    background-color: transparent;
-    border-radius:30px;
-    padding:3px;
+QProgressBar{
+	background: rgba(255,255,255,180);
+	border-radius:5px;
+	color: rgba(200,200,200,0);
+	margin-top: 20px;
+	margin-right: 30px;
+	margin-left: 30px;
+	height: 10px;
+	border: 2px solid white;
 }
 
-QPushButton#change_icons_btn:pressed{
-    padding:7px;
-    border:5px solid transparent;
-}
-
-QPushButton#change_icons_btn:hover{
-    border-radius:20px;
-    padding:5px;
-}
-
-QMainWindow {
-    background-image: url(images/background.png);
-    background-repeat: no-repeat;
-    background-size: 1920px 1080px;
+QProgressBar::chunk{
+	border-radius: 5px;
+	background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0
+	rgba(254,170,199,255),stop:1 rgba(100,85,255,255));
 }
 
 QDockWidget {
@@ -107,10 +101,6 @@ QPushButton#drums_btn{
     padding:7px;
 }
 
-QDialog{
-    background-image: url(images/split.png);
-}
-
 QLabel{
     color: white;
     font-weight: bold;
@@ -125,7 +115,6 @@ QRadioButton{
 
 QPushButton#file_btn{
     background-color: transparent;
-    image: url(images/mp3.png);
     border-radius:20px;
     padding:7px;
 }
@@ -145,14 +134,12 @@ QPushButton#file_btn:hover{
 
 QPushButton#aceptar_btn{
     background-color: transparent;
-    image: url(images/aceptar_btn.png);
     border-radius:30px;
     padding:3px;
 }
 
 QPushButton#aceptar_btn:disabled{
     background-color: transparent;
-    image: url(images/aceptar_btn_disabled.png);
     border-radius:30px;
     padding:3px;
 }
@@ -169,7 +156,6 @@ QPushButton#aceptar_btn:hover{
 
 QPushButton#cancelar_btn{
     background-color: transparent;
-    image: url(images/cancelar_btn.png);
     border-radius:30px;
     padding:3px;
 }
@@ -187,7 +173,6 @@ QPushButton#cancelar_btn:hover{
 
 QPushButton#extract_name_btn{
     background-color: transparent;
-    image: url(images/extract_name_btn.png);
     border-radius:30px;
     padding:3px;
 }
@@ -328,7 +313,6 @@ QMenuBar QMenu::item::pressed{
 
 QPushButton#prev_btn{
     background-color: rgba(255,255,255,0.1);
-    image: url(images/prev.png);
     border-radius:20px;
     padding:7px;
 }
@@ -351,9 +335,8 @@ QPushButton#prev_btn:hover{
 }
 
 QPushButton#play_btn{
-    background-color: rgba(255,255,255,0.1);
-    image: url(images/play.png);
-    border-radius:30px;
+    background-color: transparent;
+    border-radius:40px;
     padding:3px;
 }
 
@@ -375,20 +358,12 @@ QPushButton#play_btn:hover{
         spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
     stop:0 rgba(122,130,255,255),
     stop:1 rgba(132,76,171,255));
-    border-radius:20px;
+    border-radius:40px;
 }
-
-
-
-
-
-
-
 
 
 QPushButton#next_btn{
     background-color: rgba(255,255,255,0.1);
-    image: url(images/next.png);
     border-radius:20px;
     padding:7px;
 }
@@ -411,8 +386,7 @@ QPushButton#next_btn:hover{
 }
 
 QPushButton#stop_btn{
-    background-color: rgba(255,255,255,0.1);
-    image: url(images/stop.png);
+    background-color: transparent;
     border-radius:20px;
     padding:7px;
 }
@@ -446,21 +420,6 @@ QCheckBox {
     color: white;
 }
 
-QCheckBox::indicator:checked{
-    image:url(images/checkbox_checked.png);
-}
-
-QCheckBox::indicator:unchecked{
-    image:url(images/checkbox_unchecked.png);
-}
-
-QCheckBox::indicator:checked:hover,QCheckBox::indicator:checked:pressed{
-    image:url(images/checkbox_hover01.png);
-}
-
-QCheckBox::indicator:unchecked:hover,QCheckBox::indicator:unchecked:pressed{
-    image:url(images/checkbox_hover02.png);
-}
 
 QDial {
     background-color: #ffffff;
@@ -512,55 +471,30 @@ QRadioButton::indicator {
     height: 20px;
 }
 
-
-/*QPushButton#metro_toggle_btn{
-    background-color: transparent;
-
-    image: url(images/metronomo_off.png);
-    border-radius:20px;
-    padding:7px;
-}
-
-QPushButton#metro_toggle_btn:checked{
-    image: url(images/metronomo_on.png);
-    background-color: transparent;
-}
-
-QPushButton#metro_toggle_btn:pressed{
-    background-color: darkgray;
-    border-radius:20px;
-    padding:7px;
-    border:5px solid gray;
-}
-
-QPushButton#metro_toggle_btn:hover{
-    background-color: gray;
-    border-radius:20px;
-    padding:7px;
-}*/
-
-QSlider{
-
+QSlider{	
+	margin-left:20px;
 }
 
 QSlider::groove:Horizontal{
-    border-radius: 4px;
-    height: 8x;
-    margin: 5px;
+    height: 4px;
+	border-radius: 2px;    
     background-color: rgb(52,59,72);
 }
 
 QSlider::handle:Horizontal{
-    background: #fff;
-    width: 12px;
-	height: 12px;
-    margin: -5px -3px;
-    border-radius: 10px;
+    background: white;
+    width: 10px;
+    margin: -3px -1px;
+    border-radius: 5px;
     border: 1px solid #5555ff;
 }
 
 QSlider::handle:Horizontal:hover{
     background: rgb(222,115,126);
+	width: 14px;
+	border-radius: 7px;
+	margin: -6px 0px;
+	border: 1px solid #5555ff;
 }
 
 QSlider::add-page:Horizontal{
