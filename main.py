@@ -9,7 +9,7 @@ from os.path import expanduser
 from datetime import datetime
 import time
 import pygame
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QPoint, QRect, QObject, QThread,QPointF,QDir
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QPoint, QRect, QObject, QThread,QPointF
 from PyQt6.QtGui import QAction, QPixmap, QIcon, QKeySequence,QColor,QPainter
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
@@ -24,8 +24,7 @@ import math
 import requests
 from urllib.parse import quote
 import unicodedata
-from resources import resource_path
-from resources import bg_image
+from resources import resource_path,styled_message_box,bg_image
 
 
 class CustomDial(QDial):
@@ -105,7 +104,7 @@ class TitleBar(QWidget):
                 background: transparent;
                 border: none;
                 padding: 0px 0px;
-                border-radius:5px
+                border-radius:16px
             }
             QPushButton:hover {
                 background: rgba(255, 255, 255, 0.1);
@@ -278,17 +277,6 @@ class AudioPlayer(QMainWindow):
         self.demucs_progress = 0  # 0-100
         self.demucs_active = False
 
-        # Crear contenedor principal con bordes
-        # self.main_frame = QFrame()
-        # self.main_frame.setStyleSheet("""
-        #             QFrame {
-        #                 background: #2D2D2D;
-        #                 border: 1px solid #404040;
-        #                 border-radius: 8px;
-        #             }
-        #         """)
-
-
         self.setWindowIcon(QIcon(resource_path('images/main_window/main_icon.png')))
         self.resize(1098,813)
         self.center()
@@ -359,6 +347,7 @@ class AudioPlayer(QMainWindow):
 
         # Conexión para detectar cierre manual de la Playlist
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
+
 
     def _setup_background(self):
         """Configura el background sin afectar la estructura existente"""
@@ -452,7 +441,7 @@ class AudioPlayer(QMainWindow):
         if missing:
             msg = "Faltan dependencias requeridas:\n\n" + "\n".join(missing)
             msg += "\n\nPor favor instale:\n1. Python 3.8+\n2. Demucs (pip install demucs)\n3. FFmpeg"
-            QMessageBox.critical(self, "Error crítico", msg)
+            styled_message_box(self, "Error crítico", msg,QMessageBox.Icon.Critical)
             sys.exit(1)
 
     def load_demucs_model(self):
@@ -472,12 +461,6 @@ class AudioPlayer(QMainWindow):
                 shell=True  # Importante para Windows
             )
 
-            # Debug: Escribe la salida en un archivo
-            with open("demucs_debug.log", "w") as f:
-                f.write(f"Return code: {result.returncode}\n")
-                f.write(f"Stdout: {result.stdout}\n")
-                f.write(f"Stderr: {result.stderr}\n")
-
             if result.returncode != 0:
                 raise RuntimeError(f"Demucs returned error: {result.stderr}")
 
@@ -490,7 +473,7 @@ class AudioPlayer(QMainWindow):
             print(error_msg)  # Para ver en consola si ejecutas con --console
             with open("demucs_error.log", "w") as f:
                 f.write(error_msg)
-            QMessageBox.critical(
+            styled_message_box(
                 self,
                 "Error",
                 f"No se pudo acceder a Demucs:\n{error_msg}\n\n"
@@ -498,7 +481,7 @@ class AudioPlayer(QMainWindow):
                 "1. Demucs está instalado (pip install demucs)\n"
                 "2. Python está en el PATH del sistema\n"
                 "3. El ejecutable se usa en la misma terminal donde funciona demucs"
-            )
+            ,QMessageBox.Icon.Critical)
             self.demucs_available = False
 
     def _log_system_path(self):
@@ -511,8 +494,6 @@ class AudioPlayer(QMainWindow):
                 shell=True
             ).stdout
 
-            with open("system_path.log", "w") as f:
-                f.write(f"System PATH:\n{path}\n")
         except Exception as e:
             with open("system_path.log", "w") as f:
                 f.write(f"Error getting PATH: {str(e)}\n")
@@ -536,9 +517,6 @@ class AudioPlayer(QMainWindow):
                 shell=True
             ).stdout
 
-            with open("python_environment.log", "w") as f:
-                f.write(f"Python paths:\n{python_path}\n")
-                f.write(f"Installed packages:\n{pip_list}\n")
         except Exception as e:
             with open("python_environment.log", "w") as f:
                 f.write(f"Error checking Python: {str(e)}\n")
@@ -646,14 +624,14 @@ class AudioPlayer(QMainWindow):
         self.bass_btn.setEnabled(state)
         self.other_btn.setEnabled(state)
         if state:
-            self.drums_btn.setIcon(QIcon(resource_path('images/main_window/icons01/drums.png')))
-            self.drums_btn.setChecked(False)
-            self.vocals_btn.setIcon(QIcon(resource_path('images/main_window/icons01/vocals.png')))
-            self.vocals_btn.setChecked(False)
-            self.bass_btn.setIcon(QIcon(resource_path('images/main_window/icons01/bass.png')))
-            self.bass_btn.setChecked(False)
-            self.other_btn.setIcon(QIcon(resource_path('images/main_window/icons01/other.png')))
-            self.other_btn.setChecked(False)
+            # Solo actualizar si no están muteados
+            for track_name, btn in zip(
+                    ["drums", "vocals", "bass", "other"],
+                    [self.drums_btn, self.vocals_btn, self.bass_btn, self.other_btn]
+            ):
+                if not self.mute_states[track_name]:
+                    btn.setIcon(QIcon(resource_path(f'images/main_window/icons01/{track_name}.png')))
+                    btn.setChecked(False)
 
     def track_buttons(self):
         # Configurar botones
@@ -793,11 +771,11 @@ class AudioPlayer(QMainWindow):
         self.create_tab_widget()
 
         ## Barra de progreso
-        #self.progress_song = QSlider(Qt.Orientation.Horizontal)
         self.progress_song = QProgressBar(self)
-        self.progress_song.setGeometry(0,10,100,16)
-        self.progress_song.setTextVisible(False)
+        self.progress_song.setFormat("00:00 / 00:00")  # Formato inicial
         self.progress_song.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_song.setTextVisible(True)
+        self.progress_song.setFixedHeight(20)
         self.progress_song.setEnabled(False)
 
 
@@ -918,14 +896,6 @@ class AudioPlayer(QMainWindow):
         dialog = SearchDialog(self)
 
         bg_image(dialog,'images/split_dialog/split.png')
-        # bg_path = resource_path('images/split_dialog/split.png')
-        # qt_path = QDir.toNativeSeparators(bg_path).replace('\\', '/')
-        # style = f"""
-        #         SearchDialog{{
-        #             background-image: url({qt_path});
-        #         }}
-        #         """
-        # dialog.setStyleSheet(style)
         dialog.search_requested.connect(self.handle_search)
         dialog.exec()
 
@@ -980,8 +950,8 @@ class AudioPlayer(QMainWindow):
     def show_split_dialog(self):
         """Muestra diálogo de forma no modal"""
         if not self.demucs_available:
-            QMessageBox.warning(self, "Función no disponible",
-                                "La separación de pistas no está disponible (falta Demucs)")
+            styled_message_box(self, "Función no disponible",
+                                "La separación de pistas no está disponible (falta Demucs)",QMessageBox.Icon.Warning)
             return
 
         self.split_dialog = SplitDialog(self)
@@ -1031,14 +1001,14 @@ class AudioPlayer(QMainWindow):
         self.processing = False
         self.scan_folder(Path("music_library"))
         self.playlist_widget.setCurrentRow(self.playlist_widget.count() - 1)
-        QMessageBox.information(self, "Éxito", "Separación finalizada correctamente")
+        styled_message_box(self, "Éxito", "Separación finalizada correctamente",QMessageBox.Icon.Information)
 
     def _handle_demucs_error(self, error_msg):
         self.demucs_active = False
         self.update_status()
         """Manejo unificado de errores"""
         self.processing = False
-        QMessageBox.critical(self, "Error", error_msg)
+        styled_message_box(self, "Error", error_msg,QMessageBox.Icon.Critical)
         if self.split_dialog:
             self.split_dialog.show()
 
@@ -1114,7 +1084,7 @@ class AudioPlayer(QMainWindow):
                                     self.play_btn.setEnabled(True)
                                 self._check_and_fetch_lyrics(dir_path, artist, song)
                 except Exception as e:
-                    QMessageBox.warning(self, "Error", f"Error cargando {json_file}: {str(e)}")
+                    styled_message_box(self, "Error", f"Error cargando {json_file}: {str(e)}",QMessageBox.Icon.Critical)
         self.update_status()
 
     def _check_and_fetch_lyrics(self, dir_path, artist, song):
@@ -1170,29 +1140,47 @@ class AudioPlayer(QMainWindow):
 
         except Exception as e:
             print(f"Error API: {str(e)}")
-            self._write_default_lyrics(output_dir, artist, song)
+            self._write_lyrics_file(output_dir, artist, song, None)
 
     def _write_lyrics_file(self, output_dir, artist, song, lyrics):
-        """Escribe el archivo LRC con formato"""
-        lrc_content = (
-            f"<html>\n"
-            f"[00:00.00]<H2><center>{artist} - {song}</H2></center>\n"
-            f"{lyrics if lyrics else 'Lo siento, no se encontraron las letras de este track'}\n"
-        )
+        """Escribe el archivo LRC con formato, centrando todas las líneas"""
+        # Línea de título (manteniendo el formato actual)
+        title_line = f'[00:00.00]<H1 style="color: #3AABEF;"><center>{artist}</center></H1>\n<H2 style="color: #7E54AF;"><center>{song}</center></H2>\n'
 
+        if not lyrics:
+            # Caso sin letras
+            content = title_line + '<center style="color: #ff2626;">Lo siento, no se encontraron las letras de este track, revisa el nombre del artista y de la canción</center>\n'
+        else:
+            # Procesar cada línea de letras
+            processed_lines = []
+            for line in lyrics.split('\n'):
+                if line.strip():  # Solo procesar líneas no vacías
+                    # Dividir en timestamp y texto
+                    parts = line.split(']', 1)
+                    if len(parts) == 2:
+                        timestamp, text = parts
+                        # Reconstruir la línea con el texto centrado
+                        #processed_line = f"{timestamp}]<center>{text.strip()}</center>"
+                        processed_line = f'{timestamp}]<center style="color: #F88FFF;">{text.strip()}</center>'
+                        processed_lines.append(processed_line)
+
+            # Unir todo el contenido
+            content = title_line + '\n'.join(processed_lines) + '\n'
+
+        # Escribir el archivo
         with open(output_dir / "lyrics.lrc", "w", encoding="utf-8") as f:
-            f.write(lrc_content)
+            f.write(content)
 
-    def _write_default_lyrics(self, output_dir, artist, song):
-        """Escribe el archivo LRC por defecto"""
-        default_content = (
-            f"<html>\n"
-            f"[00:00.00]<H2><center>{artist} - {song}</H2></center>\n"
-            f"Lo siento, no se encontraran las letras de este track\n"
-        )
-
-        with open(output_dir / "lyrics.lrc", "w", encoding="utf-8") as f:
-            f.write(default_content)
+    # def _write_default_lyrics(self, output_dir, artist, song):
+    #     """Escribe el archivo LRC por defecto"""
+    #     default_content = (
+    #         f"<html>\n"
+    #         f"[00:00.00]<H2><center>{artist} - {song}</H2></center>\n"
+    #         f"Lo siento, no se encontraran las letras de este track\n"
+    #     )
+    #
+    #     with open(output_dir / "lyrics.lrc", "w", encoding="utf-8") as f:
+    #         f.write(default_content)
 
     def play_selected(self):
         self.stop_playback()
@@ -1239,10 +1227,13 @@ class AudioPlayer(QMainWindow):
 
             #Iniciar Barra de progreso del track
             length = int(sounds[0].get_length() * 1000)
+            total_seconds = int(sounds[0].get_length())
+            mins, secs = divmod(total_seconds, 60)
+            self.progress_song.setFormat(f"00:00 / {mins:02d}:{secs:02d}")
             self.progress_song.setRange(0, length)
             return True
         except (pygame.error, FileNotFoundError) as e:
-            QMessageBox.critical(self, "Error", f"Error cargando audio: {str(e)}")
+            styled_message_box(self, "Error", f"Error cargando audio: {str(e)}",QMessageBox.Icon.Critical)
             return False
 
     def _update_playback_ui(self, state: str):
@@ -1266,6 +1257,28 @@ class AudioPlayer(QMainWindow):
 
         self.update_status()
 
+    def _restore_mute_states(self):
+        """Actualiza los botones según los estados de mute guardados"""
+        # Configurar iconos basados en los estados actuales
+        icon_map = {
+            "drums": ("drums", "no_drums"),
+            "vocals": ("vocals", "no_vocals"),
+            "bass": ("bass", "no_bass"),
+            "other": ("other", "no_other")
+        }
+
+        for track_name, btn in zip(
+                ["drums", "vocals", "bass", "other"],
+                [self.drums_btn, self.vocals_btn, self.bass_btn, self.other_btn]
+        ):
+            # Establecer el icono correcto basado en el estado de mute
+            icon_index = 1 if self.mute_states[track_name] else 0
+            icon_name = icon_map[track_name][icon_index]
+            btn.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
+
+            # Sincronizar el estado visual del botón
+            btn.setChecked(self.mute_states[track_name])
+
     def play_current(self):
         self.stop_playback()
         if not (0 <= self.current_index < len(self.playlist)):
@@ -1274,9 +1287,10 @@ class AudioPlayer(QMainWindow):
         if not self._setup_audio():
             return
 
-        self.enable_disable_buttons(True)
+        self._restore_mute_states()
+
         self._control_channels('play')
-        self._update_metadata()  # Método nuevo para cargar metadatos
+        self._update_metadata()  # Método para cargar metadatos
         self._update_playback_ui('Activa')
         self.playback_state = "Activa"
         self.set_volume(self.volume)
@@ -1302,7 +1316,6 @@ class AudioPlayer(QMainWindow):
         self.progress_song.setValue(0)
         self.current_channels = []
         self.update_lyrics_menu_state()
-        self.enable_disable_buttons(False)
 
     def _update_metadata(self):
         """Carga metadatos y letras"""
@@ -1330,7 +1343,6 @@ class AudioPlayer(QMainWindow):
 
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
-                #line = line.strip()
                 # Buscar timestamp [mm:ss.xx]
                 time_match = re.match(r'\[(\d+):(\d+\.\d+)\]', line)
 
@@ -1411,7 +1423,7 @@ class AudioPlayer(QMainWindow):
             self.load_lyrics(lrc_path)
 
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"No se pudo ajustar: {str(e)}")
+            styled_message_box(self, "Error", f"No se pudo ajustar: {str(e)}",QMessageBox.Icon.Warning)
 
     def _process_lines(self, lines, offset):
         """Procesa cada línea aplicando el offset"""
@@ -1512,8 +1524,12 @@ class AudioPlayer(QMainWindow):
                     "other": ("other","no_other")
                 }
 
-                prefix = "no_" if self.mute_states[track_name] else ""
-                icon_name = icon_map[track_name][1] if self.mute_states[track_name] else icon_map[track_name][0]
+                # prefix = "no_" if self.mute_states[track_name] else ""
+                # icon_name = icon_map[track_name][1] if self.mute_states[track_name] else icon_map[track_name][0]
+                # sender.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
+
+                icon_index = 1 if self.mute_states[track_name] else 0
+                icon_name = icon_map[track_name][icon_index]
                 sender.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
 
                 # Aplicar mute o volumen guardado
@@ -1539,7 +1555,19 @@ class AudioPlayer(QMainWindow):
             if not pos:
                 self.play_next()
             else:
-                self.progress_song.setValue(self.progress_song.value() + 1000)
+                current_time_ms = self.progress_song.value() + 1000
+                self.progress_song.setValue(current_time_ms)
+
+                # Actualizar el texto del progreso
+                current_seconds = current_time_ms // 1000
+                total_seconds = self.progress_song.maximum() // 1000
+
+                current_mins, current_secs = divmod(current_seconds, 60)
+                total_mins, total_secs = divmod(total_seconds, 60)
+
+                self.progress_song.setFormat(
+                    f"{current_mins:02d}:{current_secs:02d} / {total_mins:02d}:{total_secs:02d}"
+                )
 
     def update_status(self):
         """Actualiza la barra de estado """
@@ -1585,7 +1613,6 @@ class DemucsWorker(QObject):
 
 
     def run(self):
-        #log_file = self.base_path / "debuggin_demucs.log"
         try:
             # Configuración para Windows
             if os.name == 'nt':
@@ -1716,3 +1743,4 @@ if __name__ == "__main__":
     player = AudioPlayer()
     player.show()
     sys.exit(app.exec())
+

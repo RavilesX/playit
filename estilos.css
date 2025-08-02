@@ -1,12 +1,14 @@
 QProgressBar{
-	background: rgba(255,255,255,180);
+	background: #292a2d;
 	border-radius:5px;
-	color: rgba(200,200,200,0);
-	margin-top: 20px;
+	color: white;
 	margin-right: 30px;
 	margin-left: 30px;
-	height: 10px;
 	border: 2px solid white;
+	text-align: center;
+	font-size: 15px;
+	font-weight: bold;
+	font-family: "Saira Stencil One";
 }
 
 QProgressBar::chunk{
@@ -76,10 +78,10 @@ QListWidget QScrollBar::sub-page:vertical {
 
 
 QTextEdit{
-    font-family: "Oxygen Mono";
+    font-family: "Saira Stencil One";
     color: white;
-    font-weight: bold;
-    font-size: 18px;
+    font-size: 30px;
+	padding-top:120px;
 }
 
 p{
@@ -92,13 +94,6 @@ p{
     from{
         width: 0ch;
     }
-}
-
-
-QPushButton#drums_btn{
-    background-color: transparent;
-    border-radius:20px;
-    padding:7px;
 }
 
 QLabel{
@@ -199,27 +194,32 @@ QLineEdit{
     stop:1 rgba(132,76,171,255));
 }
 
+
+
+QPushButton#drums_btn{
+    background-color: transparent;
+    border-radius:20px;
+}
+
 QPushButton#drums_btn:checked{
     background-color: transparent;
 }
 
 QPushButton#drums_btn:pressed{
-    background-color: darkgray;
-    border-radius:20px;
-    padding:7px;
-    border:5px solid gray;
+    border:8px solid transparent;
 }
 
 QPushButton#drums_btn:hover{
-    background-color: gray;
+    background: qlineargradient(
+        spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
+    stop:0 rgba(122,130,255,255),
+    stop:1 rgba(132,76,171,255));
     border-radius:20px;
-    padding:7px;
 }
 
 QPushButton#vocals_btn{
     background-color: transparent;
-    border-radius:20px;
-    padding:7px;
+	border-radius:20px;
 }
 
 QPushButton#vocals_btn:checked{
@@ -227,22 +227,20 @@ QPushButton#vocals_btn:checked{
 }
 
 QPushButton#vocals_btn:pressed{
-    background-color: transparent;
-    border-radius:20px;
-    padding:7px;
-    border:5px solid gray;
+    border:8px solid transparent;
 }
 
 QPushButton#vocals_btn:hover{
-    background-color: gray;
+    background: qlineargradient(
+        spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
+    stop:0 rgba(132,76,171,255),
+    stop:1 rgba(122,130,255,255));
     border-radius:20px;
-    padding:7px;
 }
 
 QPushButton#bass_btn{
     background-color: transparent;
     border-radius:20px;
-    padding:7px;
 }
 
 QPushButton#bass_btn:checked{
@@ -250,22 +248,20 @@ QPushButton#bass_btn:checked{
 }
 
 QPushButton#bass_btn:pressed{
-    background-color: transparent;
-    border-radius:20px;
-    padding:7px;
-    border:5px solid gray;
+    border:8px solid transparent;
 }
 
 QPushButton#bass_btn:hover{
-    background-color: gray;
+    background: qlineargradient(
+        spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
+    stop:0 rgba(122,130,255,255),
+    stop:1 rgba(132,76,171,255));
     border-radius:20px;
-    padding:7px;
 }
 
 QPushButton#other_btn{
     background-color: transparent;
     border-radius:20px;
-    padding:7px;
 }
 
 QPushButton#other_btn:checked{
@@ -273,16 +269,15 @@ QPushButton#other_btn:checked{
 }
 
 QPushButton#other_btn:pressed{
-    background-color: transparent;
-    border-radius:20px;
-    padding:7px;
-    border:5px solid gray;
+    border:5px solid transparent;
 }
 
 QPushButton#other_btn:hover{
-    background-color: gray;
+    background: qlineargradient(
+        spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
+    stop:0 rgba(132,76,171,255),
+    stop:1 rgba(122,130,255,255));
     border-radius:20px;
-    padding:7px;
 }
 
 QStatusBar{
@@ -434,29 +429,6 @@ QLabel[accessibleName="led"] {
     box-shadow: 0 2px 4px blue;
 }
 
-/* Botón del metrónomo */
-QPushButton[accessibleName="metro_btn"] {
-    background-color: #444;
-    color: white;
-    padding: 5px;
-    border-radius: 5px;
-}
-
-QPushButton[accessibleName="metro_btn"]:checked {
-    background-color: #666;
-}
-
-QLabel[accessibleName="led_error"] {
-    background-color: yellow !important;
-    animation: blink-error 1s infinite;
-}
-
-@keyframes blink-error {
-    0% { background-color: yellow; }
-    50% { background-color: darkorange; }
-    100% { background-color: yellow; }
-}
-
 QLineEdit[mandatory="true"] {
     border: 2px solid #FFA500;
 }
@@ -471,8 +443,9 @@ QRadioButton::indicator {
     height: 20px;
 }
 
-QSlider{	
-	margin-left:20px;
+QSlider{
+	margin-bottom:10px;
+	margin-left:5px;
 }
 
 QSlider::groove:Horizontal{

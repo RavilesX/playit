@@ -1,14 +1,12 @@
 import os
 import string
-
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                              QCheckBox, QPushButton,
-                             QFileDialog, QMessageBox, QFrame)
+                             QFileDialog, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QDir
 from pathlib import Path
-from resources import resource_path
-from resources import bg_image
+from resources import resource_path, styled_message_box,bg_image
 
 
 class SplitDialog(QDialog):
@@ -55,12 +53,11 @@ class SplitDialog(QDialog):
                             """
         self.gpu_check.setStyleSheet(check_style)
 
-
         self._init_ui()
         self.bg_label = QLabel(self)
         self.bg_label.setGeometry(0, 0, self.width(), self.height())
 
-        # Cargar imagen
+        # Cargar imagen de fondo en el Qlabel
         bg_path = resource_path('images/split_dialog/split.png')
         pixmap = QPixmap(bg_path)
 
@@ -69,7 +66,6 @@ class SplitDialog(QDialog):
         else:
             print(f"No se pudo cargar el background: {bg_path}")
         self.bg_label.lower()
-
 
 
 
@@ -158,12 +154,14 @@ class SplitDialog(QDialog):
 
     def _validate(self):
         if not Path(self.file_path.text()).exists():
-            QMessageBox.critical(self, "Error", "Archivo inválido")
+            styled_message_box(self, "Error", "Archivo inválido", QMessageBox.Icon.Critical)
             return
 
-        reply = QMessageBox.question(
-            self, "Advertencia",
+        reply = styled_message_box(
+            self,
+            "Advertencia",
             "Dependiendo de su hardware, el proceso puede demorar varios minutos. ¿Continuar?",
+            QMessageBox.Icon.Question,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 

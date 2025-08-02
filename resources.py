@@ -1,20 +1,54 @@
 import sys
-import os
 from pathlib import Path
-from PyQt6.QtCore import QFile, QTextStream, QDir, QIODevice
-from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QAbstractButton
+from PyQt6.QtCore import QDir
+from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QAbstractButton,QMessageBox
 from typing import Union
 
 
+def styled_message_box(parent, title, text, icon=QMessageBox.Icon.Information, buttons=QMessageBox.StandardButton.Ok):
+    """Crea un QMessageBox con estilo personalizado"""
+    msg = QMessageBox(parent)
+    msg.setWindowTitle(title)
+    msg.setText(text)
+    msg.setIcon(icon)
+    msg.setStandardButtons(buttons)
+    path = QDir.toNativeSeparators(resource_path('images/main_window/bg_message_box.png')).replace('\\', '/')
+    msg.setStyleSheet(f"""
+    QMessageBox {{
+        background-image: url({path});
+        background-repeat: no-repeat; 
+        background-position: center;
+    }}
+    QLabel#qt_msgbox_label {{ 
+        color: white;
+        font-weight: bold;
+    }}
+    QPushButton {{
+        min-width: 80px;
+        color: white;
+        background-color: #333;
+    }}
+    """)
+
+    return msg.exec()
+
 def resource_path(relative_path):
-    """Obtiene la ruta correcta para recursos"""
+    """Obtiene la ruta correcta tanto para desarrollo como para el ejecutable"""
     try:
-        base_path = Path(sys._MEIPASS if hasattr(sys, '_MEIPASS') else Path.cwd())
+        # PyInstaller crea una carpeta temporal en _MEIPASS
+        base_path = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path.cwd()
         path = base_path / relative_path
-        return QDir.toNativeSeparators(str(path))
+
+        # Debug: Verificar existencia del archivo
+        if not path.exists():
+            print(f"⚠️ Recurso no encontrado: {path}")
+            with open('missing_resources.log', 'a') as f:
+                f.write(f"Missing: {path}\n")
+
+        return str(path)
     except Exception as e:
-        print(f"Resource path error: {e}")
-        return QDir.toNativeSeparators(str(Path.cwd() / relative_path))
+        print(f"Error en resource_path: {e}")
+        return str(Path.cwd() / relative_path)
 
 def bg_image(widget: Union[QWidget, QAbstractButton, QLabel],
                      image_path: str,
