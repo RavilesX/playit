@@ -257,54 +257,63 @@ class SizeGrip(QWidget):
 
 
 class AudioPlayer(QMainWindow):
-    # update_main_leds = pyqtSignal(str, str)
-
     def __init__(self):
         super().__init__()
-        #Personalizacion de ventana
+
+        # 1. Configuración básica de la ventana
+        self._setup_window_properties()
+
+        # 2. Inicializar variables de estado
+        self._initialize_state_variables()
+
+        # 3. Configurar audio y dependencias
+        self._setup_audio_system()
+
+        # 4. Crear y configurar la interfaz
+        self._setup_user_interface()
+
+        # 5. Configurar conexiones y eventos
+        self._setup_connections()
+
+        # 6. Inicializar timers y actualizaciones
+        self._setup_timers()
+
+        # 7. Validaciones finales
+        self._perform_final_checks()
+
+    def _setup_window_properties(self):
+        """Configura propiedades básicas de la ventana principal."""
+        # Configuración de ventana sin marco
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.split_dialog = None
-        self.demucs_thread = None
-        self.demucs_worker = None
-
-        #Dependencias
-        self.demucs_available = True
-        self.pygame_available = True
-        self.torch_available = True
-        self.mutagen_available = True
-
-        # Propiedad para el progreso de separación
-        self.demucs_progress = 0  # 0-100
-        self.demucs_active = False
-
         self.setWindowIcon(QIcon(resource_path('images/main_window/main_icon.png')))
-        self.resize(1098,813)
+        self.resize(1098, 813)
         self.center()
 
-        #Busqueda
-        self.search_index = 0  # Nuevo atributo para seguimiento de búsqueda
-        self.search_results = []  # Lista para almacenar resultados
-        self.current_search = ""
+        # Configurar background y atributos de estilo
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
-        #Demucs
-        self.demucs_model = None
-        self.load_demucs_model()
-        self.processing = False
+        # Cargar y aplicar estilos CSS
+        self._load_stylesheet()
 
-        #Cargar archivo de estilos css
-        with open('estilos.css','r') as file:
-            style=file.read()
-        self.setStyleSheet(style)
+    def _load_stylesheet(self):
+        """Carga y aplica el archivo de estilos CSS."""
+        try:
+            with open('estilos.css', 'r') as file:
+                style = file.read()
+            self.setStyleSheet(style)
+        except FileNotFoundError:
+            print("Warning: estilos.css not found, using default styles")
 
-        # Variables de estado
+    def _initialize_state_variables(self):
+        """Inicializa todas las variables de estado de la aplicación."""
+        # Variables de playlist y reproducción
         self.playlist = []
         self.current_index = -1
-        self.playback_state = "Detenido"  # playing, paused, stopped
-        self.volume = 25
-        self.mute_states = {"drums": False, "vocals": False, "bass": False, "other": False}
+        self.playback_state = "Detenido"
         self.current_channels = []
 
-        # Variables para volumen individual
+        # Variables de audio
+        self.volume = 25
         self.individual_volumes = {
             "drums": 1.0,
             "vocals": 1.0,
@@ -318,36 +327,194 @@ class AudioPlayer(QMainWindow):
             "other": False
         }
 
+        # Variables de búsqueda
+        self.search_index = 0
+        self.search_results = []
+        self.current_search = ""
+
+        # Variables de procesamiento
+        self.processing = False
+        self.demucs_progress = 0
+        self.demucs_active = False
+
+        # Variables de diálogos
+        self.split_dialog = None
+        self.demucs_thread = None
+        self.demucs_worker = None
+
+        # Variables de letras
+        self.lyrics = []
+
+        # Variables de dependencias
+        self._initialize_dependency_flags()
+
+    def _initialize_dependency_flags(self):
+        """Inicializa flags de disponibilidad de dependencias."""
+        self.demucs_available = True
+        self.pygame_available = True
+        self.torch_available = True
+        self.mutagen_available = True
+
+    def _setup_audio_system(self):
+        """Configura el sistema de audio y verifica dependencias."""
         # Inicializar Pygame Mixer
-        if not pygame.mixer.get_init():
-            pygame.mixer.init()
-            pygame.mixer.set_num_channels(6)
+        self._initialize_pygame_mixer()
 
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Cargar modelo Demucs (solo verificación)
+        self.demucs_model = None
+        self.load_demucs_model()
 
+    def _initialize_pygame_mixer(self):
+        """Inicializa el sistema de audio Pygame."""
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+                pygame.mixer.set_num_channels(6)
+        except pygame.error as e:
+            print(f"Error initializing pygame mixer: {e}")
+            self.pygame_available = False
 
-        # Configurar UI
-        self.init_ui()
+    def _setup_user_interface(self):
+        """Crea y configura todos los elementos de la interfaz de usuario."""
+        # Crear frame principal y layout
+        self._create_main_frame()
+
+        # Configurar background
         self._setup_background()
+
+        # Crear componentes principales
+        self._create_title_bar()
+        self._create_size_grips()
+        self._create_tab_widget()
+        self._create_progress_bar()
+        self._create_control_buttons()
+        self._create_track_controls()
+        self._create_playlist_dock()
+
+        # Configurar layout principal
+        self._setup_main_layout()
+
+        # Inicializar menú y barra de estado
         self.init_menu()
         self.init_status_bar()
 
+    def _create_main_frame(self):
+        """Crea el frame principal contenedor."""
+        self.main_frame = QFrame()
+        self.main_frame.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+        """)
+        self.setCentralWidget(self.main_frame)
 
+    def _create_title_bar(self):
+        """Crea la barra de título personalizada."""
+        self.title_bar = TitleBar(self)
 
-        # Temporizador para actualizaciones
+    def _create_size_grips(self):
+        """Crea los controles de redimensionamiento de ventana."""
+        self.size_grips = {
+            "top": SizeGrip(self, "top"),
+            "bottom": SizeGrip(self, "bottom"),
+            "left": SizeGrip(self, "left"),
+            "right": SizeGrip(self, "right"),
+            "top_left": SizeGrip(self, "top_left"),
+            "top_right": SizeGrip(self, "top_right"),
+            "bottom_left": SizeGrip(self, "bottom_left"),
+            "bottom_right": SizeGrip(self, "bottom_right"),
+        }
+
+    def _create_tab_widget(self):
+        """Crea el widget de pestañas para portada y letras."""
+        self.create_tab_widget()
+
+    def _create_progress_bar(self):
+        """Crea la barra de progreso de reproducción."""
+        self.progress_song = QProgressBar(self)
+        self.progress_song.setFormat("00:00 / 00:00")
+        self.progress_song.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_song.setTextVisible(True)
+        self.progress_song.setFixedHeight(20)
+        self.progress_song.setEnabled(False)
+
+    def _create_control_buttons(self):
+        """Crea los botones de control de reproducción."""
+        # Usar método existente pero renombrado para claridad
+        self.controls_layout = self.init_leds()
+
+    def _create_track_controls(self):
+        """Crea los controles de pistas individuales."""
+        # Usar método existente pero renombrado para claridad
+        self.track_buttons_layout = self.track_buttons()
+
+    def _create_playlist_dock(self):
+        """Crea el dock de la playlist."""
+        self.playlist_dock = QDockWidget(self)
+        self.playlist_widget = QListWidget()
+        self.playlist_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.playlist_widget.setFixedWidth(500)
+        self.playlist_dock.setWidget(self.playlist_widget)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.playlist_dock)
+
+    def _setup_main_layout(self):
+        """Configura el layout principal de la ventana."""
+        layout = QVBoxLayout(self.main_frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Añadir componentes al layout
+        layout.addWidget(self.title_bar)
+        layout.addWidget(self.tabs)
+        layout.addLayout(self.track_buttons_layout)
+        layout.addWidget(self.progress_song)
+        layout.addLayout(self.controls_layout)
+
+    def _setup_connections(self):
+        """Configura todas las conexiones de señales y eventos."""
+        # Conexiones de control de audio
+        self._connect_playback_controls()
+
+        # Conexiones de playlist
+        self._connect_playlist_events()
+
+        # Conexiones de dock
+        self._connect_dock_events()
+
+    def _connect_playback_controls(self):
+        """Conecta los controles de reproducción."""
+        self.play_btn.clicked.connect(self.toggle_play_pause)
+        self.prev_btn.clicked.connect(self.play_previous)
+        self.next_btn.clicked.connect(self.play_next)
+        self.stop_btn.clicked.connect(self.stop_playback)
+
+    def _connect_playlist_events(self):
+        """Conecta eventos de la playlist."""
+        self.playlist_widget.itemDoubleClicked.connect(self.play_selected)
+        self.playlist_widget.itemActivated.connect(self.play_selected)
+
+    def _connect_dock_events(self):
+        """Conecta eventos del dock de playlist."""
+        self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
+
+    def _setup_timers(self):
+        """Configura los timers de actualización."""
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_display)
         self.timer.start(1000)
 
-        #Validar Dependencias
+    def _perform_final_checks(self):
+        """Realiza validaciones finales y configuraciones post-inicialización."""
+        # Validar dependencias
         self._check_dependencies()
 
-        #Lyrics
-        self.lyrics = []
+        # Centrar ventana
+        self.center()
 
-        # Conexión para detectar cierre manual de la Playlist
-        self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
-
+        # Actualizar estado inicial
+        self.update_status()
 
     def _setup_background(self):
         """Configura el background sin afectar la estructura existente"""
@@ -466,7 +633,6 @@ class AudioPlayer(QMainWindow):
 
             self.demucs_available = True
 
-
         except Exception as e:
 
             error_msg = f"Error checking Demucs: {str(e)}"
@@ -483,6 +649,7 @@ class AudioPlayer(QMainWindow):
                 "3. El ejecutable se usa en la misma terminal donde funciona demucs"
             ,QMessageBox.Icon.Critical)
             self.demucs_available = False
+
 
     def _log_system_path(self):
         """Registra el PATH del sistema para debugging"""
@@ -588,7 +755,7 @@ class AudioPlayer(QMainWindow):
         self.volume_dial.valueChanged.connect(self.set_volume)
 
 
-        # Diseño
+        # Layout
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(self.prev_btn)
         controls_layout.addWidget(self.play_btn)
@@ -638,7 +805,6 @@ class AudioPlayer(QMainWindow):
         self.drums_btn = QPushButton()
         self.setup_button(self.drums_btn, 'drums_btn', 'drums')
         self.drums_slider = QSlider(Qt.Orientation.Horizontal)
-
         self.setup_slider(self.drums_slider, 'drums')
 
         self.vocals_btn = QPushButton()
@@ -1149,7 +1315,7 @@ class AudioPlayer(QMainWindow):
 
         if not lyrics:
             # Caso sin letras
-            content = title_line + '<center style="color: #ff2626;">Lo siento, no se encontraron las letras de este track, revisa el nombre del artista y de la canción</center>\n'
+            content = title_line + '<center style="color: #ff2626;">Letras no encontradas, revisa datos de artista/canción</center>\n'
         else:
             # Procesar cada línea de letras
             processed_lines = []
@@ -1170,17 +1336,6 @@ class AudioPlayer(QMainWindow):
         # Escribir el archivo
         with open(output_dir / "lyrics.lrc", "w", encoding="utf-8") as f:
             f.write(content)
-
-    # def _write_default_lyrics(self, output_dir, artist, song):
-    #     """Escribe el archivo LRC por defecto"""
-    #     default_content = (
-    #         f"<html>\n"
-    #         f"[00:00.00]<H2><center>{artist} - {song}</H2></center>\n"
-    #         f"Lo siento, no se encontraran las letras de este track\n"
-    #     )
-    #
-    #     with open(output_dir / "lyrics.lrc", "w", encoding="utf-8") as f:
-    #         f.write(default_content)
 
     def play_selected(self):
         self.stop_playback()
