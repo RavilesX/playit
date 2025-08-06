@@ -25,7 +25,8 @@ import requests
 from urllib.parse import quote
 import unicodedata
 from resources import resource_path,styled_message_box,bg_image
-
+from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
+from lazy_config import LazyLoadingConfig, setup_production_lazy_loading
 
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
@@ -38,9 +39,10 @@ class AboutDialog(QDialog):
         <center><H1><span style="color: #FFFFFF;">Play</span><span style="color: #fc5690;">It</span></H1></center>
         <p>Versión 1.0</p>
         <p>Reproductor de Audio que permite separacion de pistas usando Demucs.</p>
-        <p>Desarrollado por Ravilesx.</p>
+        <p>Desarrollado por RavilesX.</p>
         <p>ravilesx@gmail.com</p>
-        <p>Copyright © 2025</p>
+        <p>Software de uso libre</p>
+        <p>Donaciones en Paypal:</p>        
         """
 
         self.text_edit = QTextEdit()
@@ -49,10 +51,11 @@ class AboutDialog(QDialog):
 
         self.text_edit.setStyleSheet("""
                             QTextEdit {
+                                color: white;
                                 background: transparent;
                                 border: 0px;
                                 padding-top:2px;
-                                font-size: 14px;
+                                font-size: 16px;                                
                             }
                         """)
 
@@ -177,10 +180,6 @@ class TitleBar(QWidget):
         self.draggable = True
         self.drag_position = QPoint()
 
-    #choco
-    def changeTitle(self,title):
-        self.title = QLabel(title)
-
 
     def toggle_maximize(self):
         if self.parent.isMaximized():
@@ -303,6 +302,8 @@ class AudioPlayer(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self._setup_lazy_managers()
+
         # 1. Configuración básica de la ventana
         self._setup_window_properties()
 
@@ -323,6 +324,17 @@ class AudioPlayer(QMainWindow):
 
         # 7. Validaciones finales
         self._perform_final_checks()
+
+    def _setup_lazy_managers(self):
+        """NUEVO: Inicializa los gestores de lazy loading"""
+        self.lazy_audio = LazyAudioManager()
+        self.lazy_images = LazyImageManager()
+        self.lazy_lyrics = LazyLyricsManager()
+        self.lazy_playlist = LazyPlaylistLoader()
+
+        # Configuración automática
+        config = LazyLoadingConfig.create_adaptive_config()
+        setup_production_lazy_loading(self)
 
     def _setup_window_properties(self):
         """Configura propiedades básicas de la ventana principal."""
@@ -526,6 +538,13 @@ class AudioPlayer(QMainWindow):
         # Conexiones de dock
         self._connect_dock_events()
 
+        # Conexiones para lazy loading
+        self._connect_lazy_loading_signals()
+
+    def _connect_lazy_loading_signals(self):
+        """Configura las conexiones para lazy loading"""
+        self.lazy_playlist.playlist_updated.connect(self._on_song_loaded)
+        self.lazy_playlist.loading_finished.connect(self._on_playlist_loaded)
     def _connect_playback_controls(self):
         """Conecta los controles de reproducción."""
         self.play_btn.clicked.connect(self.toggle_play_pause)
@@ -541,6 +560,45 @@ class AudioPlayer(QMainWindow):
     def _connect_dock_events(self):
         """Conecta eventos del dock de playlist."""
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
+
+    def _on_song_loaded(self, song_data):
+        """Callback cuando se carga una canción individual"""
+        from PyQt6.QtWidgets import QListWidgetItem
+        from PyQt6.QtGui import QIcon
+        from resources import resource_path
+
+        # Verificar si ya existe en la playlist
+        exists = any(
+            track['artist'] == song_data['artist'] and
+            track['song'] == song_data['song']
+            for track in self.playlist
+        )
+
+        if not exists:
+            # Añadir a la playlist
+            self.playlist.append(song_data)
+
+            # Añadir a la UI
+            icon = QIcon(resource_path('images/main_window/audio_icon.png'))
+            item_text = f"{song_data['artist']} - {song_data['song']}"
+            item = QListWidgetItem(item_text)
+            item.setIcon(icon)
+            self.playlist_widget.addItem(item)
+
+            # Habilitar botones si es la primera canción
+            if len(self.playlist) == 1:
+                self.prev_btn.setEnabled(True)
+                self.next_btn.setEnabled(True)
+                self.play_btn.setEnabled(True)
+
+            # Obtener letras de forma asíncrona
+            self._check_and_fetch_lyrics_async(song_data['path'], song_data['artist'], song_data['song'])
+
+    def _on_playlist_loaded(self):
+        """Callback cuando termina de cargar toda la playlist"""
+        self.status_bar.showMessage(f"Playlist cargada: {len(self.playlist)} canciones")
+        self.update_status()
+        print(f"✅ Playlist loaded successfully: {len(self.playlist)} songs")
 
     def _setup_timers(self):
         """Configura los timers de actualización."""
@@ -932,14 +990,16 @@ class AudioPlayer(QMainWindow):
         if track_index is not None and track_index < len(self.current_channels):
             self.current_channels[track_index].set_volume(volume * (self.volume / 100.0))
 
-
-
     def setup_button(self, button, object_name, icon_name):
-        """Configura botones con parámetros comunes."""
+        """Método modificado para usar lazy loading de iconos"""
         button.setObjectName(object_name)
         button.setIconSize(QSize(120, 120))
+
+        # Usar lazy loading para el icono
         icon_path = resource_path(f'images/main_window/icons01/{icon_name}.png')
-        button.setIcon(QIcon(icon_path))
+        icon = self.lazy_images.load_icon_cached(icon_path, (120, 120))
+        button.setIcon(icon)
+
         button.setCheckable(True)
         button.clicked.connect(self.toggle_mute)
 
@@ -1264,15 +1324,47 @@ class AudioPlayer(QMainWindow):
         self.update_status()
 
     def load_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta",expanduser("~/Music"))
+        """Método modificado para usar lazy loading"""
+        from PyQt6.QtWidgets import QFileDialog
+        from os.path import expanduser
+        from pathlib import Path
+
+        path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta", expanduser("~/Music"))
         if path:
-            self.scan_folder(Path(path))
+            # Limpiar playlist actual primero
+            self.clear_playlist()
+
+            # Mostrar indicador de carga
+            self.status_bar.showMessage("Cargando playlist...")
+
+            # Usar lazy loading para cargar la carpeta
+            try:
+                self.lazy_playlist.load_playlist_lazy(Path(path))
+                print(f"🔄 Started loading playlist from: {path}")
+            except Exception as e:
+                print(f"❌ Error starting playlist load: {e}")
+                styled_message_box(self, "Error", f"Error iniciando carga: {str(e)}", QMessageBox.Icon.Critical)
+                self.status_bar.showMessage("Error cargando playlist")
 
     def reset_search_indices(self):
         """Reinicia los índices y resultados de búsqueda"""
         self.search_results = []
         self.search_index = 0
         self.current_search = ""
+
+    def clear_playlist(self):
+        """Limpia la playlist actual"""
+        self.stop_playback()
+        self.playlist.clear()
+        self.playlist_widget.clear()
+        self.current_index = -1
+        self.reset_search_indices()
+
+        # Deshabilitar botones
+        self.prev_btn.setEnabled(False)
+        self.next_btn.setEnabled(False)
+        self.play_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
 
     def scan_folder(self, path):
         self.reset_search_indices()
@@ -1302,27 +1394,36 @@ class AudioPlayer(QMainWindow):
                                     self.prev_btn.setEnabled(True)
                                     self.next_btn.setEnabled(True)
                                     self.play_btn.setEnabled(True)
-                                self._check_and_fetch_lyrics(dir_path, artist, song)
+                                self._check_and_fetch_lyrics_async(dir_path, artist, song)
                 except Exception as e:
                     styled_message_box(self, "Error", f"Error cargando {json_file}: {str(e)}",QMessageBox.Icon.Critical)
         self.update_status()
 
-    def _check_and_fetch_lyrics(self, dir_path, artist, song):
-        """Verifica y obtiene letras si es necesario"""
-        lrc_path = dir_path / "lyrics.lrc"
-        default_text = "Lo siento, no se encontraron las letras de este track"
+    def _check_and_fetch_lyrics_async(self, dir_path, artist, song):
+        """Versión asíncrona de _check_and_fetch_lyrics"""
 
-        # Verificar si necesita actualización
-        needs_update = False
-        if not lrc_path.exists():
-            needs_update = True
-        else:
-            with open(lrc_path, "r", encoding="utf-8") as f:
-                if default_text in f.read():
+        def check_lyrics():
+            lrc_path = dir_path / "lyrics.lrc"
+            default_text = "Letras no encontradas, revisa datos de artista/canción"
+
+            needs_update = False
+            if not lrc_path.exists():
+                needs_update = True
+            else:
+                try:
+                    with open(lrc_path, "r", encoding="utf-8") as f:
+                        if default_text in f.read():
+                            needs_update = True
+                except:
                     needs_update = True
 
-        if needs_update:
-            self._fetch_lyrics_from_api(artist, song, dir_path)
+            if needs_update:
+                self._fetch_lyrics_from_api(artist, song, dir_path)
+
+        # Ejecutar en un hilo separado para no bloquear
+        import threading
+        thread = threading.Thread(target=check_lyrics, daemon=True)
+        thread.start()
 
     def _normalize_text(self, text):
         """Normaliza texto removiendo tildes y convirtiendo a minúsculas"""
@@ -1414,35 +1515,40 @@ class AudioPlayer(QMainWindow):
                 channel.unpause()
 
     def _setup_audio(self) -> bool:
-        """Configura los archivos de audio y canales"""
+        """Método modificado para usar lazy loading de audio"""
         song = self.playlist[self.current_index]
         path = song["path"]
 
         try:
-            sounds = [
-                pygame.mixer.Sound(path / "separated" / "drums.mp3"),
-                pygame.mixer.Sound(path / "separated" / "vocals.mp3"),
-                pygame.mixer.Sound(path / "separated" / "bass.mp3"),
-                pygame.mixer.Sound(path / "separated" / "other.mp3")
-            ]
-            self.current_channels = [s.play() for s in sounds]
+            # Usar lazy loading para cargar los sonidos
+            sounds = self.lazy_audio.load_audio_lazy(path)
+            if not sounds:
+                return False
+
+            # Crear canales de reproducción
+            self.current_channels = [sound.play() for sound in sounds]
 
             # Aplicar volúmenes iniciales
             for i, track_name in enumerate(["drums", "vocals", "bass", "other"]):
-                if not self.mute_states[track_name]:
-                    self.current_channels[i].set_volume(self.individual_volumes[track_name] * (self.volume / 100.0))
-                else:
-                    self.current_channels[i].set_volume(0)
+                if i < len(self.current_channels):
+                    if not self.mute_states[track_name]:
+                        volume = self.individual_volumes[track_name] * (self.volume / 100.0)
+                        self.current_channels[i].set_volume(volume)
+                    else:
+                        self.current_channels[i].set_volume(0)
 
-            #Iniciar Barra de progreso del track
-            length = int(sounds[0].get_length() * 1000)
-            total_seconds = int(sounds[0].get_length())
-            mins, secs = divmod(total_seconds, 60)
-            self.progress_song.setFormat(f"00:00 / {mins:02d}:{secs:02d}")
-            self.progress_song.setRange(0, length)
+            # Configurar barra de progreso
+            if sounds:
+                length = int(sounds[0].get_length() * 1000)
+                total_seconds = int(sounds[0].get_length())
+                mins, secs = divmod(total_seconds, 60)
+                self.progress_song.setFormat(f"00:00 / {mins:02d}:{secs:02d}")
+                self.progress_song.setRange(0, length)
+
             return True
-        except (pygame.error, FileNotFoundError) as e:
-            styled_message_box(self, "Error", f"Error cargando audio: {str(e)}",QMessageBox.Icon.Critical)
+
+        except Exception as e:
+            styled_message_box(self, "Error", f"Error cargando audio: {str(e)}", QMessageBox.Icon.Critical)
             return False
 
     def _update_playback_ui(self, state: str):
@@ -1452,9 +1558,9 @@ class AudioPlayer(QMainWindow):
         self.progress_song.setEnabled(state != "Detenido")
         self.playback_state = state
 
-
-        song = self.playlist[self.current_index]
-        path = song["path"]
+        if self.current_index!=-1:
+            song = self.playlist[self.current_index]
+            path = song["path"]
 
 
         # Habilitar botones
@@ -1527,21 +1633,68 @@ class AudioPlayer(QMainWindow):
         self.update_lyrics_menu_state()
 
     def _update_metadata(self):
-        """Carga metadatos y letras"""
+        """Método modificado para usar lazy loading de imágenes y letras"""
         song = self.playlist[self.current_index]
         path = song["path"]
 
-        #choco
-        variable = song["artist"] + " " + song["song"]
-        self.title_bar.changeTitle(variable)
+        # # Actualizar título de ventana
+        title = f"{song['artist']} - {song['song']}"
+        self.title_bar.title.setText(title)
 
-        # Cargar portada
-        cover_path = path / "cover.png"
-        self.cover_label.setPixmap(QPixmap(str(cover_path) if cover_path.exists() else QPixmap(resource_path('images/main_window/default.png'))))
+        # Cargar portada usando lazy loading
+        cover_pixmap = self.lazy_images.load_cover_lazy(path, (500, 500))
+        self.cover_label.setPixmap(cover_pixmap)
 
-        # Cargar letras
+        # Cargar letras usando lazy loading
         lyrics_path = path / "lyrics.lrc"
-        self.load_lyrics(lyrics_path) if lyrics_path.exists() else self.lyrics_text.clear()
+        if lyrics_path.exists():
+            self.load_lyrics(lyrics_path)
+        else:
+            self.lyrics_text.clear()
+
+        # Precargar recursos de las siguientes canciones
+        self._preload_adjacent_resources()
+
+    def _preload_adjacent_resources(self):
+        """Precarga recursos de canciones adyacentes"""
+        if not self.playlist:
+            return
+
+        # Precargar audio de las siguientes 2 canciones
+        self.lazy_audio.preload_next_songs(self.playlist, self.current_index, count=2)
+
+        # Precargar letras de canciones adyacentes
+        self.lazy_lyrics.preload_lyrics(self.playlist, self.current_index)
+
+        # Precargar portadas de canciones adyacentes
+        def preload_covers():
+            for offset in [-1, 1]:
+                idx = (self.current_index + offset) % len(self.playlist)
+                if 0 <= idx < len(self.playlist):
+                    song_path = self.playlist[idx]["path"]
+                    self.lazy_images.load_cover_lazy(song_path, (500, 500))
+
+        import threading
+        thread = threading.Thread(target=preload_covers, daemon=True)
+        thread.start()
+
+    def get_cache_stats(self) -> dict:
+        """Obtiene estadísticas detalladas de uso de cache"""
+        return {
+            "audio_cache_size": len(self.lazy_audio.cache._cache),
+            "image_cache_size": len(self.lazy_images.cache._cache),
+            "lyrics_cache_size": len(self.lazy_lyrics.cache._cache),
+            "total_cached_items": (
+                    len(self.lazy_audio.cache._cache) +
+                    len(self.lazy_images.cache._cache) +
+                    len(self.lazy_lyrics.cache._cache)
+            ),
+            "current_song": (
+                f"{self.playlist[self.current_index]['artist']} - {self.playlist[self.current_index]['song']}"
+                if self.current_index >= 0 and self.playlist else "Ninguna"
+            ),
+            "playlist_size": len(self.playlist)
+        }
 
 
     def load_lyrics(self, file_path):
@@ -1779,11 +1932,15 @@ class AudioPlayer(QMainWindow):
                 )
 
     def update_status(self):
-        """Actualiza la barra de estado """
+        """Método modificado para incluir estadísticas de cache"""
+        # Obtener estadísticas de cache
+        cache_stats = self.get_cache_stats()
+
         status_parts = [
             f"Canciones: {len(self.playlist)}",
             f"Reproducción: {self.playback_state.capitalize()}",
             self._format_demucs_progress(),
+            f"Cache: {cache_stats['total_cached_items']} elementos",
             f"Fecha: {datetime.now().strftime('%A - %d/%m/%Y')}",
             f"Hora: {datetime.now().strftime('%H:%M')}"
         ]
@@ -1843,13 +2000,13 @@ class DemucsWorker(QObject):
             self.base_path.mkdir(parents=True, exist_ok=True)
 
             # Paso 2: Copiar archivo original
-            self.progress.emit(10)
-            dest_file = self.base_path / f"{self.song}.mp3"
-            shutil.copy(self.src_path, dest_file)
+            # self.progress.emit(10)
+            # dest_file = self.base_path / f"{self.song}.mp3"
+            # shutil.copy(self.src_path, dest_file)
 
             # Paso 3: Extraer portada
             self.progress.emit(15)
-            self._extract_cover(dest_file)
+            self._extract_cover(self.src_path)
 
             # Paso 4: Generar JSON
             self.progress.emit(17)
@@ -1904,7 +2061,7 @@ class DemucsWorker(QObject):
                     break
         except Exception as e:
             print(f"No se pudo extraer portada: {str(e)}")
-            shutil.copy(resource_path('images/main_window/default.png'), self.base_path / "cover.png")
+            # shutil.copy(resource_path('images/main_window/default.png'), self.base_path / "cover.png")
 
     def _create_json(self):
         data = {
