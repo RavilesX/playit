@@ -27,6 +27,49 @@ import unicodedata
 from resources import resource_path,styled_message_box,bg_image
 
 
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Sobre Playit")
+        self.setFixedSize(400, 500)
+
+        # Texto informativo (ejemplo)
+        about_text = """
+        <center><H1><span style="color: #FFFFFF;">Play</span><span style="color: #fc5690;">It</span></H1></center>
+        <p>Versión 1.0</p>
+        <p>Reproductor de Audio que permite separacion de pistas usando Demucs.</p>
+        <p>Desarrollado por Ravilesx.</p>
+        <p>ravilesx@gmail.com</p>
+        <p>Copyright © 2025</p>
+        """
+
+        self.text_edit = QTextEdit()
+        self.text_edit.setReadOnly(True)
+        self.text_edit.setHtml(about_text)
+
+        self.text_edit.setStyleSheet("""
+                            QTextEdit {
+                                background: transparent;
+                                border: 0px;
+                                padding-top:2px;
+                                font-size: 14px;
+                            }
+                        """)
+
+
+
+        self.ok_btn = QPushButton()
+        self.ok_btn.setFixedSize(70, 70)
+        self.ok_btn.setObjectName("aceptar_btn")
+        bg_image(self.ok_btn, "images/split_dialog/aceptar_btn.png")
+        self.ok_btn.clicked.connect(self.accept)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.text_edit)
+        layout.addWidget(self.ok_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.setLayout(layout)
+
 class CustomDial(QDial):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -900,6 +943,12 @@ class AudioPlayer(QMainWindow):
         button.setCheckable(True)
         button.clicked.connect(self.toggle_mute)
 
+    def show_about_dialog(self):
+        """Muestra el diálogo de información sobre la aplicación"""
+        dialog = AboutDialog(self)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        dialog.exec()
+
 
 
     def init_ui(self):
@@ -989,6 +1038,7 @@ class AudioPlayer(QMainWindow):
         menu = self.menuBar()
         file_menu = menu.addMenu("Archivo")
         options_menu = menu.addMenu("Opciones")
+        help_menu = menu.addMenu("Ayuda")
 
         load_action = QAction("Seleccionar Carpeta", self)
         load_action.setShortcut(QKeySequence("Ctrl+O"))
@@ -1039,6 +1089,10 @@ class AudioPlayer(QMainWindow):
 
         lyrics_menu.addAction(self.advance_action)
         lyrics_menu.addAction(self.delay_action)
+
+        about_action = QAction("Sobre Playit", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
 
         # Inicialmente deshabilitadas
         self.advance_action.setEnabled(False)
