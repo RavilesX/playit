@@ -1,20 +1,19 @@
 import re
 import os
-from pathlib import Path
+import threading
 TORCH_AVAILABLE = False
 import subprocess
 import sys
 import json
-from os.path import expanduser
 from datetime import datetime
 import time
 import pygame
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QPoint, QRect, QObject, QThread,QPointF
-from PyQt6.QtGui import QAction, QPixmap, QIcon, QKeySequence,QColor,QPainter
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QPoint, QRect, QObject, QThread, QPointF
+from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
-                             QPushButton, QSlider, QStatusBar, QFileDialog, QMessageBox,
-                             QProgressBar, QDialog, QListWidgetItem,QLineEdit, QDial, QFrame )
+                             QPushButton, QSlider, QStatusBar, QMessageBox,
+                             QProgressBar, QDialog, QLineEdit, QDial, QFrame, QListWidgetItem)
 import shutil
 from mutagen.mp3 import MP3
 from PIL import Image
@@ -24,7 +23,7 @@ import math
 import requests
 from urllib.parse import quote
 import unicodedata
-from resources import resource_path,styled_message_box,bg_image
+from resources import styled_message_box, bg_image, resource_path
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
 from lazy_config import LazyLoadingConfig, setup_production_lazy_loading
 
@@ -32,23 +31,22 @@ class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Sobre Playit")
-        self.setFixedSize(400, 500)
-
-        # Texto informativo (ejemplo)
-        about_text = """
-        <center><H1><span style="color: #FFFFFF;">Play</span><span style="color: #fc5690;">It</span></H1></center>
-        <p>Versión 1.0</p>
-        <p>Reproductor de Audio que permite separacion de pistas usando Demucs.</p>
+        self.setFixedSize(400, 550)
+        logo=resource_path('images/main_window/about.png')
+        version=resource_path('images/main_window/version.png')
+        about_text = f"""
+        <center><img src="{version}"></center>
+        <p>Reproductor de Audio que permite separación de pistas usando Demucs.</p>
         <p>Desarrollado por RavilesX.</p>
-        <p>ravilesx@gmail.com</p>
+        <a>ravilesx@gmail.com</a>
         <p>Software de uso libre</p>
-        <p>Donaciones en Paypal:</p>        
+        <p>Donaciones en Paypal:</p>
+        <img src="{logo}">                
         """
 
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         self.text_edit.setHtml(about_text)
-
         self.text_edit.setStyleSheet("""
                             QTextEdit {
                                 color: white;
@@ -58,7 +56,6 @@ class AboutDialog(QDialog):
                                 font-size: 16px;                                
                             }
                         """)
-
 
 
         self.ok_btn = QPushButton()
@@ -484,7 +481,16 @@ class AudioPlayer(QMainWindow):
 
     def _create_tab_widget(self):
         """Crea el widget de pestañas para portada y letras."""
-        self.create_tab_widget()
+        # QTabWidget para portada y letras
+        self.tabs = QTabWidget()
+        self.cover_label = QLabel()
+        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lyrics_text = QTextEdit()
+        self.lyrics_text.setAcceptRichText(True)
+        self.lyrics_text.setReadOnly(True)
+        self.tabs.addTab(self.cover_label, "Portada")
+        self.tabs.addTab(self.lyrics_text, "Letras")
+        self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
 
     def _create_progress_bar(self):
         """Crea la barra de progreso de reproducción."""
@@ -563,9 +569,9 @@ class AudioPlayer(QMainWindow):
 
     def _on_song_loaded(self, song_data):
         """Callback cuando se carga una canción individual"""
-        from PyQt6.QtWidgets import QListWidgetItem
-        from PyQt6.QtGui import QIcon
-        from resources import resource_path
+        # from PyQt6.QtWidgets import QListWidgetItem
+        # from PyQt6.QtGui import QIcon
+        # from resources import resource_path
 
         # Verificar si ya existe en la playlist
         exists = any(
@@ -874,18 +880,6 @@ class AudioPlayer(QMainWindow):
         self.move(frame.topLeft())
 
 
-    def create_tab_widget(self):
-        # QTabWidget para portada y letras
-        self.tabs = QTabWidget()
-        self.cover_label = QLabel()
-        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lyrics_text = QTextEdit()
-        self.lyrics_text.setAcceptRichText(True)
-        self.lyrics_text.setReadOnly(True)
-        self.tabs.addTab(self.cover_label, "Portada")
-        self.tabs.addTab(self.lyrics_text, "Letras")
-        self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
-
     def enable_disable_buttons(self, state):
         self.drums_btn.setEnabled(state)
         self.vocals_btn.setEnabled(state)
@@ -991,7 +985,7 @@ class AudioPlayer(QMainWindow):
             self.current_channels[track_index].set_volume(volume * (self.volume / 100.0))
 
     def setup_button(self, button, object_name, icon_name):
-        """Método modificado para usar lazy loading de iconos"""
+        """Método para usar lazy loading de iconos"""
         button.setObjectName(object_name)
         button.setIconSize(QSize(120, 120))
 
@@ -1011,70 +1005,70 @@ class AudioPlayer(QMainWindow):
 
 
 
-    def init_ui(self):
-        # Widget principal
-        self.main_frame = QFrame()   #Contenedor principal con bordes
-        self.main_frame.setStyleSheet("""
-                    QFrame {
-                        background: transparent;
-                        border: 1px solid #404040;
-                        border-radius: 8px;
-                    }
-                """)
-        #layout principal
-        layout = QVBoxLayout(self.main_frame)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Añadir barra de título
-        self.title_bar = TitleBar(self)
-        layout.addWidget(self.title_bar)
-
-        self.size_grips = {
-            "top": SizeGrip(self, "top"),
-            "bottom": SizeGrip(self, "bottom"),
-            "left": SizeGrip(self, "left"),
-            "right": SizeGrip(self, "right"),
-            "top_left": SizeGrip(self, "top_left"),
-            "top_right": SizeGrip(self, "top_right"),
-            "bottom_left": SizeGrip(self, "bottom_left"),
-            "bottom_right": SizeGrip(self, "bottom_right"),
-        }
-
-        self.setCentralWidget(self.main_frame)
-
-        self.create_tab_widget()
-
-        ## Barra de progreso
-        self.progress_song = QProgressBar(self)
-        self.progress_song.setFormat("00:00 / 00:00")  # Formato inicial
-        self.progress_song.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.progress_song.setTextVisible(True)
-        self.progress_song.setFixedHeight(20)
-        self.progress_song.setEnabled(False)
-
-
-        layout.addWidget(self.tabs)
-        layout.addLayout(self.track_buttons())
-        layout.addWidget(self.progress_song)
-        layout.addLayout(self.init_leds())
-
-        # Conexiones de control de audio
-        self.play_btn.clicked.connect(self.toggle_play_pause)
-        self.prev_btn.clicked.connect(self.play_previous)
-        self.next_btn.clicked.connect(self.play_next)
-        self.stop_btn.clicked.connect(self.stop_playback)
-
-
-        # Playlist Dock
-        self.playlist_dock = QDockWidget(self)
-        self.playlist_widget = QListWidget()
-        self.playlist_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.playlist_widget.setFixedWidth(500)
-        self.playlist_dock.setWidget(self.playlist_widget)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.playlist_dock)
-        self.playlist_widget.itemDoubleClicked.connect(self.play_selected)
-        self.playlist_widget.itemActivated.connect(self.play_selected)
+    # def init_ui(self):
+    #     # Widget principal
+    #     self.main_frame = QFrame()   #Contenedor principal con bordes
+    #     self.main_frame.setStyleSheet("""
+    #                 QFrame {
+    #                     background: transparent;
+    #                     border: 1px solid #404040;
+    #                     border-radius: 8px;
+    #                 }
+    #             """)
+    #     #layout principal
+    #     layout = QVBoxLayout(self.main_frame)
+    #     layout.setContentsMargins(0, 0, 0, 0)
+    #     layout.setSpacing(0)
+    #
+    #     # Añadir barra de título
+    #     self.title_bar = TitleBar(self)
+    #     layout.addWidget(self.title_bar)
+    #
+    #     self.size_grips = {
+    #         "top": SizeGrip(self, "top"),
+    #         "bottom": SizeGrip(self, "bottom"),
+    #         "left": SizeGrip(self, "left"),
+    #         "right": SizeGrip(self, "right"),
+    #         "top_left": SizeGrip(self, "top_left"),
+    #         "top_right": SizeGrip(self, "top_right"),
+    #         "bottom_left": SizeGrip(self, "bottom_left"),
+    #         "bottom_right": SizeGrip(self, "bottom_right"),
+    #     }
+    #
+    #     self.setCentralWidget(self.main_frame)
+    #
+    #     self.create_tab_widget()
+    #
+    #     ## Barra de progreso
+    #     self.progress_song = QProgressBar(self)
+    #     self.progress_song.setFormat("00:00 / 00:00")  # Formato inicial
+    #     self.progress_song.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    #     self.progress_song.setTextVisible(True)
+    #     self.progress_song.setFixedHeight(20)
+    #     self.progress_song.setEnabled(False)
+    #
+    #
+    #     layout.addWidget(self.tabs)
+    #     layout.addLayout(self.track_buttons())
+    #     layout.addWidget(self.progress_song)
+    #     layout.addLayout(self.init_leds())
+    #
+    #     # Conexiones de control de audio
+    #     self.play_btn.clicked.connect(self.toggle_play_pause)
+    #     self.prev_btn.clicked.connect(self.play_previous)
+    #     self.next_btn.clicked.connect(self.play_next)
+    #     self.stop_btn.clicked.connect(self.stop_playback)
+    #
+    #
+    #     # Playlist Dock
+    #     self.playlist_dock = QDockWidget(self)
+    #     self.playlist_widget = QListWidget()
+    #     self.playlist_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    #     self.playlist_widget.setFixedWidth(500)
+    #     self.playlist_dock.setWidget(self.playlist_widget)
+    #     self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.playlist_dock)
+    #     self.playlist_widget.itemDoubleClicked.connect(self.play_selected)
+    #     self.playlist_widget.itemActivated.connect(self.play_selected)
 
 
     def keyPressEvent(self, event):
@@ -1421,7 +1415,7 @@ class AudioPlayer(QMainWindow):
                 self._fetch_lyrics_from_api(artist, song, dir_path)
 
         # Ejecutar en un hilo separado para no bloquear
-        import threading
+
         thread = threading.Thread(target=check_lyrics, daemon=True)
         thread.start()
 
@@ -1674,7 +1668,6 @@ class AudioPlayer(QMainWindow):
                     song_path = self.playlist[idx]["path"]
                     self.lazy_images.load_cover_lazy(song_path, (500, 500))
 
-        import threading
         thread = threading.Thread(target=preload_covers, daemon=True)
         thread.start()
 
