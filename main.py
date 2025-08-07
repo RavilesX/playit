@@ -1,6 +1,8 @@
 import re
 import os
 import threading
+from pathlib import Path
+
 TORCH_AVAILABLE = False
 import subprocess
 import sys
@@ -296,6 +298,10 @@ class SizeGrip(QWidget):
 
 
 class AudioPlayer(QMainWindow):
+    cover_loaded = pyqtSignal(QPixmap)
+    lyrics_loaded = pyqtSignal(list)
+    lyrics_error = pyqtSignal(str)
+    lyrics_not_found = pyqtSignal()
     def __init__(self):
         super().__init__()
 
@@ -551,6 +557,10 @@ class AudioPlayer(QMainWindow):
         """Configura las conexiones para lazy loading"""
         self.lazy_playlist.playlist_updated.connect(self._on_song_loaded)
         self.lazy_playlist.loading_finished.connect(self._on_playlist_loaded)
+        self.cover_loaded.connect(self._handle_cover_loaded)
+        self.lyrics_loaded.connect(self._handle_lyrics_loaded)
+        self.lyrics_error.connect(self._handle_lyrics_error)
+        self.lyrics_not_found.connect(self._handle_lyrics_not_found)
     def _connect_playback_controls(self):
         """Conecta los controles de reproducción."""
         self.play_btn.clicked.connect(self.toggle_play_pause)
@@ -599,6 +609,33 @@ class AudioPlayer(QMainWindow):
 
             # Obtener letras de forma asíncrona
             self._check_and_fetch_lyrics_async(song_data['path'], song_data['artist'], song_data['song'])
+
+    def _handle_cover_loaded(self, pixmap):
+        self.cover_label.setPixmap(pixmap)
+
+    def _handle_lyrics_loaded(self, lyrics_data):
+        print("Lyrics cargados exitosamente")
+        self.lyrics = lyrics_data
+
+        if not hasattr(self, 'lyrics_timer'):
+            self.lyrics_timer = QTimer(self)
+            self.lyrics_timer.timeout.connect(self.update_lyrics_display)
+        self.lyrics_timer.start(100)
+
+        self.update_lyrics_menu_state()
+
+
+
+
+
+
+    def _handle_lyrics_error(self, error_msg):
+        print(f"Error cargando lyrics: {error_msg}")
+        self.lyrics_text.setHtml(f'<center style="color: #ff6666;">Error: {error_msg}</center>')
+
+    def _handle_lyrics_not_found(self):
+        print("No se encontraron lyrics")
+        self.lyrics_text.setHtml('<center style="color: #ff6666;">No hay letras disponibles</center>')
 
     def _on_playlist_loaded(self):
         """Callback cuando termina de cargar toda la playlist"""
@@ -989,10 +1026,25 @@ class AudioPlayer(QMainWindow):
         button.setObjectName(object_name)
         button.setIconSize(QSize(120, 120))
 
-        # Usar lazy loading para el icono
-        icon_path = resource_path(f'images/main_window/icons01/{icon_name}.png')
-        icon = self.lazy_images.load_icon_cached(icon_path, (120, 120))
-        button.setIcon(icon)
+        try:
+            # Usar lazy loading para el icono
+            icon_path = resource_path(f'images/main_window/icons01/{icon_name}.png')
+            icon = self.lazy_images.load_icon_cached(icon_path, (120, 120))
+
+            if icon.isNull():
+                print(f"⚠️ Icono no encontrado: {icon_path}")
+                # Crear icono por defecto
+                default_pixmap = QPixmap(120, 120)
+                default_pixmap.fill(Qt.GlobalColor.darkGray)
+                icon = QIcon(default_pixmap)
+
+            button.setIcon(icon)
+        except Exception as e:
+            print(f"❌ Error cargando icono para {object_name}: {e}")
+            # Icono de emergencia
+            fallback_pixmap = QPixmap(120, 120)
+            fallback_pixmap.fill(Qt.GlobalColor.red)
+            button.setIcon(QIcon(fallback_pixmap))
 
         button.setCheckable(True)
         button.clicked.connect(self.toggle_mute)
@@ -1143,6 +1195,14 @@ class AudioPlayer(QMainWindow):
 
         lyrics_menu.addAction(self.advance_action)
         lyrics_menu.addAction(self.delay_action)
+
+        cleanup_action = QAction("Limpiar Cache", self)
+        cleanup_action.triggered.connect(self.cleanup_resources_manual)
+        options_menu.addAction(cleanup_action)
+
+        debug_action = QAction("Mostrar Estado Cache", self)
+        debug_action.triggered.connect(lambda: print(self.show_cache_debug_info()))
+        help_menu.addAction(debug_action)
 
         about_action = QAction("Sobre Playit", self)
         about_action.triggered.connect(self.show_about_dialog)
@@ -1475,11 +1535,10 @@ class AudioPlayer(QMainWindow):
                     if len(parts) == 2:
                         timestamp, text = parts
                         # Reconstruir la línea con el texto centrado
-                        #processed_line = f"{timestamp}]<center>{text.strip()}</center>"
                         processed_line = f'{timestamp}]<center style="color: #F88FFF;">{text.strip()}</center>'
                         processed_lines.append(processed_line)
 
-            # Unir todo el contenido
+            # Unir el contenido
             content = title_line + '\n'.join(processed_lines) + '\n'
 
         # Escribir el archivo
@@ -1496,11 +1555,16 @@ class AudioPlayer(QMainWindow):
         Acciones soportadas: 'play', 'stop', 'pause', 'unpause'
         """
         if not self.current_channels:
+            print(f"⚠️ No hay canales para acción: {action}")
             return
 
-        for channel in self.current_channels:
-            if action == 'play' and not channel.get_busy():
-                channel.play()
+
+        for i, channel in enumerate(self.current_channels):
+            if not channel:
+                continue
+
+            if action == 'play':
+                channel.unpause()
             elif action == 'stop':
                 channel.stop()
             elif action == 'pause':
@@ -1508,41 +1572,84 @@ class AudioPlayer(QMainWindow):
             elif action == 'unpause':
                 channel.unpause()
 
+        print(f"🎮 Acción de control aplicada: {action} a {len(self.current_channels)} canales")
+
+
     def _setup_audio(self) -> bool:
-        """Método modificado para usar lazy loading de audio"""
+        """Método para usar lazy loading de audio"""
+        if not (0 <= self.current_index < len(self.playlist)):
+            return False
+
         song = self.playlist[self.current_index]
-        path = song["path"]
+        path = Path(song["path"])
 
         try:
+            print(f"🔄 Cargando audio para: {song['artist']} - {song['song']}")
+
             # Usar lazy loading para cargar los sonidos
             sounds = self.lazy_audio.load_audio_lazy(path)
+
             if not sounds:
+                print(f"❌ No se pudieron cargar los archivos de audio para: {path}")
+                from PyQt6.QtWidgets import QMessageBox
+                from resources import styled_message_box
+                styled_message_box(
+                    self,
+                    "Error de Audio",
+                    f"No se encontraron las pistas separadas para:\n{song['artist']} - {song['song']}\n\n"
+                    "Asegúrese de que exista la carpeta 'separated' con los archivos:\n"
+                    "• drums.mp3\n• vocals.mp3\n• bass.mp3\n• other.mp3",
+                    QMessageBox.Icon.Warning
+                )
                 return False
 
+            print(f"✅ Audio cargado: {len(sounds)} pistas")
+
             # Crear canales de reproducción
-            self.current_channels = [sound.play() for sound in sounds]
+            self.current_channels = []
+            for i, sound in enumerate(sounds):
+                try:
+                    channel = sound.play()
+                    channel.pause()  # Pausar inmediatamente para control manual
+                    self.current_channels.append(channel)
+                except Exception as e:
+                    print(f"❌ Error creando canal {i}: {e}")
+                    return False
 
             # Aplicar volúmenes iniciales
             for i, track_name in enumerate(["drums", "vocals", "bass", "other"]):
                 if i < len(self.current_channels):
-                    if not self.mute_states[track_name]:
-                        volume = self.individual_volumes[track_name] * (self.volume / 100.0)
-                        self.current_channels[i].set_volume(volume)
-                    else:
-                        self.current_channels[i].set_volume(0)
+                    volume = 0 if self.mute_states[track_name] else (
+                            self.individual_volumes[track_name] * (self.volume / 100.0)
+                    )
+                    self.current_channels[i].set_volume(volume)
 
             # Configurar barra de progreso
-            if sounds:
-                length = int(sounds[0].get_length() * 1000)
-                total_seconds = int(sounds[0].get_length())
-                mins, secs = divmod(total_seconds, 60)
-                self.progress_song.setFormat(f"00:00 / {mins:02d}:{secs:02d}")
-                self.progress_song.setRange(0, length)
+            try:
+                length_seconds = sounds[0].get_length()
+                length_ms = int(length_seconds * 1000)
+                total_mins, total_secs = divmod(int(length_seconds), 60)
+
+                self.progress_song.setFormat(f"00:00 / {total_mins:02d}:{total_secs:02d}")
+                self.progress_song.setRange(0, length_ms)
+                self.progress_song.setValue(0)
+
+                print(f"⏱️ Duración configurada: {total_mins:02d}:{total_secs:02d}")
+            except Exception as e:
+                print(f"⚠️ Error configurando progreso: {e}")
 
             return True
 
         except Exception as e:
-            styled_message_box(self, "Error", f"Error cargando audio: {str(e)}", QMessageBox.Icon.Critical)
+            print(f"❌ Error general en _setup_audio: {e}")
+            from PyQt6.QtWidgets import QMessageBox
+            from resources import styled_message_box
+            styled_message_box(
+                self,
+                "Error",
+                f"Error cargando audio: {str(e)}",
+                QMessageBox.Icon.Critical
+            )
             return False
 
     def _update_playback_ui(self, state: str):
@@ -1589,21 +1696,73 @@ class AudioPlayer(QMainWindow):
             btn.setChecked(self.mute_states[track_name])
 
     def play_current(self):
+        print(f"▶️ Iniciando reproducción...")
+
+        # Detener reproducción actual
         self.stop_playback()
+
         if not (0 <= self.current_index < len(self.playlist)):
+            print("❌ Índice de playlist inválido")
             return
 
+        # Configurar audio
         if not self._setup_audio():
+            print("❌ Falló la configuración de audio")
             return
 
+        print(
+            f"🎵 Reproduciendo: {self.playlist[self.current_index]['artist']} - {self.playlist[self.current_index]['song']}")
+
+        # Restaurar estados de mute
         self._restore_mute_states()
 
+        # Iniciar reproducción
         self._control_channels('play')
-        self._update_metadata()  # Método para cargar metadatos
+
+        # Actualizar metadatos (portada, letras, etc.)
+        self._update_metadata()
+
+        # Actualizar UI
         self._update_playback_ui('Activa')
         self.playback_state = "Activa"
+
+        # Aplicar volumen
         self.set_volume(self.volume)
+
+        # Actualizar menú de letras
         self.update_lyrics_menu_state()
+
+        print("✅ Reproducción iniciada correctamente")
+
+
+
+
+
+    def show_cache_debug_info(self) -> str:
+        """Muestra información de debug del cache"""
+        try:
+            audio_stats = self.lazy_audio.cache.get_stats()
+            image_stats = self.lazy_images.cache.get_stats()
+            lyrics_stats = self.lazy_lyrics.cache.get_stats()
+
+            info = f"""
+                    🔍 ESTADÍSTICAS DE CACHE:
+                    ├─ Audio: {audio_stats['size']}/{audio_stats['max_size']} ({audio_stats['utilization']:.1f}%)
+                    ├─ Imágenes: {image_stats['size']}/{image_stats['max_size']} ({image_stats['utilization']:.1f}%)
+                    ├─ Letras: {lyrics_stats['size']}/{lyrics_stats['max_size']} ({lyrics_stats['utilization']:.1f}%)
+                    └─ Total elementos: {audio_stats['size'] + image_stats['size'] + lyrics_stats['size']}
+                
+                    🎵 CANCIÓN ACTUAL: {self.playlist[self.current_index]['artist'] + ' - ' + self.playlist[self.current_index]['song'] if self.current_index >= 0 else 'Ninguna'}
+                    📊 PLAYLIST: {len(self.playlist)} canciones
+                    🔊 ESTADO: {self.playback_state}
+            """
+
+            return info.strip()
+
+        except Exception as e:
+            error_msg = f"Error obteniendo estadísticas: {e}"
+            print(error_msg)
+            return error_msg
 
     def toggle_play_pause(self):
         if self.playback_state == "Activa":
@@ -1627,67 +1786,163 @@ class AudioPlayer(QMainWindow):
         self.update_lyrics_menu_state()
 
     def _update_metadata(self):
-        """Método modificado para usar lazy loading de imágenes y letras"""
-        song = self.playlist[self.current_index]
-        path = song["path"]
+        """Método corregido para usar lazy loading de imágenes y letras"""
+        try:
+            song = self.playlist[self.current_index]
+            path = Path(song["path"])
+            lrc_path = path / "lyrics.lrc"
 
-        # # Actualizar título de ventana
-        title = f"{song['artist']} - {song['song']}"
-        self.title_bar.title.setText(title)
+            # Actualizar título de ventana
+            title = f"{song['artist']} - {song['song']}"
+            self.title_bar.title.setText(title)
+            print(f"📝 Título actualizado: {title}")
 
-        # Cargar portada usando lazy loading
-        cover_pixmap = self.lazy_images.load_cover_lazy(path, (500, 500))
-        self.cover_label.setPixmap(cover_pixmap)
+            # Cargar portada usando lazy loading (async)
+            def load_cover_async():
+                try:
+                    cover_pixmap = self.lazy_images.load_cover_lazy(path, (500, 500))
+                    self.cover_loaded.emit(cover_pixmap)
+                    print("🖼️ Portada cargada")
+                except Exception as e:
+                    print(f"❌ Error cargando portada async: {e}")
 
-        # Cargar letras usando lazy loading
-        lyrics_path = path / "lyrics.lrc"
-        if lyrics_path.exists():
-            self.load_lyrics(lyrics_path)
-        else:
-            self.lyrics_text.clear()
+            def load_lyrics_async():
+                try:
+                    # Verificar si el archivo existe primero
+                    if not lrc_path.exists():
+                        self.lyrics_not_found.emit()
+                        return
 
-        # Precargar recursos de las siguientes canciones
-        self._preload_adjacent_resources()
+                    # Usar el lazy manager para cargar las letras
+                    lyrics_data = self.lazy_lyrics.load_lyrics_lazy(path)
+                    self.lyrics_loaded.emit(lyrics_data)
+
+
+                except Exception as e:
+                    print(f"❌ Error cargando letras: {e}")
+                    self.lyrics_error.emit(str(e))
+
+             # Ejecutar carga asíncrona
+            threading.Thread(target=load_cover_async, daemon=True).start()
+            threading.Thread(target=load_lyrics_async, daemon=True).start()
+
+            # Precargar recursos de las siguientes canciones
+            self._preload_adjacent_resources()
+
+        except Exception as e:
+            print(f"❌ Error actualizando metadatos: {e}")
+
+    def get_cache_stats(self) -> dict:
+        """Obtiene estadísticas completas de uso de cache"""
+        try:
+            audio_stats = self.lazy_audio.cache.get_stats()
+            image_stats = self.lazy_images.cache.get_stats()
+            lyrics_stats = self.lazy_lyrics.cache.get_stats()
+
+            total_hits = audio_stats['hits'] + image_stats['hits'] + lyrics_stats['hits']
+            total_requests = total_hits + audio_stats['misses'] + image_stats['misses'] + lyrics_stats['misses']
+
+            return {
+                "audio_cache": audio_stats,
+                "image_cache": image_stats,
+                "lyrics_cache": lyrics_stats,
+                "total_cached_items": (
+                        audio_stats['size'] + image_stats['size'] + lyrics_stats['size']
+                ),
+                "overall_hit_rate": (total_hits / max(1, total_requests) * 100),
+                "memory_utilization": {
+                    "audio": audio_stats['utilization'],
+                    "images": image_stats['utilization'],
+                    "lyrics": lyrics_stats['utilization']
+                }
+            }
+        except Exception as e:
+            print(f"❌ Error obteniendo estadísticas: {e}")
+            return {
+                "error": str(e),
+                "total_cached_items": 0,
+                "overall_hit_rate": 0,
+                "memory_utilization": {"audio": 0, "images": 0, "lyrics": 0}
+            }
+
 
     def _preload_adjacent_resources(self):
-        """Precarga recursos de canciones adyacentes"""
+        """Precarga recursos de canciones adyacentes de forma optimizada"""
         if not self.playlist:
             return
 
-        # Precargar audio de las siguientes 2 canciones
-        self.lazy_audio.preload_next_songs(self.playlist, self.current_index, count=2)
+        def preload_worker():
+            try:
+                print("🔄 Iniciando precarga de recursos adyacentes...")
 
-        # Precargar letras de canciones adyacentes
-        self.lazy_lyrics.preload_lyrics(self.playlist, self.current_index)
+                # Precargar audio de las siguientes 2 canciones
+                self.lazy_audio.preload_next_songs(self.playlist, self.current_index, count=2)
 
-        # Precargar portadas de canciones adyacentes
-        def preload_covers():
-            for offset in [-1, 1]:
-                idx = (self.current_index + offset) % len(self.playlist)
-                if 0 <= idx < len(self.playlist):
-                    song_path = self.playlist[idx]["path"]
-                    self.lazy_images.load_cover_lazy(song_path, (500, 500))
+                # Precargar letras de canciones adyacentes
+                self.lazy_lyrics.preload_lyrics(self.playlist, self.current_index)
 
-        thread = threading.Thread(target=preload_covers, daemon=True)
-        thread.start()
+                # Precargar portadas de canciones adyacentes
+                for offset in [-1, 1]:
+                    try:
+                        idx = (self.current_index + offset) % len(self.playlist)
+                        if 0 <= idx < len(self.playlist):
+                            song_path = Path(self.playlist[idx]["path"])
+                            cache_key = f"cover_{song_path}_(500, 500)"
 
-    def get_cache_stats(self) -> dict:
-        """Obtiene estadísticas detalladas de uso de cache"""
-        return {
-            "audio_cache_size": len(self.lazy_audio.cache._cache),
-            "image_cache_size": len(self.lazy_images.cache._cache),
-            "lyrics_cache_size": len(self.lazy_lyrics.cache._cache),
-            "total_cached_items": (
-                    len(self.lazy_audio.cache._cache) +
-                    len(self.lazy_images.cache._cache) +
-                    len(self.lazy_lyrics.cache._cache)
-            ),
-            "current_song": (
-                f"{self.playlist[self.current_index]['artist']} - {self.playlist[self.current_index]['song']}"
-                if self.current_index >= 0 and self.playlist else "Ninguna"
-            ),
-            "playlist_size": len(self.playlist)
-        }
+                            # Solo precargar si no está en cache
+                            if cache_key not in self.lazy_images.cache._cache:
+                                self.lazy_images.load_cover_lazy(song_path, (500, 500))
+                                print(
+                                    f"🖼️ Portada precargada: {self.playlist[idx]['artist']} - {self.playlist[idx]['song']}")
+                    except Exception as e:
+                        print(f"❌ Error precargando portada {offset}: {e}")
+
+                print("✅ Precarga completada")
+
+            except Exception as e:
+                print(f"❌ Error en precarga general: {e}")
+
+        # Ejecutar en hilo separado para no bloquear
+        threading.Thread(target=preload_worker, daemon=True).start()
+
+    def cleanup_resources_manual(self):
+        """Limpia recursos manualmente y muestra estadísticas"""
+        try:
+            print("🧹 Iniciando limpieza manual de recursos...")
+
+            # Obtener estadísticas antes
+            before_stats = self.get_cache_stats()
+            print(f"📊 Antes - Total elementos: {before_stats['total_cached_items']}")
+
+            # Limpiar caches
+            self.lazy_audio.cache.clear()
+            self.lazy_images.cache.clear()
+            self.lazy_lyrics.cache.clear()
+
+            # Obtener estadísticas después
+            after_stats = self.get_cache_stats()
+            print(f"📊 Después - Total elementos: {after_stats['total_cached_items']}")
+
+            # Mostrar mensaje al usuario
+            styled_message_box(
+                self,
+                "Limpieza Completa",
+                f"Cache limpiado exitosamente.\n"
+                f"Elementos eliminados: {before_stats['total_cached_items'] - after_stats['total_cached_items']}\n"
+                f"Memoria liberada aproximada: {(before_stats['total_cached_items'] - after_stats['total_cached_items']) * 2:.1f}MB",
+                QMessageBox.Icon.Information
+            )
+
+            print("✅ Limpieza manual completada")
+
+        except Exception as e:
+            print(f"❌ Error en limpieza manual: {e}")
+            styled_message_box(
+                self,
+                "Error",
+                f"Error durante la limpieza: {str(e)}",
+                QMessageBox.Icon.Warning
+            )
 
 
     def load_lyrics(self, file_path):
@@ -1723,7 +1978,6 @@ class AudioPlayer(QMainWindow):
         # Actualizar al cargar lyrics
         self.update_lyrics_menu_state()
 
-
         # Conectar al temporizador de actualización
         self.lyrics_timer = QTimer(self)
         self.lyrics_timer.timeout.connect(self.update_lyrics_display)
@@ -1731,16 +1985,29 @@ class AudioPlayer(QMainWindow):
 
     def update_lyrics_display(self):
         """Actualiza el texto según el tiempo actual de reproducción"""
-        if not self.lyrics or not self.playback_state == "Activa":
-            return
+        try:
+            if not self.lyrics or not self.playback_state == "Activa":
+                return
 
-        current_time = self.progress_song.value() / 1000  # Convertir ms a segundos
+            # Obtener tiempo actual en segundos con decimales
+            current_time = self.progress_song.value() / 1000.0
 
-        # Buscar la letra correspondiente
-        for i, (tiempo, texto) in enumerate(self.lyrics):
-            if current_time >= tiempo and (i == len(self.lyrics) - 1 or current_time < self.lyrics[i + 1][0]):
-                self.lyrics_text.setText(texto)
-                break
+            # Buscar la letra correspondiente
+            current_lyric = None
+            for time_stamp, text in self.lyrics:
+                if current_time >= time_stamp:
+                    current_lyric = text
+                else:
+                    break  # Los lyrics están ordenados, podemos salir
+
+
+            # Solo actualizar si hay un lyric válido y es diferente al anterio
+            if current_lyric and current_lyric != getattr(self, 'last_lyric', None):
+                self.lyrics_text.setHtml(current_lyric)
+                self.last_lyric = current_lyric
+
+        except Exception as e:
+            print(f"❌ Error actualizando letras: {e}")
 
     def update_lyrics_menu_state(self):
         """Actualiza el estado de las opciones del menú"""
@@ -1925,19 +2192,35 @@ class AudioPlayer(QMainWindow):
                 )
 
     def update_status(self):
-        """Método modificado para incluir estadísticas de cache"""
-        # Obtener estadísticas de cache
-        cache_stats = self.get_cache_stats()
+        """Método mejorado para incluir estadísticas de cache optimizadas"""
+        try:
+            # Solo calcular estadísticas cada 5 segundos para no impactar rendimiento
+            current_time = time.time()
+            if not hasattr(self, '_last_stats_update'):
+                self._last_stats_update = 0
 
-        status_parts = [
-            f"Canciones: {len(self.playlist)}",
-            f"Reproducción: {self.playback_state.capitalize()}",
-            self._format_demucs_progress(),
-            f"Cache: {cache_stats['total_cached_items']} elementos",
-            f"Fecha: {datetime.now().strftime('%A - %d/%m/%Y')}",
-            f"Hora: {datetime.now().strftime('%H:%M')}"
-        ]
-        self.status_bar.showMessage(" | ".join(status_parts))
+            if current_time - self._last_stats_update > 5.0:
+                cache_stats = self.get_cache_stats()
+                self._cached_stats = cache_stats
+                self._last_stats_update = current_time
+            else:
+                cache_stats = getattr(self, '_cached_stats', {'total_cached_items': 0})
+
+            status_parts = [
+                f"Canciones: {len(self.playlist)}",
+                f"Reproducción: {self.playback_state.capitalize()}",
+                self._format_demucs_progress(),
+                f"Cache: {cache_stats.get('total_cached_items', 0)} elementos",
+                f"Fecha: {datetime.now().strftime('%A - %d/%m/%Y')}",
+                f"Hora: {datetime.now().strftime('%H:%M')}"
+            ]
+
+            self.status_bar.showMessage(" | ".join(status_parts))
+
+        except Exception as e:
+            print(f"❌ Error actualizando status: {e}")
+            # Status de emergencia
+            self.status_bar.showMessage(f"Canciones: {len(self.playlist)} | Estado: {self.playback_state}")
 
     def _format_demucs_progress(self):
         """Genera la barra ASCII de progreso"""
@@ -2054,7 +2337,6 @@ class DemucsWorker(QObject):
                     break
         except Exception as e:
             print(f"No se pudo extraer portada: {str(e)}")
-            # shutil.copy(resource_path('images/main_window/default.png'), self.base_path / "cover.png")
 
     def _create_json(self):
         data = {
