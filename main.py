@@ -10,8 +10,8 @@ import json
 from datetime import datetime
 import time
 import pygame
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QPoint, QRect, QObject, QThread, QPointF
-from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QPoint, QRect, QObject, QThread, QPointF, QUrl
+from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon,QDesktopServices
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
                              QPushButton, QSlider, QStatusBar, QMessageBox,
@@ -33,17 +33,53 @@ class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Sobre Playit")
-        self.setFixedSize(400, 550)
+        self.setFixedSize(450, 550)
         logo=resource_path('images/main_window/about.png')
         version=resource_path('images/main_window/version.png')
         about_text = f"""
+        <style>
+        li{{color:#b23c56;}}
+        sub{{color:#c5c6c8;font-family: Arial, Helvetica, sans-serif;}}
+        </style>
         <center><img src="{version}"></center>
         <p>Reproductor de Audio que permite separación de pistas usando Demucs.</p>
-        <p>Desarrollado por RavilesX.</p>
-        <a>ravilesx@gmail.com</a>
-        <p>Software de uso libre</p>
-        <p>Donaciones en Paypal:</p>
-        <img src="{logo}">                
+        <b>Caracteristicas:</b>
+        <p>A) Separación en 4 pistas:</p>
+        <li>:: Batería</li>
+        <li>:: Voz</li>
+        <li>:: Bajo</li>
+        <li>:: Demas instrumentos</li>
+        <p>B) Control de volumen General</p>
+        <p>C) Control de volumen Individual para cada track</p>
+        <li>:: Clic sobre el instrumento para mutear</li>
+        <li>:: Slider para bajar o subir el volumen</li>
+        <p>D) Botones para control de reproducción</p>
+        <li>:: Reproducir anterior</li>
+        <li>:: Play/Pausa</li>
+        <li>:: Reproducir Siguiente</li>
+        <li>:: Detener reproducción</li>
+        <p>E) Barra indicadora de progreso</p>
+        <p>F) Mostrar Portada/Cover de Album</p>
+        <p>G) Mostrar Letras/Lyrics</p>
+        <p>H) Playlist</p>
+        <li>* Desacoplable, puede colocarse a la dercha o izquierda</li>
+        <p>I) Barra de Estado con información útil</p>
+        <p>J) Selección de Carpeta para cargar la Playlist</p>
+        <p>K) Dividir audio</p>
+        <li>:: Selección de archivo Mp3</li>
+        <li>:: Botón para extraer desde el nombre de archivo el nombre de artista/canción</li>
+        <li>:: Opción para usar GPU en caso de tener instalado GPU Nvidia y el software CUDA</li>
+        <li>:: Una vez completada la division, se agrega a la carpeta 'music_library' y no se tiene que dividir de nuevo</li>
+        <p>L) Eliminar pistas de la playlist</p>
+        <p>M) Buscar en playlist</p>
+        <p>N) Modificar Lyrics tempo de la cancion actual</p>
+        <li>:: Adelantar la visualización 0.5 segundos</li>
+        <li>:: Retrasar la visualización 0.5 segundos</li>
+        <p>O) Limpiar la caché cargada</p>
+        <sub>ESTE SOFTWARE SE PROPORCIONA 'TAL CUAL', SIN GARANTÍAS DE NINGÚN TIPO, YA SEAN EXPRESAS O IMPLÍCITAS, INCLUYENDO, PERO NO LIMITADO A, GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO, LOS AUTORES O COLABORADORES SERÁN RESPONSABLES DE DAÑOS DIRECTOS, INDIRECTOS, INCIDENTALES, ESPECIALES, EJEMPLARES O CONSECUENTES (INCLUYENDO, PERO NO LIMITADO A, LA ADQUISICIÓN DE BIENES O SERVICIOS SUSTITUTOS; LA PÉRDIDA DE USO, DATOS O BENEFICIOS; O LA INTERRUPCIÓN DEL NEGOCIO) DE CUALQUIER MANERA CAUSADOS Y BAJO CUALQUIER TEORÍA DE RESPONSABILIDAD, YA SEA POR CONTRATO, RESPONSABILIDAD ESTRICTA O AGRAVIO (INCLUYENDO NEGLIGENCIA O DE OTRA MANERA) QUE SURJA DE CUALQUIER FORMA DEL USO DE ESTE SOFTWARE, INCLUSO SI SE HA AVISADO DE LA POSIBILIDAD DE TALES DAÑOS.</sub>
+        <p>Desarrollado por: RavilesX</p><p>Email: ravilesx@gmail.com</p>
+        <p>Software Libre para uso personal</p>
+        
         """
 
         self.text_edit = QTextEdit()
@@ -51,7 +87,7 @@ class AboutDialog(QDialog):
         self.text_edit.setHtml(about_text)
         self.text_edit.setStyleSheet("""
                             QTextEdit {
-                                color: white;
+                                color: #fc5490;
                                 background: transparent;
                                 border: 0px;
                                 padding-top:2px;
@@ -60,17 +96,29 @@ class AboutDialog(QDialog):
                         """)
 
 
-        self.ok_btn = QPushButton()
-        self.ok_btn.setFixedSize(70, 70)
-        self.ok_btn.setObjectName("aceptar_btn")
-        bg_image(self.ok_btn, "images/split_dialog/aceptar_btn.png")
-        self.ok_btn.clicked.connect(self.accept)
+        self.paypal_btn = QPushButton()
+        self.paypal_btn.setFixedSize(70, 70)
+        self.paypal_btn.setObjectName("aceptar_btn")
+        bg_image(self.paypal_btn, "images/main_window/paypal.png")
+        self.paypal_btn.clicked.connect(self.open_paypal_donation)
 
         layout = QVBoxLayout()
         layout.addWidget(self.text_edit)
-        layout.addWidget(self.ok_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(QLabel("Se aceptan donaciones, por un mundo con software libre"), alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.paypal_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        # layout.addWidget(self.ok_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.setLayout(layout)
+
+    def open_paypal_donation(self):
+        """Abre el enlace de PayPal en el navegador predeterminado"""
+        paypal_url = QUrl("https://www.paypal.com/donate/?business=TULUZ868SK2BG&no_recurring=0&item_name=Desarrollo+apps+sin+fines+de+lucro%2C+no+necesitas+donar+para+usarlas%2C+pero+me+ayuda+y+me+inspira+a+seguir+creando+soluciones.&currency_code=USD")  # ¡REEMPLAZA CON TU ENLACE!
+
+        if not paypal_url.isValid():
+            print("¡Enlace de PayPal inválido!")
+            return
+
+        QDesktopServices.openUrl(paypal_url)
 
 class CustomDial(QDial):
     def __init__(self, parent=None):
@@ -494,6 +542,7 @@ class AudioPlayer(QMainWindow):
         self.lyrics_text = QTextEdit()
         self.lyrics_text.setAcceptRichText(True)
         self.lyrics_text.setReadOnly(True)
+        self.lyrics_font_size = 36
         self.tabs.addTab(self.cover_label, "Portada")
         self.tabs.addTab(self.lyrics_text, "Letras")
         self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
@@ -1056,73 +1105,6 @@ class AudioPlayer(QMainWindow):
         dialog.exec()
 
 
-
-    # def init_ui(self):
-    #     # Widget principal
-    #     self.main_frame = QFrame()   #Contenedor principal con bordes
-    #     self.main_frame.setStyleSheet("""
-    #                 QFrame {
-    #                     background: transparent;
-    #                     border: 1px solid #404040;
-    #                     border-radius: 8px;
-    #                 }
-    #             """)
-    #     #layout principal
-    #     layout = QVBoxLayout(self.main_frame)
-    #     layout.setContentsMargins(0, 0, 0, 0)
-    #     layout.setSpacing(0)
-    #
-    #     # Añadir barra de título
-    #     self.title_bar = TitleBar(self)
-    #     layout.addWidget(self.title_bar)
-    #
-    #     self.size_grips = {
-    #         "top": SizeGrip(self, "top"),
-    #         "bottom": SizeGrip(self, "bottom"),
-    #         "left": SizeGrip(self, "left"),
-    #         "right": SizeGrip(self, "right"),
-    #         "top_left": SizeGrip(self, "top_left"),
-    #         "top_right": SizeGrip(self, "top_right"),
-    #         "bottom_left": SizeGrip(self, "bottom_left"),
-    #         "bottom_right": SizeGrip(self, "bottom_right"),
-    #     }
-    #
-    #     self.setCentralWidget(self.main_frame)
-    #
-    #     self.create_tab_widget()
-    #
-    #     ## Barra de progreso
-    #     self.progress_song = QProgressBar(self)
-    #     self.progress_song.setFormat("00:00 / 00:00")  # Formato inicial
-    #     self.progress_song.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    #     self.progress_song.setTextVisible(True)
-    #     self.progress_song.setFixedHeight(20)
-    #     self.progress_song.setEnabled(False)
-    #
-    #
-    #     layout.addWidget(self.tabs)
-    #     layout.addLayout(self.track_buttons())
-    #     layout.addWidget(self.progress_song)
-    #     layout.addLayout(self.init_leds())
-    #
-    #     # Conexiones de control de audio
-    #     self.play_btn.clicked.connect(self.toggle_play_pause)
-    #     self.prev_btn.clicked.connect(self.play_previous)
-    #     self.next_btn.clicked.connect(self.play_next)
-    #     self.stop_btn.clicked.connect(self.stop_playback)
-    #
-    #
-    #     # Playlist Dock
-    #     self.playlist_dock = QDockWidget(self)
-    #     self.playlist_widget = QListWidget()
-    #     self.playlist_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-    #     self.playlist_widget.setFixedWidth(500)
-    #     self.playlist_dock.setWidget(self.playlist_widget)
-    #     self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.playlist_dock)
-    #     self.playlist_widget.itemDoubleClicked.connect(self.play_selected)
-    #     self.playlist_widget.itemActivated.connect(self.play_selected)
-
-
     def keyPressEvent(self, event):
         """Maneja la tecla Delete para eliminar elementos seleccionados"""
         if event.key() == Qt.Key.Key_Delete:
@@ -1184,25 +1166,32 @@ class AudioPlayer(QMainWindow):
         self.addAction(search_action)
 
         # Opción de modificar Lyrics
-        lyrics_menu = options_menu.addMenu("Modificar Lyrics Tempo")
+        lyrics_menu = options_menu.addMenu("Modificar Lyrics")
         self.advance_action = QAction(">> Mostrar Despues 0.5s", self)
         self.advance_action.setShortcut("Ctrl+Shift+Right")
         self.advance_action.triggered.connect(lambda: self.adjust_lyrics_timing(0.5))
+
 
         self.delay_action = QAction("<< Mostrar Antes 0.5s", self)
         self.delay_action.setShortcut("Ctrl+Shift+Left")
         self.delay_action.triggered.connect(lambda: self.adjust_lyrics_timing(-0.5))
 
+        self.increase_font_action = QAction("Incrementar tamaño", self)
+        self.increase_font_action.setShortcut("Ctrl+Shift+Up")
+        self.increase_font_action.triggered.connect(self.increase_lyrics_font)
+
+        self.decrease_font_action = QAction("Disminuir tamaño", self)
+        self.decrease_font_action.setShortcut("Ctrl+Shift+Down")
+        self.decrease_font_action.triggered.connect(self.decrease_lyrics_font)
+
         lyrics_menu.addAction(self.advance_action)
         lyrics_menu.addAction(self.delay_action)
+        lyrics_menu.addAction(self.increase_font_action)
+        lyrics_menu.addAction(self.decrease_font_action)
 
         cleanup_action = QAction("Limpiar Cache", self)
         cleanup_action.triggered.connect(self.cleanup_resources_manual)
         options_menu.addAction(cleanup_action)
-
-        debug_action = QAction("Mostrar Estado Cache", self)
-        debug_action.triggered.connect(lambda: print(self.show_cache_debug_info()))
-        help_menu.addAction(debug_action)
 
         about_action = QAction("Sobre Playit", self)
         about_action.triggered.connect(self.show_about_dialog)
@@ -1211,6 +1200,27 @@ class AudioPlayer(QMainWindow):
         # Inicialmente deshabilitadas
         self.advance_action.setEnabled(False)
         self.delay_action.setEnabled(False)
+
+    def increase_lyrics_font(self):
+        """Aumenta el tamaño de la fuente en 2 puntos"""
+        self.lyrics_font_size += 2
+        if self.lyrics_font_size > 80:  # Límite máximo
+            self.lyrics_font_size = 20
+        self.apply_lyrics_font()
+
+    def decrease_lyrics_font(self):
+        """Disminuye el tamaño de la fuente en 2 puntos"""
+        self.lyrics_font_size -= 2
+        if self.lyrics_font_size < 20:  # Límite mínimo
+            self.lyrics_font_size = 80
+        self.apply_lyrics_font()
+
+    def apply_lyrics_font(self):
+        self.lyrics_text.setStyleSheet(f"""
+                                    QTextEdit {{
+                                        font-size: {self.lyrics_font_size}px;                                
+                                    }}
+                                """)
 
     def _toggle_playlist_visibility(self, state):
         """Maneja la acción del menú"""
@@ -1738,31 +1748,6 @@ class AudioPlayer(QMainWindow):
 
 
 
-    def show_cache_debug_info(self) -> str:
-        """Muestra información de debug del cache"""
-        try:
-            audio_stats = self.lazy_audio.cache.get_stats()
-            image_stats = self.lazy_images.cache.get_stats()
-            lyrics_stats = self.lazy_lyrics.cache.get_stats()
-
-            info = f"""
-                    🔍 ESTADÍSTICAS DE CACHE:
-                    ├─ Audio: {audio_stats['size']}/{audio_stats['max_size']} ({audio_stats['utilization']:.1f}%)
-                    ├─ Imágenes: {image_stats['size']}/{image_stats['max_size']} ({image_stats['utilization']:.1f}%)
-                    ├─ Letras: {lyrics_stats['size']}/{lyrics_stats['max_size']} ({lyrics_stats['utilization']:.1f}%)
-                    └─ Total elementos: {audio_stats['size'] + image_stats['size'] + lyrics_stats['size']}
-                
-                    🎵 CANCIÓN ACTUAL: {self.playlist[self.current_index]['artist'] + ' - ' + self.playlist[self.current_index]['song'] if self.current_index >= 0 else 'Ninguna'}
-                    📊 PLAYLIST: {len(self.playlist)} canciones
-                    🔊 ESTADO: {self.playback_state}
-            """
-
-            return info.strip()
-
-        except Exception as e:
-            error_msg = f"Error obteniendo estadísticas: {e}"
-            print(error_msg)
-            return error_msg
 
     def toggle_play_pause(self):
         if self.playback_state == "Activa":
