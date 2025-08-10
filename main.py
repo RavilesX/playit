@@ -3,6 +3,8 @@ import os
 import threading
 from pathlib import Path
 
+from einops.layers import torch
+
 TORCH_AVAILABLE = False
 import subprocess
 import sys
@@ -43,12 +45,14 @@ class AboutDialog(QDialog):
         </style>
         <center><img src="{version}"></center>
         <p>Reproductor de Audio que permite separación de pistas usando Demucs.</p>
-        <b>Caracteristicas:</b>
+        <b>CARACTERISTICAS:</b>
         <p>A) Separación en 4 pistas:</p>
         <li>:: Batería</li>
         <li>:: Voz</li>
         <li>:: Bajo</li>
         <li>:: Demas instrumentos</li>
+        <li>:: - Función de separar pistas en queue -</li>
+        <li>:: - Proceso No bloqueante de la interfaz -</li>
         <p>B) Control de volumen General</p>
         <p>C) Control de volumen Individual para cada track</p>
         <li>:: Clic sobre el instrumento para mutear</li>
@@ -417,6 +421,9 @@ class AudioPlayer(QMainWindow):
         self.current_index = -1
         self.playback_state = "Detenido"
         self.current_channels = []
+        self.demucs_queue = []  # Cola de trabajos pendientes
+        self.processing_multiple = False  # Indica si hay múltiples trabajos
+        self.lyrics_lock = threading.Lock()
 
         # Variables de audio
         self.volume = 25
@@ -442,6 +449,7 @@ class AudioPlayer(QMainWindow):
         self.processing = False
         self.demucs_progress = 0
         self.demucs_active = False
+        self.last_in_queue = {"artist":"","song":""}
 
         # Variables de diálogos
         self.split_dialog = None
@@ -674,10 +682,6 @@ class AudioPlayer(QMainWindow):
         self.update_lyrics_menu_state()
 
 
-
-
-
-
     def _handle_lyrics_error(self, error_msg):
         print(f"Error cargando lyrics: {error_msg}")
         self.lyrics_text.setHtml(f'<center style="color: #ff6666;">Error: {error_msg}</center>')
@@ -882,36 +886,36 @@ class AudioPlayer(QMainWindow):
                 f.write(f"Error checking Python: {str(e)}\n")
 
 
-    def normalized_path(self, path):
-        """Normaliza rutas para todos los sistemas operativos"""
-        return Path(path).resolve().as_posix().lower()
-
-    def _organize_demucs_output(self, demucs_dir, target_dir, input_path):
-        """Reorganiza los archivos generados por Demucs"""
-        try:
-            # Crear directorio si no existe
-            target_dir.mkdir(parents=True, exist_ok=True)
-
-            # Nombre base del archivo original (sin extensión)
-            song_name = input_path.stem
-
-            for stem in ["drums", "bass", "other", "vocals"]:
-                # Ruta de origen (archivo WAV generado por Demucs)
-                src = self.normalized_path(demucs_dir / "separated/htdemucs_ft" / song_name / f"{stem}.mp3")
-
-                # Ruta de destino (MP3 convertido)
-                dest = self.normalized_path(target_dir / "separated/")
-
-                #mover archivos
-
-                shutil.move(str(src),str(dest))
-
-            shutil.rmtree(demucs_dir/"separated/htdemucs_ft")
-
-
-        except Exception as e:
-            print(f"Error organizando archivos: {str(e)}")
-            raise
+    # def normalized_path(self, path):
+    #     """Normaliza rutas para todos los sistemas operativos"""
+    #     return Path(path).resolve().as_posix().lower()
+    #
+    # def _organize_demucs_output(self, demucs_dir, target_dir, input_path):
+    #     """Reorganiza los archivos generados por Demucs"""
+    #     try:
+    #         # Crear directorio si no existe
+    #         target_dir.mkdir(parents=True, exist_ok=True)
+    #
+    #         # Nombre base del archivo original (sin extensión)
+    #         song_name = input_path.stem
+    #
+    #         for stem in ["drums", "bass", "other", "vocals"]:
+    #             # Ruta de origen (archivo WAV generado por Demucs)
+    #             src = self.normalized_path(demucs_dir / "separated/htdemucs_ft" / song_name / f"{stem}.mp3")
+    #
+    #             # Ruta de destino (MP3 convertido)
+    #             dest = self.normalized_path(target_dir / "separated/")
+    #
+    #             #mover archivos
+    #
+    #             shutil.move(str(src),str(dest))
+    #
+    #         shutil.rmtree(demucs_dir/"separated/htdemucs_ft")
+    #
+    #
+    #     except Exception as e:
+    #         print(f"Error organizando archivos: {str(e)}")
+    #         raise
 
 
     def init_leds(self):
@@ -1277,19 +1281,19 @@ class AudioPlayer(QMainWindow):
             # Incrementar para siguiente iteración
             self.search_index += 1
 
-    def select_search_result(self):
-        """Selecciona el siguiente resultado en la lista"""
-        if not self.search_results:
-            return
-
-        # Obtener y seleccionar el ítem
-        item = self.search_results[self.search_index]
-        item.setSelected(True)
-        self.playlist_widget.scrollToItem(item)
-
-
-        # Actualizar índice para siguiente búsqueda
-        self.search_index = (self.search_index + 1) % len(self.search_results)
+    # def select_search_result(self):
+    #     """Selecciona el siguiente resultado en la lista"""
+    #     if not self.search_results:
+    #         return
+    #
+    #     # Obtener y seleccionar el ítem
+    #     item = self.search_results[self.search_index]
+    #     item.setSelected(True)
+    #     self.playlist_widget.scrollToItem(item)
+    #
+    #
+    #     # Actualizar índice para siguiente búsqueda
+    #     self.search_index = (self.search_index + 1) % len(self.search_results)
 
     def show_split_dialog(self):
         """Muestra diálogo de forma no modal"""
@@ -1305,62 +1309,153 @@ class AudioPlayer(QMainWindow):
 
 
     def process_song(self, artist, song, use_gpu, file_path):
-        """Método existente modificado para trabajo en segundo plano"""
-        self.demucs_active = True
-        self.demucs_progress = 0
+        """Agrega el trabajo a la cola y procesa si no hay trabajos activos"""
+        # Crear objeto de trabajo
+        job = {
+            'artist': artist,
+            'song': song,
+            'use_gpu': use_gpu,
+            'file_path': file_path
+        }
+
+        #Agrega o reemplaza la ultima cancion del queue
+        self.last_in_queue["artist"] = artist
+        self.last_in_queue["song"] = song
+
+        # Agregar a la cola
+        self.demucs_queue.append(job)
+
+        # Si no hay proceso activo, iniciar procesamiento
+        if not self.demucs_active:
+            self._process_next_job()
+        else:
+            self.processing_multiple = True
+            self.update_status()
+
+    def _process_next_job(self):
+        """Procesa el siguiente trabajo en la cola"""
+        if not self.demucs_queue:
+            self.demucs_active = False
+            self.processing_multiple = False
+            self.update_status()
+            return
+
+        # Obtener el próximo trabajo
+        job = self.demucs_queue.pop(0)
+        self._start_demucs_job(job)
+
+    def _start_demucs_job(self, job):
+        """Inicia un trabajo de separación con Demucs"""
         try:
+            # Limpiar cualquier trabajo anterior
+            self._cleanup_previous_job()
+
+            self.demucs_active = True
+            self.demucs_progress = 0
             self.processing = True
             self.update_status()
 
-            # Crear worker para Demucs
+            # Crear worker y thread nuevos
             self.demucs_worker = DemucsWorker(
-                artist, song, use_gpu, file_path
+                job['artist'],
+                job['song'],
+                job['use_gpu'],
+                job['file_path']
             )
             self.demucs_thread = QThread()
 
-            # Configurar conexiones
+            # Configurar conexiones más simples
             self.demucs_worker.moveToThread(self.demucs_thread)
             self.demucs_thread.started.connect(self.demucs_worker.run)
             self.demucs_worker.finished.connect(self._on_demucs_success)
             self.demucs_worker.error.connect(self._handle_demucs_error)
-            self.demucs_worker.finished.connect(self.demucs_thread.quit)
-            self.demucs_thread.finished.connect(self.demucs_thread.deleteLater)
             self.demucs_worker.progress.connect(self._update_demucs_progress)
 
-            # Ocultar diálogo si está visible
-            if self.split_dialog:
-                self.split_dialog.hide()
+            # Conexión de limpieza
+            self.demucs_thread.finished.connect(self.demucs_thread.deleteLater)
 
             # Iniciar proceso
             self.demucs_thread.start()
 
         except Exception as e:
+            self._handle_demucs_error(f"Error iniciando separación: {str(e)}")
+            self._process_next_job()
+
+    def _cleanup_previous_job(self):
+        """Limpia recursos de trabajos anteriores"""
+        try:
+            if self.demucs_thread and self.demucs_thread.isRunning():
+                self.demucs_thread.quit()
+                self.demucs_thread.wait(1000)  # Esperar hasta 1 segundo
+        except:
             pass
+
+        try:
+            if self.demucs_worker:
+                self.demucs_worker.deleteLater()
+        except:
+            pass
+
+        self.demucs_thread = None
+        self.demucs_worker = None
 
 
     def _on_demucs_success(self):
-        self.demucs_active = False
-        self.update_status()
-        """Manejo de finalización exitosa"""
-        self.processing = False
         self.scan_folder(Path("music_library"))
-        self.playlist_widget.setCurrentRow(self.playlist_widget.count() - 1)
-        styled_message_box(self, "Éxito", "Separación finalizada correctamente",QMessageBox.Icon.Information)
+        """Maneja la finalización exitosa de un trabajo"""
+        # Primero limpiar el trabajo actual
+        self._cleanup_current_job()
+
+        # Procesar siguiente trabajo en la cola
+        self._process_next_job()
+
+        # Mostrar mensaje solo si fue el último trabajo
+        if not self.demucs_queue and self.processing_multiple:
+            self.processing_multiple = False
+            self.audio_files = {'drums.mp3', 'vocals.mp3', 'bass.mp3', 'other.mp3'}
+
+            self.verification_timer = QTimer(self)
+            self.verification_timer.timeout.connect(self.check_files)
+            self.verification_timer.start(30000)  # 30 segundos
+            self.check_files()
+
+    def check_files(self,):
+        """Verifica si los archivos están disponibles"""
+        for archivo in self.audio_files:
+            file = f"music_library/{self.last_in_queue['artist']}/{self.last_in_queue['song']}/separated/{archivo}"
+            if os.path.exists(file):
+                self.verification_timer.stop()
+                self.scan_folder(Path("music_library"))
+
+    def _cleanup_current_job(self):
+        """Limpia el trabajo actual sin afectar la cola"""
+        self.demucs_active = False
+        self.processing = False
+        self.update_status()
+
+        # Limpiar referencias
+        if self.demucs_thread and self.demucs_thread.isRunning():
+            self.demucs_thread.quit()
+            self.demucs_thread.wait(500)  # Esperar medio segundo
+
+        self.demucs_thread = None
+        self.demucs_worker = None
 
     def _handle_demucs_error(self, error_msg):
-        self.demucs_active = False
-        self.update_status()
-        """Manejo unificado de errores"""
-        self.processing = False
-        styled_message_box(self, "Error", error_msg,QMessageBox.Icon.Critical)
-        if self.split_dialog:
-            self.split_dialog.show()
+        """Maneja errores y pasa al siguiente trabajo"""
+        # Primero limpiar el trabajo actual
+        self._cleanup_current_job()
 
-    def _update_progress(self, value):
-        self.progress_song.setValue(value)
+        # Mostrar error solo si es el único trabajo
+        if not self.processing_multiple:
+            styled_message_box(self, "Error", error_msg, QMessageBox.Icon.Critical)
+
+        # Continuar con el siguiente trabajo
+        self._process_next_job()
+
 
     def _update_demucs_progress(self, value):
-        """Actualiza el progreso y refresca la barra"""
+        """Actualiza el progreso del trabajo actual"""
         self.demucs_progress = value
         self.update_status()
 
@@ -1520,7 +1615,6 @@ class AudioPlayer(QMainWindow):
                         result.get("syncedLyrics")):
                     synced_lyrics = result["syncedLyrics"]
                     break
-
             self._write_lyrics_file(output_dir, artist, song, synced_lyrics)
 
         except Exception as e:
@@ -2177,7 +2271,6 @@ class AudioPlayer(QMainWindow):
                 )
 
     def update_status(self):
-        """Método mejorado para incluir estadísticas de cache optimizadas"""
         try:
             # Solo calcular estadísticas cada 5 segundos para no impactar rendimiento
             current_time = time.time()
@@ -2195,10 +2288,15 @@ class AudioPlayer(QMainWindow):
                 f"Canciones: {len(self.playlist)}",
                 f"Reproducción: {self.playback_state.capitalize()}",
                 self._format_demucs_progress(),
+                # Mostrar estado de la cola
+                f"En cola: {len(self.demucs_queue)}" if self.demucs_queue else "",
                 f"Cache: {cache_stats.get('total_cached_items', 0)} elementos",
                 f"Fecha: {datetime.now().strftime('%A - %d/%m/%Y')}",
                 f"Hora: {datetime.now().strftime('%H:%M')}"
             ]
+
+            # Filtrar partes vacías
+            status_parts = [part for part in status_parts if part]
 
             self.status_bar.showMessage(" | ".join(status_parts))
 
@@ -2208,20 +2306,26 @@ class AudioPlayer(QMainWindow):
             self.status_bar.showMessage(f"Canciones: {len(self.playlist)} | Estado: {self.playback_state}")
 
     def _format_demucs_progress(self):
-        """Genera la barra ASCII de progreso"""
-        if not self.demucs_active:
-            return "Separando: Detenido"
+        """Muestra progreso incluyendo estado de cola"""
+        if not self.demucs_active and not self.demucs_queue:
+            return ""
 
-        bars = 10
-        filled = int(self.demucs_progress / 100 * bars)
-        progress_bar = '■' * filled + '▢' * (bars - filled)
-        return f"Separando: {progress_bar} {self.demucs_progress}%"
+        if self.demucs_active:
+            bars = 10
+            filled = int(self.demucs_progress / 100 * bars)
+            progress_bar = '■' * filled + '▢' * (bars - filled)
+            return f"Separando: {progress_bar} {self.demucs_progress}%"
+
+        if self.demucs_queue:
+            return f"En cola: {len(self.demucs_queue)} trabajos"
+
+        return ""
 
 
 class DemucsWorker(QObject):
     finished = pyqtSignal()
     error = pyqtSignal(str)
-    progress = pyqtSignal(int)  # Nueva señal para progreso
+    progress = pyqtSignal(int)
 
     def __init__(self, artist, song, use_gpu, src_path):
         super().__init__()
@@ -2230,14 +2334,14 @@ class DemucsWorker(QObject):
         self.use_gpu = use_gpu
         self.src_path = Path(src_path)
         self.base_path = Path("music_library") / artist / song
+        self.process = None
+        self.file_check_timer = None
+        self.file_verification_attempts = 0
 
-    def check_cuda(self):
-
-        if not TORCH_AVAILABLE:
-            return False
-        return torch.cuda.is_available()
-
-
+    # def check_cuda(self):
+    #     if not TORCH_AVAILABLE:
+    #         return False
+    #     return torch.cuda.is_available()
 
     def run(self):
         try:
@@ -2255,15 +2359,10 @@ class DemucsWorker(QObject):
                     'start_new_session': True
                 }
 
-            self.check_cuda()
+            # self.check_cuda()
             # Paso 1: Crear estructura de carpetas
             self.progress.emit(5)
             self.base_path.mkdir(parents=True, exist_ok=True)
-
-            # Paso 2: Copiar archivo original
-            # self.progress.emit(10)
-            # dest_file = self.base_path / f"{self.song}.mp3"
-            # shutil.copy(self.src_path, dest_file)
 
             # Paso 3: Extraer portada
             self.progress.emit(15)
@@ -2273,27 +2372,9 @@ class DemucsWorker(QObject):
             self.progress.emit(17)
             self._create_json()
 
-            # Paso 5: Ejecutar Demucs
+            # Paso 5: Ejecutar Demucs con subprocess.run
             self.progress.emit(26)
-                # Usa el comando de terminal directamente
-            cmd = [
-                "demucs",
-                "-n", "htdemucs_ft",
-                "-o", str(self.base_path / "separated"),
-                "--mp3",
-                str(self.src_path)
-            ]
-
-            # Ejecuta el comando
-            result = subprocess.run(
-                cmd,
-                **kwargs,
-                text=True,
-                encoding='utf-8',
-                timeout=3600,  # 1 hora máximo
-                check=True
-            )
-
+            self._run_demucs_safe()
 
             # Paso 6: Organizar archivos generados
             self.progress.emit(83)
@@ -2302,14 +2383,120 @@ class DemucsWorker(QObject):
             self.progress.emit(100)
             self.finished.emit()
 
-
-        except subprocess.TimeoutExpired:
-            error_msg = "Demucs excedió el tiempo límite (1 hora)"
-            self.error.emit(error_msg)
-        except subprocess.CalledProcessError as e:
-            self.error.emit(f"Demucs failed with code {e.returncode}")
         except Exception as e:
             self.error.emit(f"Error: {str(e)}")
+
+                # Usa el comando de terminal directamente
+        #     cmd = [
+        #         "demucs",
+        #         "-n", "htdemucs_ft",
+        #         "-o", str(self.base_path / "separated"),
+        #         "--mp3",
+        #         str(self.src_path)
+        #     ]
+        #
+        #     # Ejecuta el comando
+        #     result = subprocess.run(
+        #         cmd,
+        #         **kwargs,
+        #         text=True,
+        #         encoding='utf-8',
+        #         timeout=3600,  # 1 hora máximo
+        #         check=True
+        #     )
+        #
+        #
+        #     # Paso 6: Organizar archivos generados
+        #     self.progress.emit(83)
+        #     self._organize_output()
+        #
+        #     self.progress.emit(100)
+        #     self.finished.emit()
+        #
+        #
+        # except subprocess.TimeoutExpired:
+        #     error_msg = "Demucs excedió el tiempo límite (1 hora)"
+        #     self.error.emit(error_msg)
+        # except subprocess.CalledProcessError as e:
+        #     self.error.emit(f"Demucs failed with code {e.returncode}")
+        # except Exception as e:
+        #     self.error.emit(f"Error: {str(e)}")
+
+    def _run_demucs_safe(self):
+        """Ejecuta Demucs de manera segura con manejo de tiempo de espera"""
+        try:
+            # Configuración para Windows
+            if os.name == 'nt':
+                kwargs = {
+                    'creationflags': subprocess.CREATE_NO_WINDOW,
+                    'stdout': subprocess.PIPE,
+                    'stderr': subprocess.PIPE
+                }
+            else:
+                kwargs = {
+                    'stdout': subprocess.PIPE,
+                    'stderr': subprocess.PIPE,
+                    'start_new_session': True
+                }
+
+            cmd = [
+                "demucs",
+                "-n", "htdemucs_ft",
+                "-o", str(self.base_path / "separated"),
+                "--mp3",
+                str(self.src_path)
+            ]
+
+            # Ejecutar con tiempo de espera extendido
+            result = subprocess.run(
+                cmd,
+                **kwargs,
+                text=True,
+                encoding='utf-8',
+                timeout=7200,  # 2 horas máximo
+                check=True
+            )
+
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Demucs excedió el tiempo límite (2 horas)")
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Demucs falló con código {e.returncode}"
+            if e.stderr:
+                error_msg += f"\nError: {e.stderr.strip()}"
+            raise RuntimeError(error_msg)
+        except Exception as e:
+            raise RuntimeError(f"Error ejecutando Demucs: {str(e)}")
+
+    def _verify_output_files(self, max_attempts=5, delay=2):
+        """Verifica que los archivos de salida estén completos con reintentos"""
+        required_files = ["drums.mp3", "vocals.mp3", "bass.mp3", "other.mp3"]
+        input_stem = self.src_path.stem
+
+        for attempt in range(max_attempts):
+            try:
+                # Intentar encontrar la carpeta correcta
+                possible_dirs = [
+                    self.base_path / "separated" / "htdemucs_ft" / input_stem,
+                    self.base_path / "separated" / "htdemucs_ft" / self.song
+                ]
+
+                for demucs_dir in possible_dirs:
+                    if demucs_dir.exists():
+                        # Verificar todos los archivos requeridos
+                        if all((demucs_dir / f).exists() for f in required_files):
+                            return True
+
+                # Si no se encontraron, esperar y reintentar
+                time.sleep(delay)
+
+            except Exception as e:
+                # En caso de error de acceso, registrar y continuar
+                print(f"⚠️ Error verificando archivos (intento {attempt + 1}): {str(e)}")
+                time.sleep(delay)
+
+        # Si después de todos los intentos no están los archivos
+        print(f"❌ Archivos no disponibles después de {max_attempts} intentos")
+        return False
 
     def _extract_cover(self, mp3_path):
         try:

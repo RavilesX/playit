@@ -690,9 +690,9 @@ class LazyPlaylistLoader(QObject):
                                 if self._should_stop:
                                     break
 
-                                # Validar que existe la carpeta separada
+                                # Validar que existe la carpeta y archivos separados (other.mp3)
                                 song_folder = dir_path
-                                separated_folder = song_folder / "separated"
+                                separated_folder = song_folder / "separated" / "other.mp3"
 
                                 song_info = {
                                     "artist": artist,
