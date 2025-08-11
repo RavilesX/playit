@@ -1,0 +1,184 @@
+from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRect
+from PyQt6.QtGui import QPixmap, QPainter, QIcon
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QDial
+from resources import resource_path
+import math
+
+
+class TitleBar(QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.setFixedHeight(35)
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(5, 0, 5, 0)
+
+        # Título
+        self.title = QLabel("Play It")
+        self.title.setStyleSheet("color: white; font-weight: bold;")
+
+        # Botones de control
+        self.min_btn = QPushButton()
+        self.min_btn.setIcon(QIcon(resource_path('images/main_window/min.png')))
+        self.min_btn.setIconSize(QSize(24, 24))
+        self.max_btn = QPushButton()
+        self.max_btn.setIcon(QIcon(resource_path('images/main_window/max.png')))
+        self.max_btn.setIconSize(QSize(24, 24))
+        self.close_btn = QPushButton()
+        self.close_btn.setIcon(QIcon(resource_path('images/main_window/cerrar.png')))
+        self.close_btn.setIconSize(QSize(32, 32))
+
+        # Estilos de botones
+        btn_style = """
+            QPushButton {
+                background: transparent;
+                border: none;
+                padding: 0px 0px;
+                border-radius:16px
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.1);
+            }
+            QPushButton:pressed {
+                background: rgba(255, 255, 255, 0.2);
+                border:5px solid transparent;
+            }
+            #close_btn:hover { background: #E81123; }
+        """
+        self.setStyleSheet(btn_style)
+        self.close_btn.setObjectName("close_btn")
+
+        # Conexiones
+        self.min_btn.clicked.connect(self.parent.showMinimized)
+        self.max_btn.clicked.connect(self.toggle_maximize)
+        self.close_btn.clicked.connect(self.parent.close)
+
+        # Añadir elementos al layout
+        self.layout.addWidget(self.title)
+        self.layout.addStretch()
+        self.layout.addWidget(self.min_btn)
+        self.layout.addWidget(self.max_btn)
+        self.layout.addWidget(self.close_btn)
+
+        # Variables para arrastrar ventana
+        self.draggable = True
+        self.drag_position = QPoint()
+
+    def toggle_maximize(self):
+        if self.parent.isMaximized():
+            self.parent.showNormal()
+            self.max_btn.setIcon(QIcon(resource_path('images/main_window/max.png')))
+            self.max_btn.setIconSize(QSize(24, 24))
+        else:
+            self.parent.showMaximized()
+            self.max_btn.setIcon(QIcon(resource_path('images/main_window/rest.png')))
+            self.max_btn.setIconSize(QSize(24, 24))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.draggable:
+            self.drag_position = event.globalPosition().toPoint() - self.parent.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and self.draggable:
+            self.parent.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
+
+
+class CustomDial(QDial):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.background = QPixmap(resource_path('images/main_window/dial_bg.png'))  # Imagen de fondo
+        self.knob = QPixmap(resource_path('images/main_window/knob.png'))  # Imagen del knob
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Dibujar fondo escalado proporcionalmente
+        bg_scaled = self.background.scaled(
+            self.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        painter.drawPixmap(self.rect(), bg_scaled)
+
+        # Calcular posición del knob
+        angle = self._calculate_angle()
+        pos = self._knob_position(angle)
+
+        # Dibujar knob rotado y centrado
+        knob_scaled = self.knob.scaled(
+            20, 20,  # Tamaño deseado del knob
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        painter.translate(pos)
+        painter.rotate(angle + 135)  # Ajustar ángulo inicial
+        painter.drawPixmap(-knob_scaled.width() // 2, -knob_scaled.height() // 2, knob_scaled)
+        painter.resetTransform()
+
+    def _calculate_angle(self):
+        """Convierte el valor del dial a ángulo (0-270 grados)"""
+        return 270 * (self.value() - self.minimum()) / (self.maximum() - self.minimum())
+
+    def _knob_position(self, angle):
+        """Calcula posición (x,y) basada en ángulo y radio"""
+        radius = min(self.width(), self.height()) // 2 - 25  # Radio ajustable
+        center = self.rect().center()
+        theta = math.radians(angle + 135)  # Ajuste de coordenadas Qt
+
+        return QPointF(
+            center.x() + radius * math.cos(theta),
+            center.y() + radius * math.sin(theta))
+
+class SizeGrip(QWidget):
+    def __init__(self, parent, position):
+        super().__init__(parent)
+        self.parent = parent
+        self.position = position
+        self.setFixedSize(8, 8)
+        self.setCursor(self.get_cursor())
+
+    def get_cursor(self):
+        return {
+            "top": Qt.CursorShape.SizeVerCursor,
+            "bottom": Qt.CursorShape.SizeVerCursor,
+            "left": Qt.CursorShape.SizeHorCursor,
+            "right": Qt.CursorShape.SizeHorCursor,
+            "top_left": Qt.CursorShape.SizeFDiagCursor,
+            "top_right": Qt.CursorShape.SizeBDiagCursor,
+            "bottom_left": Qt.CursorShape.SizeBDiagCursor,
+            "bottom_right": Qt.CursorShape.SizeFDiagCursor,
+        }[self.position]
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.mouse_pos = event.globalPosition().toPoint()
+            self.window_pos = self.parent.pos()
+            self.window_size = self.parent.size()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            delta = event.globalPosition().toPoint() - self.mouse_pos
+            new_rect = QRect(self.window_pos, self.window_size)
+
+            if self.position == "top":
+                new_rect.adjust(0, delta.y(), 0, 0)
+            elif self.position == "bottom":
+                new_rect.adjust(0, 0, 0, delta.y())
+            elif self.position == "left":
+                new_rect.adjust(delta.x(), 0, 0, 0)
+            elif self.position == "right":
+                new_rect.adjust(0, 0, delta.x(), 0)
+            elif self.position == "top_left":
+                new_rect.adjust(delta.x(), delta.y(), 0, 0)
+            elif self.position == "top_right":
+                new_rect.adjust(0, delta.y(), delta.x(), 0)
+            elif self.position == "bottom_left":
+                new_rect.adjust(delta.x(), 0, 0, delta.y())
+            elif self.position == "bottom_right":
+                new_rect.adjust(0, 0, delta.x(), delta.y())
+
+            self.parent.setGeometry(new_rect.normalized())
+            event.accept()

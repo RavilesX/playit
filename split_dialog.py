@@ -177,7 +177,6 @@ class SplitDialog(QDialog):
         )
         self.hide()  # Oculta en lugar de cerrar
         self.dialog_closed.emit()  # Notificar que se ocultó
-        #self.accept()
 
     def extract_name(self):
         teto=self.file_path.text()

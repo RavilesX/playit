@@ -1,6 +1,6 @@
 QProgressBar{
 	background: #292a2d;
-	border-radius:5px;
+	border-radius:10px;
 	color: white;
 	margin-right: 30px;
 	margin-left: 30px;
@@ -42,7 +42,9 @@ QListWidget{
 }
 
 QListWidget:item:focus {
-    border: 2px solid white;  /* Borde blanco cuando tiene foco */
+    border: 1px solid #cf4ee3;  /* Borde morado cuando tiene foco */
+	background: black;
+	
 }
 
 
@@ -77,11 +79,46 @@ QListWidget QScrollBar::sub-page:vertical {
 }
 
 
+/* Estilos para el "handle" (barra deslizante) */
+QScrollBar:vertical {
+    background: transparent;      /* Color de la barra deslizante */
+	border:0px;
+}
+
+    
+/* Personalización del 'thumb' (la parte móvil de la barra) */
+QScrollBar::handle:vertical {
+	background: qlineargradient(
+	spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
+stop:0 rgba(132,76,171,255),
+stop:1 rgba(122,130,255,255)); 
+	min-height: 20px;
+	border-radius: 6px;
+}
+
+/* Efecto hover en el thumb */
+QScrollBar::handle:vertical:hover {
+	background: qlineargradient(
+	spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
+stop:0 rgba(122,130,255,255),
+stop:1 rgba(132,76,171,255));  /* Color rosa claro */
+}
+
+/* Flechas de incremento/decremento (opcional) */
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+	height: 0px;
+}
+
+/* Fondo cuando se presiona la barra */
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+	background: transparent;
+}
+
+
 QTextEdit{
     font-family: "Saira Stencil One";
-    color: white;
-    font-size: 30px;
-	padding-top:120px;
+    font-size: 36px;
+	padding-top:60px;
 }
 
 p{
@@ -145,6 +182,29 @@ QPushButton#aceptar_btn:pressed{
 }
 
 QPushButton#aceptar_btn:hover{
+    border-radius:20px;
+    padding:7px;
+}
+
+
+QPushButton#paypal_btn{
+    background-color: transparent;
+    border-radius:30px;
+    padding:3px;
+}
+
+QPushButton#palypal_btn:disabled{
+    background-color: transparent;
+    border-radius:30px;
+    padding:3px;
+}
+
+QPushButton#palypal_btn:pressed{
+    padding:7px;
+    border:5px solid transparent;
+}
+
+QPushButton#palypal_btn:hover{
     border-radius:20px;
     padding:7px;
 }
