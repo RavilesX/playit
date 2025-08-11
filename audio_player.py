@@ -9,7 +9,7 @@ from datetime import datetime
 import time
 import pygame
 from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QThread
-from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon, QBrush
+from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                              QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
                              QPushButton, QSlider, QStatusBar, QMessageBox,
@@ -920,7 +920,6 @@ class AudioPlayer(QMainWindow):
         # Conectar al método existente
         self.split_dialog.show()
 
-
     def process_song(self, artist, song, use_gpu, file_path):
         """Agrega el trabajo a la cola y procesa si no hay trabajos activos"""
         # Crear objeto de trabajo
@@ -1448,6 +1447,9 @@ class AudioPlayer(QMainWindow):
         # Actualizar menú de letras
         self.update_lyrics_menu_state()
 
+        # Actualizar resaltado en playlist
+        self.highlight_current_song()
+
         print("✅ Reproducción iniciada correctamente")
 
     def toggle_play_pause(self):
@@ -1470,6 +1472,44 @@ class AudioPlayer(QMainWindow):
         self.progress_song.setValue(0)
         self.current_channels = []
         self.update_lyrics_menu_state()
+
+        # Quitar resaltado de la canción actual
+        self.clear_song_highlight()
+
+    def highlight_current_song(self):
+        """Resalta la canción actual en la playlist con estilo especial"""
+        # Primero quitar cualquier resaltado existente
+        self.clear_song_highlight()
+
+        # Resaltar el ítem actual si es válido
+        if 0 <= self.current_index < self.playlist_widget.count():
+            item = self.playlist_widget.item(self.current_index)
+
+            # Crear fuente cursiva
+            font = item.font()
+            font.setItalic(True)
+            item.setFont(font)
+
+            # Establecer color de texto
+            item.setForeground(QColor("black"))
+            item.setBackground(QColor("#eea1cd"))
+
+            # Seleccionar y hacer scroll al ítem
+            self.playlist_widget.setCurrentItem(item)
+
+    def clear_song_highlight(self):
+        """Elimina cualquier resaltado de la playlist"""
+        for i in range(self.playlist_widget.count()):
+            item = self.playlist_widget.item(i)
+
+            # Restaurar fuente normal
+            font = item.font()
+            font.setItalic(False)
+            item.setFont(font)
+
+            # Restaurar color de texto por defecto
+            item.setForeground(QColor("white"))
+            item.setBackground(QColor("transparent"))
 
     def _update_metadata(self):
         """Método corregido para usar lazy loading de imágenes y letras"""
