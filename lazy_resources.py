@@ -1,11 +1,10 @@
-import weakref
 from pathlib import Path
 from typing import Dict, Optional, Any, Callable
 from functools import lru_cache
 import threading
 import time
 import json
-from PyQt6.QtCore import QObject, pyqtSignal, QThread, QTimer, Qt
+from PyQt6.QtCore import QObject, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap, QIcon
 import pygame
 from PIL import Image
@@ -78,7 +77,7 @@ class ResourceCache:
 
                 return resource
             except Exception as e:
-                print(f"❌ Error cargando recurso {key}: {e}")
+                #print(f"❌ Error cargando recurso {key}: {e}")
                 return None
 
     def _schedule_cleanup(self):
@@ -168,12 +167,12 @@ class LazyAudioManager:
             # Usar semáforo para limitar cargas concurrentes
             with self._loading_semaphore:
                 try:
-                    print(f"🔄 Cargando audio: {path.name}")
+                    ##print(f"🔄 Cargando audio: {path.name}")
                     sounds = []
                     separated_path = path / "separated"
 
                     if not separated_path.exists():
-                        print(f"⚠️ Carpeta separated no existe: {separated_path}")
+                        ##print(f"⚠️ Carpeta separated no existe: {separated_path}")
                         return None
 
                     # Verificar que todos los archivos existan antes de cargar
@@ -191,7 +190,7 @@ class LazyAudioManager:
                             missing_files.append(f"{track_name}.mp3")
 
                     if missing_files:
-                        print(f"❌ Archivos faltantes: {', '.join(missing_files)}")
+                        ##print(f"❌ Archivos faltantes: {', '.join(missing_files)}")
                         return None
 
                     # Cargar todos los archivos
@@ -199,64 +198,61 @@ class LazyAudioManager:
                         try:
                             sound = pygame.mixer.Sound(str(track_path))
                             sounds.append(sound)
-                            print(f"✅ Cargado: {track_name}")
+                            ##print(f"✅ Cargado: {track_name}")
                         except pygame.error as e:
-                            print(f"❌ Error cargando {track_name}: {e}")
+                            ##print(f"❌ Error cargando {track_name}: {e}")
                             return None
 
                     if len(sounds) == 4:
-                        print(f"🎵 Audio completamente cargado: {path.name}")
+                        ##print(f"🎵 Audio completamente cargado: {path.name}")
                         return sounds
                     else:
-                        print(f"❌ Solo {len(sounds)}/4 pistas cargadas")
+                        ##print(f"❌ Solo {len(sounds)}/4 pistas cargadas")
                         return None
 
                 except Exception as e:
-                    print(f"❌ Error general cargando audio de {path}: {e}")
+                    ##print(f"❌ Error general cargando audio de {path}: {e}")
                     return None
 
         return self.cache.get(cache_key, loader)
 
-    def preload_next_songs(self, playlist: list, current_index: int, count: int = 2):
-        """Precarga las siguientes canciones de forma inteligente"""
-
-        def preload_worker():
-            preloaded = 0
-            for i in range(1, count + 1):
-                try:
-                    next_index = (current_index + i) % len(playlist)
-                    if next_index >= len(playlist):
-                        continue
-
-                    song_path = Path(playlist[next_index]["path"])
-                    cache_key = f"audio_{song_path}"
-
-                    # Solo precargar si no está ya en cache
-                    if cache_key not in self.cache._cache:
-                        song_info = playlist[next_index]
-                        print(f"🔄 Precargando: {song_info['artist']} - {song_info['song']}")
-
-                        result = self.load_audio_lazy(song_path)
-                        if result:
-                            preloaded += 1
-                            print(f"✅ Precargado exitoso: {song_info['song']}")
-                        else:
-                            print(f"❌ Falló precarga: {song_info['song']}")
-                    #else:
-                        print(f"📋 Ya en cache: {playlist[next_index]['song']}")
-
-                except Exception as e:
-                    print(f"❌ Error precargando canción {i}: {e}")
-
-            print(f"🎯 Precarga completada: {preloaded}/{count} canciones cargadas")
-
-        # Cancelar preload anterior si existe y está corriendo
-        if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
-            print("⏹️ Cancelando precarga anterior...")
-            return
-
-        self.preload_thread = threading.Thread(target=preload_worker, daemon=True)
-        self.preload_thread.start()
+    # def preload_next_songs(self, playlist: list, current_index: int, count: int = 2):
+    #     """Precarga las siguientes canciones de forma inteligente"""
+    #
+    #     def preload_worker():
+    #         preloaded = 0
+    #         for i in range(1, count + 1):
+    #             try:
+    #                 next_index = (current_index + i) % len(playlist)
+    #                 if next_index >= len(playlist):
+    #                     continue
+    #
+    #                 song_path = Path(playlist[next_index]["path"])
+    #                 cache_key = f"audio_{song_path}"
+    #
+    #                 # Solo precargar si no está ya en cache
+    #                 if cache_key not in self.cache._cache:
+    #                     song_info = playlist[next_index]
+    #
+    #                     result = self.load_audio_lazy(song_path)
+    #                     if result:
+    #                         preloaded += 1
+    #                         ##print(f"✅ Precargado exitoso: {song_info['song']}")
+    #                     # else:
+    #                          ##print(f"❌ Falló precarga: {song_info['song']}")
+    #
+    #             except Exception as e:
+    #                 print(f"❌ Error precargando canción {i}: {e}")
+    #
+    #         ##print(f"🎯 Precarga completada: {preloaded}/{count} canciones cargadas")
+    #
+    #     # Cancelar preload anterior si existe y está corriendo
+    #     if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
+    #         #print("⏹️ Cancelando precarga anterior...")
+    #         return
+    #
+    #     self.preload_thread = threading.Thread(target=preload_worker, daemon=True)
+    #     self.preload_thread.start()
 
     def cleanup_old_audio(self, current_path: Path, keep_count: int = 3):
         """Limpia audio manteniendo los elementos más relevantes"""
@@ -285,8 +281,8 @@ class LazyAudioManager:
                         self.cache.remove(key)
                         removed_count += 1
 
-                if removed_count > 0:
-                    print(f"🧹 Limpieza de audio: {removed_count} elementos removidos")
+                # if removed_count > 0:
+                #     print(f"🧹 Limpieza de audio: {removed_count} elementos removidos")
 
         except Exception as e:
             print(f"❌ Error limpiando cache de audio: {e}")
@@ -328,7 +324,7 @@ class LazyImageManager:
                     self.cache._access_times[cache_key] = time.time()
 
             except Exception as e:
-                print(f"❌ Error cargando imagen por defecto: {e}")
+                #print(f"❌ Error cargando imagen por defecto: {e}")
                 pixmap = QPixmap(size[0], size[1])
                 pixmap.fill(Qt.GlobalColor.darkGray)
 
@@ -344,7 +340,7 @@ class LazyImageManager:
                 try:
                     pixmap = QPixmap(path)
                     if pixmap.isNull():
-                        print(f"⚠️ No se pudo cargar icono: {path}")
+                        #print(f"⚠️ No se pudo cargar icono: {path}")
                         # Crear icono de placeholder
                         pixmap = QPixmap(size[0] if size else 32, size[1] if size else 32)
                         pixmap.fill(Qt.GlobalColor.lightGray)
@@ -357,7 +353,7 @@ class LazyImageManager:
                         )
                     return QIcon(pixmap)
                 except Exception as e:
-                    print(f"❌ Error cargando icono {path}: {e}")
+                    #print(f"❌ Error cargando icono {path}: {e}")
                     # Icono de error
                     error_pixmap = QPixmap(size[0] if size else 32, size[1] if size else 32)
                     error_pixmap.fill(Qt.GlobalColor.red)
@@ -372,14 +368,14 @@ class LazyImageManager:
         def loader():
             with self._loading_semaphore:
                 try:
-                    print(f"🖼️ Cargando portada: {path.name}")
+                    #print(f"🖼️ Cargando portada: {path.name}")
 
                     # Estrategia 1: Portada específica guardada
                     cover_path = path / "cover.png"
                     if cover_path.exists():
                         pixmap = QPixmap(str(cover_path))
                         if not pixmap.isNull():
-                            print(f"✅ Portada cargada desde archivo: {cover_path}")
+                            #print(f"✅ Portada cargada desde archivo: {cover_path}")
                             return pixmap.scaled(
                                 size[0], size[1],
                                 aspectRatioMode=Qt.AspectRatioMode.KeepAspectRatio,
@@ -393,7 +389,7 @@ class LazyImageManager:
                             try:
                                 pixmap = QPixmap(str(img_file))
                                 if not pixmap.isNull():
-                                    print(f"✅ Portada encontrada en carpeta: {img_file.name}")
+                                    #print(f"✅ Portada encontrada en carpeta: {img_file.name}")
                                     return pixmap.scaled(
                                         size[0], size[1],
                                         aspectRatioMode=Qt.AspectRatioMode.KeepAspectRatio,
@@ -418,7 +414,7 @@ class LazyImageManager:
                         if main_mp3:
                             extracted = self.extract_cover_from_mp3(main_mp3)
                             if extracted and not extracted.isNull():
-                                print(f"✅ Portada extraída de MP3: {main_mp3.name}")
+                                #print(f"✅ Portada extraída de MP3: {main_mp3.name}")
                                 return extracted.scaled(
                                     size[0], size[1],
                                     aspectRatioMode=Qt.AspectRatioMode.KeepAspectRatio,
@@ -426,11 +422,11 @@ class LazyImageManager:
                                 )
 
                     # Estrategia 4: Fallback a imagen por defecto
-                    print(f"⚠️ No se encontró portada, usando por defecto")
+                    #print(f"⚠️ No se encontró portada, usando por defecto")
                     return self.get_default_pixmap(size)
 
                 except Exception as e:
-                    print(f"❌ Error cargando portada de {path}: {e}")
+                    #print(f"❌ Error cargando portada de {path}: {e}")
                     return self.get_default_pixmap(size)
 
         return self.cache.get(cache_key, loader)
@@ -438,11 +434,11 @@ class LazyImageManager:
     def extract_cover_from_mp3(self, mp3_path: Path) -> QPixmap:
         """Extrae portada de MP3 con múltiples intentos y validaciones"""
         try:
-            print(f"🔍 Extrayendo portada de: {mp3_path.name}")
+            #print(f"🔍 Extrayendo portada de: {mp3_path.name}")
             audio = MP3(str(mp3_path))
 
             if not (hasattr(audio, 'tags') and audio.tags):
-                print("⚠️ No hay tags en el archivo MP3")
+                #print("⚠️ No hay tags en el archivo MP3")
                 return self.get_default_pixmap()
 
             # Buscar tags de imagen (APIC)
@@ -470,13 +466,13 @@ class LazyImageManager:
 
                         pixmap = QPixmap()
                         if pixmap.loadFromData(buffer.getvalue()):
-                            print("✅ Portada extraída exitosamente")
+                            #print("✅ Portada extraída exitosamente")
                             return pixmap
-                        else:
-                            print("⚠️ Error convirtiendo imagen a QPixmap")
+                        #else:
+                            #print("⚠️ Error convirtiendo imagen a QPixmap")
 
                     except Exception as e:
-                        print(f"⚠️ Error procesando tag de imagen: {e}")
+                        #print(f"⚠️ Error procesando tag de imagen: {e}")
                         continue
 
         except Exception as e:
@@ -508,7 +504,7 @@ class LazyImageManager:
                 except Exception as e:
                     print(f"❌ Error precargando portada {offset}: {e}")
 
-            print(f"🖼️ Portadas precargadas: {preloaded}")
+            #print(f"🖼️ Portadas precargadas: {preloaded}")
 
         thread = threading.Thread(target=preload_worker, daemon=True)
         thread.start()
@@ -527,7 +523,7 @@ class LazyLyricsManager:
         def loader():
             lyrics_path = path / "lyrics.lrc"
             if not lyrics_path.exists():
-                print(f"⚠️ Archivo de letras no encontrado: {lyrics_path}")
+                #print(f"⚠️ Archivo de letras no encontrado: {lyrics_path}")
                 return []
 
             try:
@@ -565,11 +561,11 @@ class LazyLyricsManager:
                 if current_time is not None and current_text:
                     lyrics.append((current_time, '\n'.join(current_text)))
 
-                print(f"🎤 Letras cargadas: {len(lyrics)} bloques de texto")
+                #print(f"🎤 Letras cargadas: {len(lyrics)} bloques de texto")
                 return lyrics
 
             except Exception as e:
-                print(f"❌ Error cargando letras de {path}: {e}")
+                #print(f"❌ Error cargando letras de {path}: {e}")
                 return []
 
         return self.cache.get(cache_key, loader)
@@ -595,7 +591,7 @@ class LazyLyricsManager:
                             if result:
                                 preloaded += 1
 
-                print(f"🎤 Letras precargadas: {preloaded}")
+                #print(f"🎤 Letras precargadas: {preloaded}")
 
             except Exception as e:
                 print(f"❌ Error precargando letras: {e}")
@@ -634,14 +630,14 @@ class LazyPlaylistLoader(QObject):
     def load_playlist_lazy(self, path: Path, callback=None):
         """Carga playlist de forma optimizada con progreso"""
         if self.loading_thread and self.loading_thread.is_alive():
-            print("⚠️ Ya hay una carga en progreso, cancelando anterior...")
+            #print("⚠️ Ya hay una carga en progreso, cancelando anterior...")
             self._should_stop = True
             self.loading_thread.join(timeout=2.0)  # Esperar hasta 2 segundos
 
         self._should_stop = False
 
         def load_worker():
-            print(f"🔍 Iniciando escaneo de carpeta: {path}")
+            #print(f"🔍 Iniciando escaneo de carpeta: {path}")
             songs_found = 0
             files_processed = 0
 
@@ -649,20 +645,20 @@ class LazyPlaylistLoader(QObject):
                 # Primero contar archivos JSON para progreso
                 json_files = list(path.rglob("*.json"))
                 total_files = len(json_files)
-                print(f"📄 Encontrados {total_files} archivos JSON")
+                #print(f"📄 Encontrados {total_files} archivos JSON")
 
                 if total_files == 0:
-                    print("⚠️ No se encontraron archivos JSON en la carpeta")
+                    #print("⚠️ No se encontraron archivos JSON en la carpeta")
                     self.loading_finished.emit()
                     return
 
                 for json_file in json_files:
                     if self._should_stop:
-                        print("🛑 Carga cancelada por el usuario")
+                        #print("🛑 Carga cancelada por el usuario")
                         break
 
                     files_processed += 1
-                    print(f"📖 Procesando ({files_processed}/{total_files}): {json_file.name}")
+                    #print(f"📖 Procesando ({files_processed}/{total_files}): {json_file.name}")
 
                     # Emitir progreso
                     self.loading_progress.emit(files_processed, total_files)
@@ -673,7 +669,7 @@ class LazyPlaylistLoader(QObject):
 
                         # Validar estructura del JSON
                         if not isinstance(data, dict):
-                            print(f"⚠️ Formato JSON inválido en {json_file}")
+                            #print(f"⚠️ Formato JSON inválido en {json_file}")
                             continue
 
                         dir_path = json_file.parent
@@ -683,7 +679,7 @@ class LazyPlaylistLoader(QObject):
                                 break
 
                             if not isinstance(songs, dict):
-                                print(f"⚠️ Estructura de canciones inválida para {artist}")
+                                #print(f"⚠️ Estructura de canciones inválida para {artist}")
                                 continue
 
                             for song, song_data in songs.items():
@@ -702,7 +698,7 @@ class LazyPlaylistLoader(QObject):
                                     "json_data": song_data
                                 }
 
-                                print(f"🎵 Canción encontrada: {artist} - {song}")
+                                #print(f"🎵 Canción encontrada: {artist} - {song}")
                                 self.playlist_updated.emit(song_info)
                                 songs_found += 1
 
@@ -710,27 +706,27 @@ class LazyPlaylistLoader(QObject):
                                 time.sleep(0.001)
 
                     except json.JSONDecodeError as e:
-                        print(f"❌ Error JSON en {json_file}: {e}")
+                        #print(f"❌ Error JSON en {json_file}: {e}")
                         continue
                     except Exception as e:
-                        print(f"❌ Error procesando {json_file}: {e}")
+                        #print(f"❌ Error procesando {json_file}: {e}")
                         continue
 
-                print(f"✅ Carga completada. Canciones encontradas: {songs_found}")
+                #print(f"✅ Carga completada. Canciones encontradas: {songs_found}")
 
             except Exception as e:
                 print(f"❌ Error fatal en carga de playlist: {e}")
             finally:
                 self.loading_finished.emit()
 
-        print("🚀 Iniciando hilo de carga de playlist...")
+        #print("🚀 Iniciando hilo de carga de playlist...")
         self.loading_thread = threading.Thread(target=load_worker, daemon=True)
         self.loading_thread.start()
 
     def stop_loading(self):
         """Detiene la carga en curso"""
         if self.is_loading():
-            print("⏹️ Deteniendo carga de playlist...")
+            #print("⏹️ Deteniendo carga de playlist...")
             self._should_stop = True
 
     def is_loading(self) -> bool:
@@ -773,7 +769,7 @@ class LazyAudioPlayer:
         # Timer para limpieza automática
         self._setup_cleanup_timer()
 
-        print("🎵 LazyAudioPlayer inicializado con lazy loading completo")
+        #print("🎵 LazyAudioPlayer inicializado con lazy loading completo")
 
     def _setup_cleanup_timer(self):
         """Configura timer de limpieza automática"""
@@ -782,7 +778,7 @@ class LazyAudioPlayer:
             self.cleanup_timer = QTimer()
             self.cleanup_timer.timeout.connect(self._periodic_cleanup)
             self.cleanup_timer.start(self.config.cleanup_interval_ms)
-            print(f"⏰ Timer de limpieza configurado: {self.config.cleanup_interval_ms}ms")
+            #print(f"⏰ Timer de limpieza configurado: {self.config.cleanup_interval_ms}ms")
         except Exception as e:
             print(f"⚠️ No se pudo configurar timer de limpieza: {e}")
 
@@ -795,10 +791,10 @@ class LazyAudioPlayer:
     def load_folder_lazy(self, path: Path):
         """Carga carpeta usando lazy loading con validación"""
         if not path.exists() or not path.is_dir():
-            print(f"❌ Ruta inválida: {path}")
+            #print(f"❌ Ruta inválida: {path}")
             return False
 
-        print(f"📁 Cargando carpeta: {path}")
+        #print(f"📁 Cargando carpeta: {path}")
         self.playlist_loader.load_playlist_lazy(path)
         return True
 
@@ -811,35 +807,34 @@ class LazyAudioPlayer:
 
             if song_id not in existing_ids:
                 self.playlist.append(song_data)
-                print(f"➕ Añadida: {song_data['artist']} - {song_data['song']}")
+                #print(f"➕ Añadida: {song_data['artist']} - {song_data['song']}")
 
         except Exception as e:
             print(f"❌ Error procesando canción cargada: {e}")
 
     def _on_playlist_loaded(self):
         """Callback cuando termina de cargar la playlist"""
-        print(f"✅ Playlist completamente cargada: {len(self.playlist)} canciones")
+        #print(f"✅ Playlist completamente cargada: {len(self.playlist)} canciones")
 
     def _on_loading_progress(self, current, total):
         """Callback de progreso de carga"""
         percentage = int((current / total) * 100) if total > 0 else 0
-        print(f"📊 Progreso de carga: {current}/{total} ({percentage}%)")
+        #print(f"📊 Progreso de carga: {current}/{total} ({percentage}%)")
 
     def play_current_lazy(self):
         """Reproduce la canción actual usando lazy loading optimizado"""
         if not (0 <= self.current_index < len(self.playlist)):
-            print("❌ Índice de canción inválido")
+            #print("❌ Índice de canción inválido")
             return False
 
         song = self.playlist[self.current_index]
         song_path = Path(song["path"])
 
-        print(f"▶️ Reproduciendo: {song['artist']} - {song['song']}")
+        #print(f"▶️ Reproduciendo: {song['artist']} - {song['song']}")
 
         # Cargar audio de forma perezosa
         sounds = self.audio_manager.load_audio_lazy(song_path)
         if not sounds:
-            print("❌ No se pudo cargar el audio")
             return False
 
         # Configurar reproducción (esto dependería de tu implementación específica)
@@ -851,7 +846,6 @@ class LazyAudioPlayer:
         self.lyrics_manager.preload_lyrics(self.playlist, self.current_index)
         self.image_manager.preload_covers(self.playlist, self.current_index)
 
-        print("✅ Reproducción iniciada exitosamente")
         return True
 
     def _periodic_cleanup(self):
@@ -881,16 +875,10 @@ class LazyAudioPlayer:
             after_stats = self.get_cache_stats()
 
             cleared_items = before_stats['total_cached_items'] - after_stats['total_cached_items']
-            print(f"🧹 Limpieza completa: {cleared_items} elementos eliminados")
+            #print(f"🧹 Limpieza completa: {cleared_items} elementos eliminados")
 
         except Exception as e:
             print(f"❌ Error en limpieza completa: {e}")
-
-    # def cleanup_resources(self):
-    #     """Limpia todos los recursos cargados"""
-    #     self.audio_manager.cache.clear()
-    #     self.image_manager.cache.clear()
-    #     self.lyrics_manager.cache.clear()
 
     def get_cache_stats(self) -> dict:
         """Obtiene estadísticas completas de uso de cache"""
@@ -918,7 +906,7 @@ class LazyAudioPlayer:
                 }
             }
         except Exception as e:
-            print(f"❌ Error obteniendo estadísticas: {e}")
+            #print(f"❌ Error obteniendo estadísticas: {e}")
             return {"error": str(e)}
 
     def get_performance_report(self) -> str:
