@@ -3,13 +3,11 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout
 from resources import resource_path, bg_image
 
-
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Sobre Playit")
         self.setFixedSize(450, 550)
-        logo=resource_path('images/main_window/about.png')
         version=resource_path('images/main_window/version.png')
         about_text = f"""
         <style>
@@ -18,17 +16,17 @@ class AboutDialog(QDialog):
         </style>
         <center><img src="{version}"></center>
         <p>Reproductor de Audio que permite separación de pistas usando Demucs.</p>
-        <b>CARACTERISTICAS:</b>
+        <b>CARACTERÍSTICAS:</b>
         <p>A) Separación en 4 pistas:</p>
         <li>:: Batería</li>
         <li>:: Voz</li>
         <li>:: Bajo</li>
-        <li>:: Demas instrumentos</li>
+        <li>:: Otros instrumentos</li>
         <li>:: - Función de separar pistas en queue -</li>
         <li>:: - Proceso No bloqueante de la interfaz -</li>
         <p>B) Control de volumen General</p>
         <p>C) Control de volumen Individual para cada track</p>
-        <li>:: Clic sobre el instrumento para mutear</li>
+        <li>:: Clic sobre el instrumento para silenciar</li>
         <li>:: Slider para bajar o subir el volumen</li>
         <p>D) Botones para control de reproducción</p>
         <li>:: Reproducir anterior</li>
@@ -40,7 +38,7 @@ class AboutDialog(QDialog):
         <p>G) Mostrar Letras/Lyrics</p>
         <p>H) Playlist</p>
         <li>* Puede mostrarse/ocultarse</li>
-        <li>* Desacoplable, (puede colocarse a la dercha o izquierda)</li>
+        <li>* Desmontable, (puede colocarse a la derecha o izquierda)</li>
         <p>I) Barra de Estado con información útil</p>
         <p>J) Selección de Carpeta para cargar la Playlist</p>
         <p>K) Dividir audio</p>
@@ -137,3 +135,45 @@ class SearchDialog(QDialog):
             self.search_requested.emit(text)
         else:
             self.reject()
+
+class QueueDialog(QDialog):
+    queue_requested = pyqtSignal(str)
+
+    def __init__(self, AudioPlayer, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Canciones en Cola")
+        self.setFixedSize(400, 550)
+        queue = f"<H1 style='color: #3AABEF;'><center>Artista - Canción</center></H1>" \
+                f"<style>" \
+                "li{color:#b23c56;}" \
+                "sub{color:#c5c6c8;font-family: Arial, Helvetica, sans-serif;}" \
+                "</style><ul>\n"
+        for element in AudioPlayer.demucs_queue:
+            queue += f"<li><center>{element['artist']} - {element['song']}</center></li>\n"
+        queue += "</ul>"
+        self.queue_edit = QTextEdit()
+        self.queue_edit.setReadOnly(True)
+        self.queue_edit.setHtml(queue)
+        self.queue_edit.setObjectName("queue_text")
+        self.queue_edit.setStyleSheet("""
+                                    #queue_text {
+                                        color: #7E54AF;
+                                        background: transparent;
+                                        border: 0px;
+                                        padding-top:2px;
+                                        font-size: 16px;                                
+                                    }
+                                """)
+
+        self.btn_queue = QPushButton()
+        self.btn_queue.setObjectName("queue_btn")
+        self.btn_queue.setFixedSize(70, 70)
+        bg_image(self.btn_queue, "images/split_dialog/aceptar_btn.png")
+        self.btn_queue.clicked.connect(self.reject)
+        self.btn_queue.setDefault(True)
+        self.btn_queue.setAutoDefault(True)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.queue_edit)
+        layout.addWidget(self.btn_queue, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.setLayout(layout)
