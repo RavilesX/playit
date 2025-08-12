@@ -34,6 +34,10 @@ QTabBar::tab{
     font-weight: bold;
 }
 
+QDialog{
+	border: 2px solid #7d73e8;
+}
+
 QListWidget{
     background: rgba(255,255,255,0.1);
     font-size:18px;
@@ -148,20 +152,22 @@ QRadioButton{
 QPushButton#file_btn{
     background-color: transparent;
     border-radius:20px;
-    padding:7px;
 }
+
+QLineEdit#SongText{
+    margin-bottom: 5px;
+}
+
 
 QPushButton#file_btn:pressed{
     background-color: darkgray;
     border-radius:20px;
-    padding:7px;
     border:5px solid gray;
 }
 
 QPushButton#file_btn:hover{
     background-color: transparent;
     border-radius:20px;
-    padding:7px;
 }
 
 QPushButton#aceptar_btn{
@@ -182,6 +188,28 @@ QPushButton#aceptar_btn:pressed{
 }
 
 QPushButton#aceptar_btn:hover{
+    border-radius:20px;
+    padding:7px;
+}
+
+QPushButton#queue_btn{
+    background-color: transparent;
+    border-radius:30px;
+    padding:3px;
+}
+
+QPushButton#queue_btn:disabled{
+    background-color: transparent;
+    border-radius:30px;
+    padding:3px;
+}
+
+QPushButton#queue_btn:pressed{
+    padding:7px;
+    border:5px solid transparent;
+}
+
+QPushButton#queue_btn:hover{
     border-radius:20px;
     padding:7px;
 }
@@ -241,7 +269,6 @@ QPushButton#extract_name_btn:hover{
     border-radius:20px;
     padding:5px;
 }
-
 
 QLineEdit{
     color: white;
@@ -463,10 +490,7 @@ QPushButton#stop_btn:hover{
     padding:7px;
 }
 
-QDialog {
-    background-color: #f0f0f0;
-    padding: 10px;
-}
+
 
 QCheckBox {
     spacing:15px;
@@ -611,4 +635,3 @@ QComboBox QAbstractItemView QScrollBar::add-page:vertical,
 QComboBox QAbstractItemView QScrollBar::sub-page:vertical {
     background: transparent;
 }
-

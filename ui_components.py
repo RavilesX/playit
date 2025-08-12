@@ -20,32 +20,25 @@ class TitleBar(QWidget):
         # Botones de control
         self.min_btn = QPushButton()
         self.min_btn.setIcon(QIcon(resource_path('images/main_window/min.png')))
-        self.min_btn.setIconSize(QSize(24, 24))
+        self.min_btn.setIconSize(QSize(16, 16))
         self.max_btn = QPushButton()
         self.max_btn.setIcon(QIcon(resource_path('images/main_window/max.png')))
-        self.max_btn.setIconSize(QSize(24, 24))
+        self.max_btn.setIconSize(QSize(16, 16))
         self.close_btn = QPushButton()
         self.close_btn.setIcon(QIcon(resource_path('images/main_window/cerrar.png')))
-        self.close_btn.setIconSize(QSize(32, 32))
+        self.close_btn.setIconSize(QSize(24, 24))
 
         # Estilos de botones
-        btn_style = """
+        estilacho = """
             QPushButton {
                 background: transparent;
                 border: none;
                 padding: 0px 0px;
-                border-radius:16px
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.1);
-            }
-            QPushButton:pressed {
-                background: rgba(255, 255, 255, 0.2);
-                border:5px solid transparent;
+                border-radius:12px
             }
             #close_btn:hover { background: #E81123; }
         """
-        self.setStyleSheet(btn_style)
+        self.setStyleSheet(estilacho)
         self.close_btn.setObjectName("close_btn")
 
         # Conexiones
@@ -182,3 +175,31 @@ class SizeGrip(QWidget):
 
             self.parent.setGeometry(new_rect.normalized())
             event.accept()
+
+
+class DialogTitleBar(TitleBar):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        # Eliminar botones que no necesitamos
+        self.min_btn.setVisible(False)
+        self.max_btn.setVisible(False)
+
+        btn_style = """
+                            DialogTitleBar {
+                                background: transparent;
+                            }
+                            QPushButton {
+                                background: transparent;
+                                border: 0px;
+                                padding: 0px 0px;
+                                border-radius:12px
+                            }                    
+                            #close_btn:hover { background: #E81123; }
+                        """
+        self.setStyleSheet(btn_style)
+
+        # Conectar correctamente el cierre
+        self.close_btn.clicked.connect(parent.reject)
+
+
