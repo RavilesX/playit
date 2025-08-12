@@ -18,9 +18,8 @@ import requests
 from urllib.parse import quote
 import unicodedata
 from resources import styled_message_box, bg_image, resource_path
-from split_dialog import SplitDialog
 from ui_components import TitleBar, CustomDial, SizeGrip
-from dialogs import AboutDialog, SearchDialog, QueueDialog
+from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
 from lazy_config import LazyLoadingConfig, setup_production_lazy_loading
 from demucs_worker import DemucsWorker
@@ -915,24 +914,18 @@ class AudioPlayer(QMainWindow):
             self.search_index += 1
 
     def show_split_dialog(self):
-        """Muestra diálogo de forma no modal"""
-        if not self.demucs_available:
-            styled_message_box(self, "Función no disponible",
-                                "La separación de pistas no está disponible (falta Demucs)",QMessageBox.Icon.Warning)
-            return
-
         self.split_dialog = SplitDialog(self)
+        bg_image(self.split_dialog, 'images/split_dialog/split.png')
         self.split_dialog.process_started.connect(self.process_song)
         # Conectar al método existente
         self.split_dialog.show()
 
-    def process_song(self, artist, song, use_gpu, file_path):
+    def process_song(self, artist, song, file_path):
         """Agrega el trabajo a la cola y procesa si no hay trabajos activos"""
         # Crear objeto de trabajo
         job = {
             'artist': artist,
             'song': song,
-            'use_gpu': use_gpu,
             'file_path': file_path
         }
 
@@ -977,7 +970,6 @@ class AudioPlayer(QMainWindow):
             self.demucs_worker = DemucsWorker(
                 job['artist'],
                 job['song'],
-                job['use_gpu'],
                 job['file_path']
             )
             self.demucs_thread = QThread()
@@ -1617,8 +1609,7 @@ class AudioPlayer(QMainWindow):
                 "Limpieza Completa",
                 f"Cache limpiado exitosamente.\n"
                 f"Elementos eliminados: {before_stats['total_cached_items'] - after_stats['total_cached_items']}\n"
-                f"Memoria liberada aproximada: {(before_stats['total_cached_items'] - after_stats['total_cached_items']) * 2:.1f}MB",
-                QMessageBox.Icon.Information
+                f"Memoria liberada aproximada: {(before_stats['total_cached_items'] - after_stats['total_cached_items']) * 2:.1f}MB"
             )
 
         except Exception as e:
