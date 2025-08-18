@@ -13,11 +13,10 @@ class DemucsWorker(QObject):
     error = pyqtSignal(str)
     progress = pyqtSignal(int)
 
-    def __init__(self, artist, song, use_gpu, src_path):
+    def __init__(self, artist, song, src_path):
         super().__init__()
         self.artist = artist
         self.song = song
-        self.use_gpu = use_gpu
         self.src_path = Path(src_path)
         self.base_path = Path("music_library") / artist / song
         self.process = None

@@ -44,7 +44,6 @@ def resource_path(relative_path):
             print(f"⚠️ Recurso no encontrado: {path}")
             with open('missing_resources.log', 'a') as f:
                 f.write(f"Missing: {path}\n")
-
         return str(path)
     except Exception as e:
         print(f"Error en resource_path: {e}")
@@ -84,7 +83,7 @@ def bg_image(widget: Union[QWidget, QAbstractButton, QLabel],
         # Construir el estilo CSS
         style_parts = [f"{prop}: url({qt_path});"]
 
-        # Agregar propiedades adicionales
+        # propiedades adicionales
         for key, value in css_properties.items():
             style_parts.append(f"{key}: {value};")
 

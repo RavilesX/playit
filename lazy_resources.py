@@ -167,7 +167,6 @@ class LazyAudioManager:
             # Usar semáforo para limitar cargas concurrentes
             with self._loading_semaphore:
                 try:
-                    ##print(f"🔄 Cargando audio: {path.name}")
                     sounds = []
                     separated_path = path / "separated"
 

@@ -61,11 +61,11 @@ class TitleBar(QWidget):
         if self.parent.isMaximized():
             self.parent.showNormal()
             self.max_btn.setIcon(QIcon(resource_path('images/main_window/max.png')))
-            self.max_btn.setIconSize(QSize(24, 24))
+            self.max_btn.setIconSize(QSize(16, 16))
         else:
             self.parent.showMaximized()
             self.max_btn.setIcon(QIcon(resource_path('images/main_window/rest.png')))
-            self.max_btn.setIconSize(QSize(24, 24))
+            self.max_btn.setIconSize(QSize(16, 16))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.draggable:

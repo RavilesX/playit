@@ -21,7 +21,6 @@ from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
 from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
-from lazy_config import LazyLoadingConfig, setup_production_lazy_loading
 from demucs_worker import DemucsWorker
 
 class AudioPlayer(QMainWindow):
@@ -32,28 +31,29 @@ class AudioPlayer(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        # 1. Primero se cargan los managers que se usan en lazy
         self._setup_lazy_managers()
 
-        # 1. Configuración básica de la ventana
+        # 2. Configuración básica de la ventana
         self._setup_window_properties()
 
-        # 2. Inicializar variables de estado
+        # 3. Inicializar variables de estado
         self._initialize_state_variables()
 
-        # 3. Configurar audio y dependencias
+        # 4. Configurar audio y dependencias
         self._setup_audio_system()
 
-        # 4. Crear y configurar la interfaz
+        # 5. Crear y configurar la interfaz
         self._setup_user_interface()
 
-        # 5. Configurar conexiones y eventos
+        # 6. Configurar conexiones y eventos
         self._setup_connections()
 
-        # 6. Inicializar timers y actualizaciones
+        # 7. Inicializar timers y actualizaciones
         self._setup_timers()
 
-        # 7. Validaciones finales
-        self._perform_final_checks()
+        # 8. Validaciones finales
+        self._perform_final_setup()
 
     def _setup_lazy_managers(self):
         """NUEVO: Inicializa los gestores de lazy loading"""
@@ -63,8 +63,8 @@ class AudioPlayer(QMainWindow):
         self.lazy_playlist = LazyPlaylistLoader()
 
         # Configuración automática
-        config = LazyLoadingConfig.create_adaptive_config()
-        setup_production_lazy_loading(self)
+        # config = LazyLoadingConfig.create_adaptive_config()
+        # setup_production_lazy_loading(self)
 
     def _setup_window_properties(self):
         """Configura propiedades básicas de la ventana principal."""
@@ -160,7 +160,6 @@ class AudioPlayer(QMainWindow):
             self.pygame_available = False
 
     def _setup_user_interface(self):
-        """Crea y configura todos los elementos de la interfaz de usuario."""
         # Crear frame principal y layout
         self._create_main_frame()
 
@@ -182,6 +181,9 @@ class AudioPlayer(QMainWindow):
         # Inicializar menú y barra de estado
         self.init_menu()
         self.init_status_bar()
+
+        # Centrar ventana
+        self.center()
 
     def _create_main_frame(self):
         """Crea el frame principal contenedor."""
@@ -213,7 +215,6 @@ class AudioPlayer(QMainWindow):
         }
 
     def _create_tab_widget(self):
-        """Crea el widget de pestañas para portada y letras."""
         # QTabWidget para portada y letras
         self.tabs = QTabWidget()
         self.cover_label = QLabel()
@@ -227,7 +228,6 @@ class AudioPlayer(QMainWindow):
         self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
 
     def _create_progress_bar(self):
-        """Crea la barra de progreso de reproducción."""
         self.progress_song = QProgressBar(self)
         self.progress_song.setFormat("00:00 / 00:00")
         self.progress_song.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -236,13 +236,9 @@ class AudioPlayer(QMainWindow):
         self.progress_song.setEnabled(False)
 
     def _create_control_buttons(self):
-        """Crea los botones de control de reproducción."""
-        # Usar método existente pero renombrado para claridad
         self.controls_layout = self.init_leds()
 
     def _create_track_controls(self):
-        """Crea los controles de pistas individuales."""
-        # Usar método existente pero renombrado para claridad
         self.track_buttons_layout = self.track_buttons()
 
     def _create_playlist_dock(self):
@@ -255,7 +251,6 @@ class AudioPlayer(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.playlist_dock)
 
     def _setup_main_layout(self):
-        """Configura el layout principal de la ventana."""
         layout = QVBoxLayout(self.main_frame)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -268,7 +263,6 @@ class AudioPlayer(QMainWindow):
         layout.addLayout(self.controls_layout)
 
     def _setup_connections(self):
-        """Configura todas las conexiones de señales y eventos."""
         # Conexiones de control de audio
         self._connect_playback_controls()
 
@@ -282,7 +276,6 @@ class AudioPlayer(QMainWindow):
         self._connect_lazy_loading_signals()
 
     def _connect_lazy_loading_signals(self):
-        """Configura las conexiones para lazy loading"""
         self.lazy_playlist.playlist_updated.connect(self._on_song_loaded)
         self.lazy_playlist.loading_finished.connect(self._on_playlist_loaded)
         self.cover_loaded.connect(self._handle_cover_loaded)
@@ -290,23 +283,18 @@ class AudioPlayer(QMainWindow):
         self.lyrics_error.connect(self._handle_lyrics_error)
         self.lyrics_not_found.connect(self._handle_lyrics_not_found)
     def _connect_playback_controls(self):
-        """Conecta los controles de reproducción."""
         self.play_btn.clicked.connect(self.toggle_play_pause)
         self.prev_btn.clicked.connect(self.play_previous)
         self.next_btn.clicked.connect(self.play_next)
         self.stop_btn.clicked.connect(self.stop_playback)
 
     def _connect_playlist_events(self):
-        """Conecta eventos de la playlist."""
-        #self.playlist_widget.itemDoubleClicked.connect(self.play_selected)
         self.playlist_widget.itemActivated.connect(self.play_selected)
 
     def _connect_dock_events(self):
-        """Conecta eventos del dock de playlist."""
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
 
     def _on_song_loaded(self, song_data):
-        """Callback cuando se carga una canción individual"""
         # Verificar si ya existe en la playlist
         exists = any(
             track['artist'] == song_data['artist'] and
@@ -338,7 +326,6 @@ class AudioPlayer(QMainWindow):
         self.cover_label.setPixmap(pixmap)
 
     def _handle_lyrics_loaded(self, lyrics_data):
-        #print("Lyrics cargados exitosamente")
         self.lyrics = lyrics_data
 
         if not hasattr(self, 'lyrics_timer'):
@@ -349,18 +336,15 @@ class AudioPlayer(QMainWindow):
         self.update_lyrics_menu_state()
 
     def _handle_lyrics_error(self, error_msg):
-        #print(f"Error cargando lyrics: {error_msg}")
         self.lyrics_text.setHtml(f'<center style="color: #ff6666;">Error: {error_msg}</center>')
 
     def _handle_lyrics_not_found(self):
-        #print("No se encontraron lyrics")
         self.lyrics_text.setHtml('<center style="color: #ff6666;">No hay letras disponibles</center>')
 
     def _on_playlist_loaded(self):
         """Callback cuando termina de cargar toda la playlist"""
         self.status_bar.showMessage(f"Playlist cargada: {len(self.playlist)} canciones")
         self.update_status()
-        #print(f"✅ Playlist loaded successfully: {len(self.playlist)} songs")
 
     def _setup_timers(self):
         """Configura los timers de actualización."""
@@ -368,19 +352,14 @@ class AudioPlayer(QMainWindow):
         self.timer.timeout.connect(self.update_display)
         self.timer.start(1000)
 
-    def _perform_final_checks(self):
-        """Realiza validaciones finales y configuraciones post-inicialización."""
+    def _perform_final_setup(self):
         # Validar dependencias
-        self._check_dependencies()
-
-        # Centrar ventana
-        self.center()
+        # self._check_dependencies()
 
         # Actualizar estado inicial
         self.update_status()
 
     def _setup_background(self):
-        """Configura el background sin afectar la estructura existente"""
         # Crear QLabel para el background
         self.background_label = QLabel(self)
         self.background_label.setGeometry(0, 0, self.width(), self.height())
@@ -395,8 +374,6 @@ class AudioPlayer(QMainWindow):
                 Qt.AspectRatioMode.IgnoreAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             ))
-        # else:
-            #print(f"No se pudo cargar el background: {bg_path}")
 
         # Asegurar que el background esté detrás de todo
         self.background_label.lower()
@@ -419,7 +396,7 @@ class AudioPlayer(QMainWindow):
         if hasattr(self, 'background_label'):
             self.background_label.resize(self.size())
 
-            # Volver a cargar la imagen para evitar pixelación
+            # Volver a cargar la imagen para evitar el pixelado feo
             bg_path = resource_path('images/main_window/background.png')
             pixmap = QPixmap(bg_path)
             if not pixmap.isNull():
@@ -429,49 +406,49 @@ class AudioPlayer(QMainWindow):
                     Qt.TransformationMode.SmoothTransformation
                 ))
 
-    def _check_dependencies(self):
-        """Verifica que las dependencias requeridas están instaladas"""
-        missing = []
-
-        # Configuración para Windows
-        if os.name == 'nt':
-            kwargs = {
-                'creationflags': subprocess.CREATE_NO_WINDOW,
-                'stdout': subprocess.PIPE,
-                'stderr': subprocess.PIPE
-            }
-        else:  # Para otros sistemas operativos
-            kwargs = {
-                'stdout': subprocess.PIPE,
-                'stderr': subprocess.PIPE,
-                'start_new_session': True
-            }
-
-        # Verificar Demucs instalado globalmente
-        try:
-            subprocess.run(["demucs", "--help"],
-                           **kwargs,
-                           check=True,
-                           text=True,
-                           encoding='utf-8')
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("Demucs no está instalado o no está en el PATH")
-
-        # Verificar FFmpeg (requerido por Demucs)
-        try:
-            subprocess.run(["ffmpeg", "-version"],
-                           **kwargs,
-                           check=True,
-                           text=True,
-                           encoding='utf-8')
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("FFmpeg no está instalado o no está en el PATH")
-
-        if missing:
-            msg = "Faltan dependencias requeridas:\n\n" + "\n".join(missing)
-            msg += "\n\nPor favor instale:\n1. Python 3.8+\n2. Demucs (pip install demucs)\n3. FFmpeg"
-            styled_message_box(self, "Error crítico", msg,QMessageBox.Icon.Critical)
-            sys.exit(1)
+    # def _check_dependencies(self):
+    #     """Verifica que las dependencias requeridas están instaladas"""
+    #     missing = []
+    #
+    #     # argumentos del comando en caso de tener Windows
+    #     if os.name == 'nt':
+    #         kwargs = {
+    #             'creationflags': subprocess.CREATE_NO_WINDOW,
+    #             'stdout': subprocess.PIPE,
+    #             'stderr': subprocess.PIPE
+    #         }
+    #     else:  # Para otros sistemas operativos
+    #         kwargs = {
+    #             'stdout': subprocess.PIPE,
+    #             'stderr': subprocess.PIPE,
+    #             'start_new_session': True
+    #         }
+    #
+    #     # Verificar Demucs instalado globalmente
+    #     try:
+    #         subprocess.run(["demucs", "--help"],
+    #                        **kwargs,
+    #                        check=True,
+    #                        text=True,
+    #                        encoding='utf-8')
+    #     except (subprocess.CalledProcessError, FileNotFoundError):
+    #         missing.append("Demucs no está instalado o no está en el PATH")
+    #
+    #     # Verificar FFmpeg
+    #     try:
+    #         subprocess.run(["ffmpeg", "-version"],
+    #                        **kwargs,
+    #                        check=True,
+    #                        text=True,
+    #                        encoding='utf-8')
+    #     except (subprocess.CalledProcessError, FileNotFoundError):
+    #         missing.append("FFmpeg no está instalado o no está en el PATH")
+    #
+    #     if missing:
+    #         msg = "Faltan dependencias requeridas:\n\n" + "\n".join(missing)
+    #         msg += "\n\nPor favor instale:\n1. Python 3.8+\n2. Demucs (pip install demucs)\n3. FFmpeg"
+    #         styled_message_box(self, "Error crítico", msg,QMessageBox.Icon.Critical)
+    #         sys.exit(1)
 
     def load_demucs_model(self):
         """Solo verifica que demucs está instalado, no carga el modelo"""
@@ -498,7 +475,6 @@ class AudioPlayer(QMainWindow):
         except Exception as e:
 
             error_msg = f"Error checking Demucs: {str(e)}"
-            #print(error_msg)  # Para ver en consola si ejecutas con --console
             with open("demucs_error.log", "w") as f:
                 f.write(error_msg)
             styled_message_box(
@@ -1508,10 +1484,9 @@ class AudioPlayer(QMainWindow):
                     self.lyrics_loaded.emit(lyrics_data)
 
                 except Exception as e:
-                    #print(f"❌ Error cargando letras: {e}")
                     self.lyrics_error.emit(str(e))
 
-            #  # Ejecutar carga asíncrona
+            #  Ejecutar carga asíncrona
             threading.Thread(target=load_cover_async, daemon=True).start()
             threading.Thread(target=load_lyrics_async, daemon=True).start()
 
@@ -1546,7 +1521,6 @@ class AudioPlayer(QMainWindow):
                 }
             }
         except Exception as e:
-            #print(f"❌ Error obteniendo estadísticas: {e}")
             return {
                 "error": str(e),
                 "total_cached_items": 0,
@@ -1561,11 +1535,6 @@ class AudioPlayer(QMainWindow):
 
         def preload_worker():
             try:
-                #print("🔄 Iniciando precarga de recursos adyacentes...")
-
-                # Precargar audio de las siguientes 2 canciones
-                # self.lazy_audio.preload_next_songs(self.playlist, self.current_index, count=2)
-
                 # Precargar letras de canciones adyacentes
                 self.lazy_lyrics.preload_lyrics(self.playlist, self.current_index)
 
