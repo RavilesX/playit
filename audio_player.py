@@ -560,14 +560,12 @@ class AudioPlayer(QMainWindow):
         return buttons_layout
 
     def setup_slider(self, slider, track_name):
-        """Configura los sliders de volumen individual"""
         slider.setRange(0, 100)
         slider.setValue(100)
         slider.setFixedWidth(120)
         slider.valueChanged.connect(lambda value: self.set_individual_volume(track_name, value))
 
     def set_individual_volume(self, track_name, value):
-        """Establece el volumen individual para cada pista"""
         # Guardar el volumen actual (antes de mute)
         self.individual_volumes[track_name] = value / 100.0
 
@@ -576,7 +574,6 @@ class AudioPlayer(QMainWindow):
             self.apply_volume_to_track(track_name, value / 100.0)
 
     def apply_volume_to_track(self, track_name, volume):
-        """Aplica el volumen a la pista específica"""
         if not self.current_channels:
             return
 
@@ -591,7 +588,6 @@ class AudioPlayer(QMainWindow):
             self.current_channels[track_index].set_volume(volume * (self.volume / 100.0))
 
     def setup_button(self, button, object_name, icon_name):
-        """Método para usar lazy loading de iconos"""
         button.setObjectName(object_name)
         button.setIconSize(QSize(120, 120))
 
@@ -601,7 +597,6 @@ class AudioPlayer(QMainWindow):
             icon = self.lazy_images.load_icon_cached(icon_path, (120, 120))
 
             if icon.isNull():
-                #print(f"⚠️ Icono no encontrado: {icon_path}")
                 # Crear icono por defecto
                 default_pixmap = QPixmap(120, 120)
                 default_pixmap.fill(Qt.GlobalColor.darkGray)
@@ -609,7 +604,6 @@ class AudioPlayer(QMainWindow):
 
             button.setIcon(icon)
         except Exception as e:
-            #print(f"❌ Error cargando icono para {object_name}: {e}")
             # Icono de emergencia
             fallback_pixmap = QPixmap(120, 120)
             fallback_pixmap.fill(Qt.GlobalColor.red)
@@ -619,24 +613,20 @@ class AudioPlayer(QMainWindow):
         button.clicked.connect(self.toggle_mute)
 
     def show_about_dialog(self):
-        """Muestra el diálogo de información sobre la aplicación"""
         dialog = AboutDialog(self)
         bg_image(dialog, 'images/split_dialog/split.png')
         dialog.exec()
 
     def show_queue_dialog(self):
-        """Muestra el diálogo de información sobre la aplicación"""
         queue_dialog = QueueDialog(self, parent=self)
         bg_image(queue_dialog, 'images/split_dialog/split.png')
         queue_dialog.exec()
 
 
     def keyPressEvent(self, event):
-        """Maneja la tecla Delete para eliminar elementos seleccionados"""
         if event.key() == Qt.Key.Key_Delete:
             self.remove_selected()
-        # elif event.key() == Qt.Key.Key_Return and self.playlist_widget.currentItem():
-        #     self.play_current()
+
         else:
             super().keyPressEvent(event)
 
@@ -729,14 +719,12 @@ class AudioPlayer(QMainWindow):
         self.delay_action.setEnabled(False)
 
     def increase_lyrics_font(self):
-        """Aumenta el tamaño de la fuente en 2 puntos"""
         self.lyrics_font_size += 2
         if self.lyrics_font_size > 80:  # Límite máximo
             self.lyrics_font_size = 20
         self.apply_lyrics_font()
 
     def decrease_lyrics_font(self):
-        """Disminuye el tamaño de la fuente en 2 puntos"""
         self.lyrics_font_size -= 2
         if self.lyrics_font_size < 20:  # Límite mínimo
             self.lyrics_font_size = 80
@@ -749,11 +737,9 @@ class AudioPlayer(QMainWindow):
                                     }}
                                 """)
     def _toggle_playlist_visibility(self, state):
-        """Maneja la acción del menú"""
         self.playlist_dock.setVisible(state)
 
     def _update_playlist_menu_state(self, visible):
-        """Actualiza el menú cuando cambia la visibilidad del dock"""
         self.show_playlist_action.setChecked(visible)
 
     def closeEvent(self, event):
@@ -762,7 +748,6 @@ class AudioPlayer(QMainWindow):
         super().closeEvent(event)
 
     def show_search_dialog(self):
-        """Muestra el diálogo de búsqueda"""
         dialog = SearchDialog(self)
 
         bg_image(dialog,'images/split_dialog/split.png')
@@ -770,7 +755,6 @@ class AudioPlayer(QMainWindow):
         dialog.exec()
 
     def handle_search(self, search_text):
-        """Maneja búsquedas manteniendo el estado anterior"""
         search_text = search_text.strip().lower()
         if not search_text:
             return
@@ -809,7 +793,6 @@ class AudioPlayer(QMainWindow):
         self.split_dialog.show()
 
     def process_song(self, artist, song, file_path):
-        """Agrega el trabajo a la cola y procesa si no hay trabajos activos"""
         # Crear objeto de trabajo
         job = {
             'artist': artist,
@@ -832,7 +815,6 @@ class AudioPlayer(QMainWindow):
             self.update_status()
 
     def _process_next_job(self):
-        """Procesa el siguiente trabajo en la cola"""
         if not self.demucs_queue:
             self.demucs_active = False
             self.processing_multiple = False
@@ -844,7 +826,6 @@ class AudioPlayer(QMainWindow):
         self._start_demucs_job(job)
 
     def _start_demucs_job(self, job):
-        """Inicia un trabajo de separación con Demucs"""
         try:
             # Limpiar cualquier trabajo anterior
             self._cleanup_previous_job()
@@ -880,7 +861,6 @@ class AudioPlayer(QMainWindow):
             self._process_next_job()
 
     def _cleanup_previous_job(self):
-        """Limpia recursos de trabajos anteriores"""
         try:
             if self.demucs_thread and self.demucs_thread.isRunning():
                 self.demucs_thread.quit()
@@ -918,7 +898,6 @@ class AudioPlayer(QMainWindow):
             self.check_files()
 
     def check_files(self,):
-        """Verifica si los archivos están disponibles"""
         for archivo in self.audio_files:
             file = f"music_library/{self.last_in_queue['artist']}/{self.last_in_queue['song']}/separated/{archivo}"
             if os.path.exists(file):
@@ -926,7 +905,6 @@ class AudioPlayer(QMainWindow):
                 self.scan_folder(Path("music_library"))
 
     def _cleanup_current_job(self):
-        """Limpia el trabajo actual sin afectar la cola"""
         self.demucs_active = False
         self.processing = False
         self.update_status()
@@ -940,7 +918,6 @@ class AudioPlayer(QMainWindow):
         self.demucs_worker = None
 
     def _handle_demucs_error(self, error_msg):
-        """Maneja errores y pasa al siguiente trabajo"""
         # Primero limpiar el trabajo actual
         self._cleanup_current_job()
 
@@ -953,7 +930,6 @@ class AudioPlayer(QMainWindow):
 
 
     def _update_demucs_progress(self, value):
-        """Actualiza el progreso del trabajo actual"""
         self.demucs_progress = value
         self.update_status()
 
@@ -971,7 +947,6 @@ class AudioPlayer(QMainWindow):
             json.dump(data, f, indent=4)
 
     def close_application(self):
-        """Cierra la aplicación completamente"""
         QApplication.instance().quit()
 
 
@@ -981,7 +956,6 @@ class AudioPlayer(QMainWindow):
         self.update_status()
 
     def load_folder(self):
-        """Método modificado para usar lazy loading"""
         from PyQt6.QtWidgets import QFileDialog
         from os.path import expanduser
         from pathlib import Path
@@ -997,20 +971,16 @@ class AudioPlayer(QMainWindow):
             # Usar lazy loading para cargar la carpeta
             try:
                 self.lazy_playlist.load_playlist_lazy(Path(path))
-                #print(f"🔄 Started loading playlist from: {path}")
             except Exception as e:
-                #print(f"❌ Error starting playlist load: {e}")
                 styled_message_box(self, "Error", f"Error iniciando carga: {str(e)}", QMessageBox.Icon.Critical)
                 self.status_bar.showMessage("Error cargando playlist")
 
     def reset_search_indices(self):
-        """Reinicia los índices y resultados de búsqueda"""
         self.search_results = []
         self.search_index = 0
         self.current_search = ""
 
     def clear_playlist(self):
-        """Limpia la playlist actual"""
         self.stop_playback()
         self.playlist.clear()
         self.playlist_widget.clear()
@@ -1057,7 +1027,6 @@ class AudioPlayer(QMainWindow):
         self.update_status()
 
     def _check_and_fetch_lyrics_async(self, dir_path, artist, song):
-        """Versión asíncrona de _check_and_fetch_lyrics"""
         def check_lyrics():
             lrc_path = dir_path / "lyrics.lrc"
             default_text = "Letras no encontradas, revisa datos de artista/canción"
@@ -1081,12 +1050,10 @@ class AudioPlayer(QMainWindow):
         thread.start()
 
     def _normalize_text(self, text):
-        """Normaliza texto removiendo tildes y convirtiendo a minúsculas"""
         normalized = unicodedata.normalize('NFKD', text.lower())
         return ''.join([c for c in normalized if not unicodedata.combining(c)])
 
     def _fetch_lyrics_from_api(self, artist, song, output_dir):
-        """Consulta la API de LRC Lib y genera el archivo"""
         base_url = "https://lrclib.net/api/search"
         query = f"{artist} {song}".replace(" ", "+")
         url = f"{base_url}?q={quote(query)}"
@@ -1117,7 +1084,6 @@ class AudioPlayer(QMainWindow):
             self._write_lyrics_file(output_dir, artist, song, None)
 
     def _write_lyrics_file(self, output_dir, artist, song, lyrics):
-        """Escribe el archivo LRC con formato, centrando todas las líneas"""
         title_line = f'[00:00.00]<H1 style="color: #3AABEF;"><center>{artist}</center></H1>\n<H2 style="color: #7E54AF;"><center>{song}</center></H2>\n'
 
         if not lyrics:
@@ -1234,7 +1200,6 @@ class AudioPlayer(QMainWindow):
             return False
 
     def _update_playback_ui(self, state: str):
-        """Actualiza la UI según el estado de reproducción"""
         self.stop_btn.setEnabled(state != "Detenido")
         self.progress_song.setEnabled(state != "Detenido")
         self.playback_state = state
@@ -1252,7 +1217,6 @@ class AudioPlayer(QMainWindow):
         self.update_status()
 
     def _restore_mute_states(self):
-        """Actualiza los botones según los estados de mute guardados"""
         # Configurar iconos basados en los estados actuales
         icon_map = {
             "drums": ("drums", "no_drums"),
@@ -1331,7 +1295,6 @@ class AudioPlayer(QMainWindow):
         self.clear_song_highlight()
 
     def highlight_current_song(self):
-        """Resalta la canción actual en la playlist con estilo especial"""
         # Primero quitar cualquier resaltado existente
         self.clear_song_highlight()
 
@@ -1352,7 +1315,6 @@ class AudioPlayer(QMainWindow):
             self.playlist_widget.setCurrentItem(item)
 
     def clear_song_highlight(self):
-        """Elimina cualquier resaltado de la playlist"""
         for i in range(self.playlist_widget.count()):
             item = self.playlist_widget.item(i)
 
@@ -1366,7 +1328,6 @@ class AudioPlayer(QMainWindow):
             item.setBackground(QColor("transparent"))
 
     def _update_metadata(self):
-        """Método corregido para usar lazy loading de imágenes y letras"""
         try:
             song = self.playlist[self.current_index]
             path = Path(song["path"])
@@ -1409,7 +1370,6 @@ class AudioPlayer(QMainWindow):
             print(f"❌ Error actualizando metadatos: {e}")
 
     def get_cache_stats(self) -> dict:
-        """Obtiene estadísticas completas de uso de cache"""
         try:
             audio_stats = self.lazy_audio.cache.get_stats()
             image_stats = self.lazy_images.cache.get_stats()
@@ -1441,7 +1401,6 @@ class AudioPlayer(QMainWindow):
             }
 
     def _preload_adjacent_resources(self):
-        """Precarga recursos de canciones adyacentes de forma optimizada"""
         if not self.playlist:
             return
 
@@ -1471,7 +1430,6 @@ class AudioPlayer(QMainWindow):
         threading.Thread(target=preload_worker, daemon=True).start()
 
     def cleanup_resources_manual(self):
-        """Limpia recursos manualmente y muestra estadísticas"""
         try:
             # Obtener estadísticas antes
             before_stats = self.get_cache_stats()
@@ -1539,7 +1497,6 @@ class AudioPlayer(QMainWindow):
         self.lyrics_timer.start(100)  # Actualizar cada 100ms
 
     def update_lyrics_display(self):
-        """Actualiza el texto según el tiempo actual de reproducción"""
         try:
             if not self.lyrics or not self.playback_state == "Activa":
                 return
@@ -1564,7 +1521,6 @@ class AudioPlayer(QMainWindow):
             print(f"❌ Error actualizando letras: {e}")
 
     def update_lyrics_menu_state(self):
-        """Actualiza el estado de las opciones del menú"""
         enabled = (
                 self.playback_state == "Activa" and
                 self.current_index != -1 and
@@ -1574,13 +1530,11 @@ class AudioPlayer(QMainWindow):
         self.delay_action.setEnabled(enabled)
 
     def _lyrics_has_error(self):
-        """Verifica si las lyrics contienen el mensaje de error"""
         if not self.lyrics:
             return True
         return any("no se encontraron las letras" in line[1] for line in self.lyrics)
 
     def adjust_lyrics_timing(self, offset):
-        """Ajusta el timing de las lyrics"""
         try:
             song_data = self.playlist[self.current_index]
             lrc_path = song_data["path"] / "lyrics.lrc"
@@ -1602,7 +1556,6 @@ class AudioPlayer(QMainWindow):
             styled_message_box(self, "Error", f"No se pudo ajustar: {str(e)}",QMessageBox.Icon.Warning)
 
     def _process_lines(self, lines, offset):
-        """Procesa cada línea aplicando el offset"""
         modified = []
         for i, line in enumerate(lines):
             if i == 0 or not line.strip().startswith("["):
@@ -1620,7 +1573,6 @@ class AudioPlayer(QMainWindow):
         return modified
 
     def _adjust_time(self, time_str, offset):
-        """Ajusta un timestamp por el offset"""
         minutes, rest = time_str.split(':', 1)
         seconds, milliseconds = rest.split('.', 1)
 
@@ -1775,7 +1727,6 @@ class AudioPlayer(QMainWindow):
             self.status_bar.showMessage(f"Canciones: {len(self.playlist)} | Estado: {self.playback_state}")
 
     def _format_demucs_progress(self):
-        """Muestra progreso incluyendo estado de cola"""
         if not self.demucs_active and not self.demucs_queue:
             return ""
 
