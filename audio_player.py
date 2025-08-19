@@ -62,10 +62,6 @@ class AudioPlayer(QMainWindow):
         self.lazy_lyrics = LazyLyricsManager()
         self.lazy_playlist = LazyPlaylistLoader()
 
-        # Configuración automática
-        # config = LazyLoadingConfig.create_adaptive_config()
-        # setup_production_lazy_loading(self)
-
     def _setup_window_properties(self):
         """Configura propiedades básicas de la ventana principal."""
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -89,7 +85,6 @@ class AudioPlayer(QMainWindow):
             print("Warning: estilos.css not found, using default styles")
 
     def _initialize_state_variables(self):
-        """Inicializa todas las variables de estado de la aplicación."""
         self.playlist = []
         self.current_index = -1
         self.playback_state = "Detenido"
@@ -136,14 +131,12 @@ class AudioPlayer(QMainWindow):
         self._initialize_dependency_flags()
 
     def _initialize_dependency_flags(self):
-        """Inicializa flags de disponibilidad de dependencias."""
         self.demucs_available = True
         self.pygame_available = True
         self.torch_available = True
         self.mutagen_available = True
 
     def _setup_audio_system(self):
-        """Configura el sistema de audio y verifica dependencias."""
         self._initialize_pygame_mixer()
 
         # Cargar modelo Demucs (solo verificación)
@@ -186,7 +179,6 @@ class AudioPlayer(QMainWindow):
         self.center()
 
     def _create_main_frame(self):
-        """Crea el frame principal contenedor."""
         self.main_frame = QFrame()
         self.main_frame.setStyleSheet("""
             QFrame {
@@ -198,11 +190,9 @@ class AudioPlayer(QMainWindow):
         self.setCentralWidget(self.main_frame)
 
     def _create_title_bar(self):
-        """Crea la barra de título personalizada."""
         self.title_bar = TitleBar(self)
 
     def _create_size_grips(self):
-        """Crea los controles de redimensionamiento de ventana."""
         self.size_grips = {
             "top": SizeGrip(self, "top"),
             "bottom": SizeGrip(self, "bottom"),
@@ -215,7 +205,6 @@ class AudioPlayer(QMainWindow):
         }
 
     def _create_tab_widget(self):
-        # QTabWidget para portada y letras
         self.tabs = QTabWidget()
         self.cover_label = QLabel()
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -242,7 +231,6 @@ class AudioPlayer(QMainWindow):
         self.track_buttons_layout = self.track_buttons()
 
     def _create_playlist_dock(self):
-        """Crea el dock de la playlist."""
         self.playlist_dock = QDockWidget(self)
         self.playlist_widget = QListWidget()
         self.playlist_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -342,21 +330,15 @@ class AudioPlayer(QMainWindow):
         self.lyrics_text.setHtml('<center style="color: #ff6666;">No hay letras disponibles</center>')
 
     def _on_playlist_loaded(self):
-        """Callback cuando termina de cargar toda la playlist"""
         self.status_bar.showMessage(f"Playlist cargada: {len(self.playlist)} canciones")
         self.update_status()
 
     def _setup_timers(self):
-        """Configura los timers de actualización."""
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_display)
         self.timer.start(1000)
 
     def _perform_final_setup(self):
-        # Validar dependencias
-        # self._check_dependencies()
-
-        # Actualizar estado inicial
         self.update_status()
 
     def _setup_background(self):
@@ -391,7 +373,7 @@ class AudioPlayer(QMainWindow):
         self.background_label.setScaledContents(True)
 
     def resizeEvent(self, event):
-        """Redimensiona el background cuando cambia el tamaño de la ventana"""
+        #Redimensiona el background cuando cambia el tamaño de la ventana
         super().resizeEvent(event)
         if hasattr(self, 'background_label'):
             self.background_label.resize(self.size())
@@ -406,65 +388,17 @@ class AudioPlayer(QMainWindow):
                     Qt.TransformationMode.SmoothTransformation
                 ))
 
-    # def _check_dependencies(self):
-    #     """Verifica que las dependencias requeridas están instaladas"""
-    #     missing = []
-    #
-    #     # argumentos del comando en caso de tener Windows
-    #     if os.name == 'nt':
-    #         kwargs = {
-    #             'creationflags': subprocess.CREATE_NO_WINDOW,
-    #             'stdout': subprocess.PIPE,
-    #             'stderr': subprocess.PIPE
-    #         }
-    #     else:  # Para otros sistemas operativos
-    #         kwargs = {
-    #             'stdout': subprocess.PIPE,
-    #             'stderr': subprocess.PIPE,
-    #             'start_new_session': True
-    #         }
-    #
-    #     # Verificar Demucs instalado globalmente
-    #     try:
-    #         subprocess.run(["demucs", "--help"],
-    #                        **kwargs,
-    #                        check=True,
-    #                        text=True,
-    #                        encoding='utf-8')
-    #     except (subprocess.CalledProcessError, FileNotFoundError):
-    #         missing.append("Demucs no está instalado o no está en el PATH")
-    #
-    #     # Verificar FFmpeg
-    #     try:
-    #         subprocess.run(["ffmpeg", "-version"],
-    #                        **kwargs,
-    #                        check=True,
-    #                        text=True,
-    #                        encoding='utf-8')
-    #     except (subprocess.CalledProcessError, FileNotFoundError):
-    #         missing.append("FFmpeg no está instalado o no está en el PATH")
-    #
-    #     if missing:
-    #         msg = "Faltan dependencias requeridas:\n\n" + "\n".join(missing)
-    #         msg += "\n\nPor favor instale:\n1. Python 3.8+\n2. Demucs (pip install demucs)\n3. FFmpeg"
-    #         styled_message_box(self, "Error crítico", msg,QMessageBox.Icon.Critical)
-    #         sys.exit(1)
-
     def load_demucs_model(self):
-        """Solo verifica que demucs está instalado, no carga el modelo"""
         try:
             # Primero verifica el PATH del sistema
             self._log_system_path()
-
-            # Intenta encontrar demucs en Python
-            self._check_python_environment()
 
             # Verificación directa con subprocess
             result = subprocess.run(
                 ['demucs', '--help'],
                 capture_output=True,
                 text=True,
-                shell=True  # Importante para Windows
+                shell=True
             )
 
             if result.returncode != 0:
@@ -502,28 +436,6 @@ class AudioPlayer(QMainWindow):
             with open("system_path.log", "w") as f:
                 f.write(f"Error getting PATH: {str(e)}\n")
 
-    def _check_python_environment(self):
-        """Verifica la instalación de Python"""
-        try:
-            # Verifica donde está instalado Python
-            python_path = subprocess.run(
-                ['where', 'python'],
-                capture_output=True,
-                text=True,
-                shell=True
-            ).stdout
-
-            # Verifica si demucs está en los paquetes
-            pip_list = subprocess.run(
-                ['pip', 'list'],
-                capture_output=True,
-                text=True,
-                shell=True
-            ).stdout
-
-        except Exception as e:
-            with open("python_environment.log", "w") as f:
-                f.write(f"Error checking Python: {str(e)}\n")
 
     def init_leds(self):
         self.prev_btn = QPushButton()
