@@ -391,10 +391,10 @@ class SplitDialog(BaseDialog):
         if '-' not in filename:
             return
 
-        parts = filename.split('-', 1)
+        parts = filename.split('-')
         if len(parts) >= 2:
             artist = string.capwords(parts[0].strip())
-            song = string.capwords(parts[1].strip())
+            song = string.capwords(parts[-1].strip())
 
             self.artist.setText(artist)
             self.song.setText(song)
