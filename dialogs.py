@@ -1,8 +1,8 @@
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPoint,QDir
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox, QComboBox,QProgressBar
 from resources import resource_path, bg_image,styled_message_box
-from ui_components import DialogTitleBar
+from ui_components import DialogTitleBar, StyledButtons
 import os
 import string
 from pathlib import Path
@@ -144,6 +144,43 @@ class AboutDialog(BaseDialog):
         <p>Software Libre</p>        
         """
 
+class WhisperDialog(BaseDialog):
+    model_selected = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent, title="Opciones de transcripción", size=(350, 250))
+        self._setup_content()
+
+    def _setup_content(self):
+        label = QLabel("Modelo (Ordenados de menor a mayor calidad)")
+        self.combo = QComboBox()
+        self.combo.addItems(["base", "small", "medium", "large-v2"])
+        self.combo.setCurrentText("large-v2")
+
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setTextVisible(True)
+
+        self.layout.addWidget(label)
+        self.layout.addWidget(self.combo)
+        self.layout.addWidget(self.bar)
+
+        self.buttons = StyledButtons(self)
+        self.buttons.accepted.connect(self._accept)  # o self.accept, según caso
+        self.buttons.rejected.connect(self.reject)
+        self.layout.addWidget(self.buttons)  # directo, sin layout intermedio
+
+        bg_image(self, "images/split_dialog/split.png")   # fondo igual
+
+    def _accept(self):
+        self.buttons.setEnabled(False)
+        self.model_selected.emit(self.combo.currentText())
+
+    def set_progress(self, value: int):
+        self.bar.setValue(value)
+
+    def _close_after_job(self):
+        self.accept()
 
 class SearchDialog(BaseDialog):
     search_requested = pyqtSignal(str)
@@ -157,30 +194,30 @@ class SearchDialog(BaseDialog):
         self.search_text.setPlaceholderText("Introduce texto a buscar...")
 
         # Buttons
-        btn_layout = self._create_button_layout()
+        self.btn_layout = self._create_button_layout()
 
         # Layout
         self.layout.addWidget(self.search_text)
-        self.layout.addLayout(btn_layout)
+        self.layout.addLayout(self.btn_layout)
 
     def _create_button_layout(self) -> QHBoxLayout:
-        layout = QHBoxLayout()
+        self.layout = QHBoxLayout()
 
-        accept_btn = self._create_action_button(
+        self.accept_btn = self._create_action_button(
             "aceptar_btn", "images/split_dialog/aceptar_btn.png",
             self._accept_search
         )
-        accept_btn.setDefault(True)
-        accept_btn.setAutoDefault(True)
+        self.accept_btn.setDefault(True)
+        self.accept_btn.setAutoDefault(True)
 
-        cancel_btn = self._create_action_button(
+        self.cancel_btn = self._create_action_button(
             "cancelar_btn", "images/split_dialog/cancelar_btn.png",
             self.reject
         )
 
-        layout.addWidget(accept_btn)
-        layout.addWidget(cancel_btn)
-        return layout
+        self.layout.addWidget(self.accept_btn)
+        self.layout.addWidget(self.cancel_btn)
+        return self.layout
 
     def _create_action_button(self, obj_name: str, image_path: str, callback) -> QPushButton:
         btn = QPushButton()
@@ -197,7 +234,6 @@ class SearchDialog(BaseDialog):
             self.accept()
         else:
             self.reject()
-
 
 class QueueDialog(BaseDialog):
     def __init__(self, audio_player, parent=None):

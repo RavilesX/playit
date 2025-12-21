@@ -3,7 +3,6 @@ import os
 import threading
 from pathlib import Path
 import subprocess
-import sys
 import json
 from datetime import datetime
 import time
@@ -13,15 +12,18 @@ from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                              QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
                              QPushButton, QSlider, QStatusBar, QMessageBox,
-                             QProgressBar, QFrame, QListWidgetItem)
+                             QProgressBar, QFrame, QListWidgetItem, QWidget)
 import requests
 from urllib.parse import quote
 import unicodedata
+from demucs_worker import DemucsWorker
 from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
-from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog
+from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog, BaseDialog,WhisperDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
-from demucs_worker import DemucsWorker
+from lyrics_extractor import LyricsExtractorWorker
+from lyrics_params import LyricsParams
+from lyrics_extractor_whisperx import LyricsExtractorWhisperX
 
 class AudioPlayer(QMainWindow):
     cover_loaded = pyqtSignal(QPixmap)
@@ -54,6 +56,15 @@ class AudioPlayer(QMainWindow):
 
         # 8. Validaciones finales
         self._perform_final_setup()
+
+        QTimer.singleShot(200, lambda: self._delayed_start())
+
+    def _delayed_start(self):
+        """Se ejecuta después de mostrar la ventana"""
+        # Cargar playlist si existe
+        default_lib = Path("music_library")
+        if default_lib.exists():
+            self.load_folder(str(default_lib))
 
     def _setup_lazy_managers(self):
         """NUEVO: Inicializa los gestores de lazy loading"""
@@ -178,6 +189,18 @@ class AudioPlayer(QMainWindow):
         # Centrar ventana
         self.center()
 
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self._cover_loaded = False
+        self._lyrics_loaded = False
+
+    def _on_tab_changed(self, index):
+        if index == 0 and not self._cover_loaded:
+            self._cover_loaded = True
+            # ya tenés la señal cover_loaded, solo forzá la carga si hace falta
+        elif index == 1 and not self._lyrics_loaded:
+            self._lyrics_loaded = True
+            # mismo para letras
+
     def _create_main_frame(self):
         self.main_frame = QFrame()
         self.main_frame.setStyleSheet("""
@@ -208,12 +231,33 @@ class AudioPlayer(QMainWindow):
         self.tabs = QTabWidget()
         self.cover_label = QLabel()
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lyrics_text = QTextEdit()
-        self.lyrics_text.setAcceptRichText(True)
-        self.lyrics_text.setReadOnly(True)
-        self.lyrics_font_size = 36
+
+        self.lyrics_header = QTextEdit()
+        self.lyrics_header.setReadOnly(True)
+        self.lyrics_header.setFixedHeight(100)
+        self.lyrics_header.setObjectName("lyrics_header")
+
+        self.lyrics_current = QTextEdit()
+        self.lyrics_current.setReadOnly(True)
+        self.lyrics_current.setObjectName("lyrics_current")
+
+        self.lyrics_next = QTextEdit()
+        self.lyrics_next.setReadOnly(True)
+        self.lyrics_next.setFixedHeight(60)
+        self.lyrics_next.setObjectName("lyrics_next")
+
+        self.lyrics_layout = QVBoxLayout()
+        self.lyrics_layout.setContentsMargins(0, 0, 0, 0)
+        self.lyrics_layout.addWidget(self.lyrics_header)
+        self.lyrics_layout.addWidget(self.lyrics_current)
+        self.lyrics_layout.addWidget(self.lyrics_next)
+
+        self.lyrics_container = QWidget()
+        self.lyrics_container.setLayout(self.lyrics_layout)
+
+        self.lyrics_font_size = 72
         self.tabs.addTab(self.cover_label, "Portada")
-        self.tabs.addTab(self.lyrics_text, "Letras")
+        self.tabs.addTab(self.lyrics_container, "Letras")
         self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
 
     def _create_progress_bar(self):
@@ -262,6 +306,13 @@ class AudioPlayer(QMainWindow):
 
         # Conexiones para lazy loading
         self._connect_lazy_loading_signals()
+
+        # Conexiones para extraer lyrics
+        self._connect_lyrics_extractor()
+
+    def _connect_lyrics_extractor(self):
+        self.sig_lyrics_ready = pyqtSignal(str)
+        self.lyrics_extraction_error = pyqtSignal(str)
 
     def _connect_lazy_loading_signals(self):
         self.lazy_playlist.playlist_updated.connect(self._on_song_loaded)
@@ -313,21 +364,30 @@ class AudioPlayer(QMainWindow):
     def _handle_cover_loaded(self, pixmap):
         self.cover_label.setPixmap(pixmap)
 
-    def _handle_lyrics_loaded(self, lyrics_data):
+    def _handle_lyrics_loaded(self, lyrics_data: list):
         self.lyrics = lyrics_data
 
+        # 1.  Header  (siempre visible)
+        song = self.playlist[self.current_index]
+        self.lyrics_header.setHtml(
+            f'<H1 style="color: #3AABEF;"><center>{song["artist"]}</center></H1>'
+            f'<H2 style="color: #7E54AF;"><center>{song["song"]}</center></H2>'
+        )
+
+        # 2.  Limpia next
+        self.lyrics_next.clear()
+
+        # 3.  Conecta timer si no está conectado
         if not hasattr(self, 'lyrics_timer'):
             self.lyrics_timer = QTimer(self)
             self.lyrics_timer.timeout.connect(self.update_lyrics_display)
         self.lyrics_timer.start(100)
 
-        self.update_lyrics_menu_state()
-
     def _handle_lyrics_error(self, error_msg):
-        self.lyrics_text.setHtml(f'<center style="color: #ff6666;">Error: {error_msg}</center>')
+        self.lyrics_text.setHtml(f'<center>Error: {error_msg}</center>')
 
     def _handle_lyrics_not_found(self):
-        self.lyrics_text.setHtml('<center style="color: #ff6666;">No hay letras disponibles</center>')
+        self.lyrics_text.setHtml('<center>No hay letras disponibles</center>')
 
     def _on_playlist_loaded(self):
         self.status_bar.showMessage(f"Playlist cargada: {len(self.playlist)} canciones")
@@ -389,6 +449,7 @@ class AudioPlayer(QMainWindow):
                 ))
 
     def load_demucs_model(self):
+        from demucs_worker import DemucsWorker
         try:
             # Primero verifica el PATH del sistema
             self._log_system_path()
@@ -591,26 +652,17 @@ class AudioPlayer(QMainWindow):
         button.setObjectName(object_name)
         button.setIconSize(QSize(120, 120))
 
-        try:
-            # Usar lazy loading para el icono
-            icon_path = resource_path(f'images/main_window/icons01/{icon_name}.png')
-            icon = self.lazy_images.load_icon_cached(icon_path, (120, 120))
-
-            if icon.isNull():
-                # Crear icono por defecto
-                default_pixmap = QPixmap(120, 120)
-                default_pixmap.fill(Qt.GlobalColor.darkGray)
-                icon = QIcon(default_pixmap)
-
-            button.setIcon(icon)
-        except Exception as e:
-            # Icono de emergencia
-            fallback_pixmap = QPixmap(120, 120)
-            fallback_pixmap.fill(Qt.GlobalColor.red)
-            button.setIcon(QIcon(fallback_pixmap))
+        button._icon_path = f'images/main_window/icons01/{icon_name}.png'
+        button._icon_disabled = f'images/main_window/icons01/no_{icon_name}.png'
+        self._lazy_load_icon(button, False)
 
         button.setCheckable(True)
         button.clicked.connect(self.toggle_mute)
+
+    def _lazy_load_icon(self, btn, muted: bool):
+        path = btn._icon_disabled if muted else btn._icon_path
+        icon = self.lazy_images.load_icon_cached(resource_path(path), (120, 120))
+        btn.setIcon(icon)
 
     def show_about_dialog(self):
         dialog = AboutDialog(self)
@@ -697,6 +749,11 @@ class AudioPlayer(QMainWindow):
         self.decrease_font_action.setShortcut("Ctrl+Shift+Down")
         self.decrease_font_action.triggered.connect(self.decrease_lyrics_font)
 
+        self.regenerate_action = QAction("Regenerar letras desde voz", self)
+        self.regenerate_action.setShortcut("Ctrl+R")
+        self.regenerate_action.triggered.connect(self._manual_regenerate_lyrics)
+        lyrics_menu.addAction(self.regenerate_action)
+
         lyrics_menu.addAction(self.advance_action)
         lyrics_menu.addAction(self.delay_action)
         lyrics_menu.addAction(self.increase_font_action)
@@ -718,6 +775,15 @@ class AudioPlayer(QMainWindow):
         self.advance_action.setEnabled(False)
         self.delay_action.setEnabled(False)
 
+    def _manual_regenerate_lyrics(self):
+        if self.current_index == -1:
+            styled_message_box(self, "Error", "No hay canción seleccionada.",
+                               QMessageBox.Icon.Warning)
+            return
+        song = self.playlist[self.current_index]
+        self.extract_lyrics_from_vocals(song["artist"], song["song"],
+                                        Path(song["path"]))
+
     def increase_lyrics_font(self):
         self.lyrics_font_size += 2
         if self.lyrics_font_size > 80:  # Límite máximo
@@ -731,7 +797,7 @@ class AudioPlayer(QMainWindow):
         self.apply_lyrics_font()
 
     def apply_lyrics_font(self):
-        self.lyrics_text.setStyleSheet(f"""
+        self.lyrics_current.setStyleSheet(f"""
                                     QTextEdit {{
                                         font-size: {self.lyrics_font_size}px;                                
                                     }}
@@ -955,12 +1021,13 @@ class AudioPlayer(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.update_status()
 
-    def load_folder(self):
+    def load_folder(self, path: str = None):
         from PyQt6.QtWidgets import QFileDialog
         from os.path import expanduser
         from pathlib import Path
 
-        path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta", expanduser("~/Music"))
+        if not path:
+            path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta", expanduser("~/Music"))
         if path:
             # Limpiar playlist actual primero
             self.clear_playlist()
@@ -1026,6 +1093,84 @@ class AudioPlayer(QMainWindow):
                     styled_message_box(self, "Error", f"Error cargando {json_file}: {str(e)}",QMessageBox.Icon.Critical)
         self.update_status()
 
+    def _ask_replace_lyrics(self, lrc_path: Path) -> bool:
+        dlg = BaseDialog(self, title="Letras existentes", size=(400, 180))
+        label = QLabel("Ya hay un archivo de letras. ¿Deseas sobrescribirlo?")
+        label.setWordWrap(True)
+        dlg.layout.addWidget(label)
+
+        btn_layout = QHBoxLayout()
+        yes_btn = QPushButton("Sí")
+        no_btn = QPushButton("No")
+        btn_layout.addWidget(yes_btn)
+        btn_layout.addWidget(no_btn)
+        dlg.layout.addLayout(btn_layout)
+
+        yes_btn.clicked.connect(dlg.accept)
+        no_btn.clicked.connect(dlg.reject)
+
+        bg_image(dlg, "images/split_dialog/split.png")  # tu fondo
+        return dlg.exec() == dlg.DialogCode.Accepted
+
+    def extract_lyrics_from_vocals(self, artist: str, song: str, dir_path: Path,
+                                   model_name: str = "base"):
+        vocals = dir_path / "separated" / "vocals.mp3"
+        lrc = dir_path / "lyrics.lrc"
+
+        if not vocals.exists():
+            self.lyrics_extraction_error.emit("No se encontró vocals.mp3")
+            return
+
+        # Preguntar antes de sobrescribir
+        if lrc.exists():
+            if not self._ask_replace_lyrics(lrc):
+                return
+
+        params = LyricsParams(
+            vocals_path=vocals,
+            lrc_path=lrc,
+            artist=artist,
+            song=song,
+            model_name=model_name
+        )
+
+#        self._start_extraction_thread(params)
+
+        # Diálogo de progreso
+        self.whisper_dlg = WhisperDialog(self)
+        self.whisper_dlg.model_selected.connect(
+            lambda m: self._start_extraction_thread(params))
+        self.whisper_dlg.show()
+
+    def _start_extraction_thread(self, params: LyricsParams):
+        self.extract_thread = QThread()
+        if params.model_name == "large-v2":
+            self.extract_worker = LyricsExtractorWhisperX(params)
+        else:
+            self.extract_worker = LyricsExtractorWorker(params)
+        self.extract_worker.moveToThread(self.extract_thread)
+
+        self.extract_thread.started.connect(self.extract_worker.run)
+        self.extract_worker.finished.connect(self._lyrics_extraction_done)
+        self.extract_worker.error.connect(self._on_lyrics_extraction_error)
+        self.extract_worker.progress.connect(self.whisper_dlg.set_progress)
+
+        # self.extract_worker.finished.connect(self.extract_thread.quit)
+        # self.extract_worker.error.connect(self.extract_thread.quit)
+        self.extract_worker.finished.connect(self.whisper_dlg._close_after_job)
+        self.extract_worker.error.connect(self.whisper_dlg._close_after_job)
+        self.extract_thread.finished.connect(self.extract_thread.deleteLater)
+
+        self.extract_thread.start()
+
+    def _lyrics_extraction_done(self, lrc_path: str):
+        self.load_lyrics(Path(lrc_path))
+        styled_message_box(self, "Listo", "Letras extraídas desde la voz.")
+
+    def _on_lyrics_extraction_error(self, msg: str):
+        styled_message_box(self, "Error", f"No se pudieron extraer las letras:\n{msg}",
+                           QMessageBox.Icon.Critical)
+
     def _check_and_fetch_lyrics_async(self, dir_path, artist, song):
         def check_lyrics():
             lrc_path = dir_path / "lyrics.lrc"
@@ -1083,12 +1228,13 @@ class AudioPlayer(QMainWindow):
         except Exception as e:
             self._write_lyrics_file(output_dir, artist, song, None)
 
+
     def _write_lyrics_file(self, output_dir, artist, song, lyrics):
-        title_line = f'[00:00.00]<H1 style="color: #3AABEF;"><center>{artist}</center></H1>\n<H2 style="color: #7E54AF;"><center>{song}</center></H2>\n'
+        title_line = ''
 
         if not lyrics:
             # Caso sin letras
-            content = title_line + '<center style="color: #ff2626;">Letras no encontradas, revisa datos de artista/canción</center>\n'
+            content = '[00:00.00]<center style="color: #ff2626;">Letras no encontradas, Intenta extraer desde audio</center>\n'
         else:
             # Procesar cada línea de letras
             processed_lines = []
@@ -1099,7 +1245,7 @@ class AudioPlayer(QMainWindow):
                     if len(parts) == 2:
                         timestamp, text = parts
                         # Reconstruir la línea con el texto centrado
-                        processed_line = f'{timestamp}]<center style="color: #F88FFF;">{text.strip()}</center>'
+                        processed_line = f'{timestamp}]<center>{text.strip()}</center>'
                         processed_lines.append(processed_line)
 
             # Unir el contenido
@@ -1290,6 +1436,9 @@ class AudioPlayer(QMainWindow):
         self.progress_song.setValue(0)
         self.current_channels = []
         self.update_lyrics_menu_state()
+        self.lyrics_header.clear()
+        self.lyrics_current.clear()
+        self.lyrics_next.clear()
 
         # Quitar resaltado de la canción actual
         self.clear_song_highlight()
@@ -1497,28 +1646,29 @@ class AudioPlayer(QMainWindow):
         self.lyrics_timer.start(100)  # Actualizar cada 100ms
 
     def update_lyrics_display(self):
-        try:
-            if not self.lyrics or not self.playback_state == "Activa":
-                return
+        if not self.lyrics or self.playback_state != "Activa":
+            return
 
-            # Obtener tiempo actual en segundos con decimales
-            current_time = self.progress_song.value() / 1000.0
+        current_time = self.progress_song.value() / 1000.0
 
-            # Buscar la letra correspondiente
-            current_lyric = None
-            for time_stamp, text in self.lyrics:
-                if current_time >= time_stamp:
-                    current_lyric = text
+        current_html = ""
+        next_html = ""
+        for i, (t, html) in enumerate(self.lyrics):
+            if current_time >= t:
+                current_html = html
+                if i + 1 < len(self.lyrics):
+                    next_html = self.lyrics[i + 1][1]
                 else:
-                    break  # Los lyrics están ordenados, podemos salir
+                    next_html = ""
+            else:
+                break
 
-            # Solo actualizar si hay un lyric válido y es diferente al anterio
-            if current_lyric and current_lyric != getattr(self, 'last_lyric', None):
-                self.lyrics_text.setHtml(current_lyric)
-                self.last_lyric = current_lyric
+        if getattr(self, "_last_current_html", None) != current_html:
+            self._last_current_html = current_html
 
-        except Exception as e:
-            print(f"❌ Error actualizando letras: {e}")
+
+        self.lyrics_current.setHtml(current_html)
+        self.lyrics_next.setHtml(f'<center>{next_html}</center>')
 
     def update_lyrics_menu_state(self):
         enabled = (

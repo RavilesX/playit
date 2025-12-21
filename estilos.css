@@ -11,6 +11,27 @@ QProgressBar{
 	font-family: "Saira Stencil One";
 }
 
+QTextEdit#lyrics_header{
+	font-family: "Saira Stencil One";
+	border: none;
+    font-size: 12px;
+}
+
+QTextEdit#lyrics_current{
+	font-family: "Saira Stencil One";
+    font-size: 72px;
+	border: none;
+	color: #F88FFF;
+	padding-top:80px;
+} 
+
+QTextEdit#lyrics_next {
+    background-color: rgba(0,0,0,180);
+    color: #d3d3d3;
+    border: none;
+    font-size: 24px;   /* ajusta */
+}
+
 QProgressBar::chunk{
 	border-radius: 5px;
 	background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0
@@ -51,7 +72,6 @@ QListWidget:item:focus {
 	
 }
 
-
 /* Estilos para la barra de scroll vertical */
 QListWidget QScrollBar:vertical {
     background: white;      /* Color de fondo de la barra */
@@ -79,6 +99,35 @@ QListWidget QScrollBar::sub-line:vertical {
 /* Estilos para el fondo de la barra */
 QListWidget QScrollBar::add-page:vertical,
 QListWidget QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+QListWidget QScrollBar:Horizontal {
+    background: white;      /* Color de fondo de la barra */
+    width: 10px;                        /* Ancho de la barra */
+}
+
+/* Estilos para el "handle" (barra deslizante) */
+QListWidget QScrollBar::handle:Horizontal {
+    background: qlineargradient(
+        spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
+    stop:0 rgba(132,76,171,255),
+    stop:1 rgba(122,130,255,255));      /* Color de la barra deslizante */
+    border-radius: 3px;       /* Bordes redondeados */
+    min-height: 20px;         /* Altura mínima del handle */
+}
+
+/* Estilos para los botones de incremento/decremento (flechas) */
+QListWidget QScrollBar::add-line:Horizontal,
+QListWidget QScrollBar::sub-line:Horizontal {
+    background: transparent;  /* Fondo transparente */
+    height: 0px;              /* Ocultar botones */
+    width: 0px;
+}
+
+/* Estilos para el fondo de la barra */
+QListWidget QScrollBar::add-page:Horizontal,
+QListWidget QScrollBar::sub-page:Horizontal {
     background: transparent;
 }
 
@@ -118,12 +167,6 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
 	background: transparent;
 }
 
-
-QTextEdit{
-    font-family: "Saira Stencil One";
-    font-size: 36px;
-	padding-top:60px;
-}
 
 p{
     color: red;

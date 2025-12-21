@@ -1,8 +1,10 @@
-from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRect
+import math
+
+from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRect,pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QIcon
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QDial
-from resources import resource_path
-import math
+from resources import resource_path,bg_image
+
 
 
 class TitleBar(QWidget):
@@ -202,4 +204,42 @@ class DialogTitleBar(TitleBar):
         # Conectar correctamente el cierre
         self.close_btn.clicked.connect(parent.reject)
 
+
+class StyledButtons(QWidget):
+    accepted = pyqtSignal()
+    rejected = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._create_buttons()
+
+    def _create_buttons(self):
+        # botón ACEPTAR
+        self.yes_btn = QPushButton()
+        self.yes_btn.setObjectName("aceptar_btn")
+        self.yes_btn.setFixedSize(70, 70)
+        self._yes_normal = "images/split_dialog/aceptar_btn.png"
+        self._yes_disabled = "images/split_dialog/aceptar_btn_disabled.png"
+        bg_image(self.yes_btn, self._yes_normal)
+        self.yes_btn.clicked.connect(self.accepted)
+
+        # botón CANCELAR
+        self.no_btn = QPushButton()
+        self.no_btn.setObjectName("cancelar_btn")
+        self.no_btn.setFixedSize(70, 70)
+        self._no_normal = "images/split_dialog/cancelar_btn.png"
+        self._no_disabled = "images/split_dialog/cancelar_btn_disabled.png"
+        bg_image(self.no_btn, self._no_normal)
+        self.no_btn.clicked.connect(self.rejected)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.yes_btn)
+        layout.addWidget(self.no_btn)
+
+    def setEnabled(self, on: bool):
+        self.yes_btn.setEnabled(on)
+        self.no_btn.setEnabled(on)
+        bg_image(self.yes_btn, self._yes_normal if on else self._yes_disabled)
+        bg_image(self.no_btn, self._no_normal if on else self._no_disabled)
 
