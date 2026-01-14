@@ -1,5 +1,4 @@
 import re
-import os
 import threading
 from pathlib import Path
 import subprocess
@@ -19,11 +18,8 @@ import unicodedata
 from demucs_worker import DemucsWorker
 from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
-from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog, BaseDialog,WhisperDialog
+from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
-from lyrics_extractor import LyricsExtractorWorker
-from lyrics_params import LyricsParams
-from lyrics_extractor_whisperx import LyricsExtractorWhisperX
 
 class AudioPlayer(QMainWindow):
     cover_loaded = pyqtSignal(QPixmap)
@@ -67,7 +63,7 @@ class AudioPlayer(QMainWindow):
             self.load_folder(str(default_lib))
 
     def _setup_lazy_managers(self):
-        """NUEVO: Inicializa los gestores de lazy loading"""
+        """Inicializa los gestores de lazy loading"""
         self.lazy_audio = LazyAudioManager()
         self.lazy_images = LazyImageManager()
         self.lazy_lyrics = LazyLyricsManager()
@@ -87,7 +83,7 @@ class AudioPlayer(QMainWindow):
         self._load_stylesheet()
 
     def _load_stylesheet(self):
-        """Carga y aplica el archivo de estilos CSS."""
+        """Carga y aplica el archivo de estilos"""
         try:
             with open('estilos.css', 'r') as file:
                 style = file.read()
@@ -144,13 +140,11 @@ class AudioPlayer(QMainWindow):
     def _initialize_dependency_flags(self):
         self.demucs_available = True
         self.pygame_available = True
-        self.torch_available = True
-        self.mutagen_available = True
 
     def _setup_audio_system(self):
         self._initialize_pygame_mixer()
 
-        # Cargar modelo Demucs (solo verificación)
+        # verificación modelo Demucs
         self.demucs_model = None
         self.load_demucs_model()
 
@@ -185,21 +179,6 @@ class AudioPlayer(QMainWindow):
         # Inicializar menú y barra de estado
         self.init_menu()
         self.init_status_bar()
-
-        # Centrar ventana
-        self.center()
-
-        self.tabs.currentChanged.connect(self._on_tab_changed)
-        self._cover_loaded = False
-        self._lyrics_loaded = False
-
-    def _on_tab_changed(self, index):
-        if index == 0 and not self._cover_loaded:
-            self._cover_loaded = True
-            # ya tenés la señal cover_loaded, solo forzá la carga si hace falta
-        elif index == 1 and not self._lyrics_loaded:
-            self._lyrics_loaded = True
-            # mismo para letras
 
     def _create_main_frame(self):
         self.main_frame = QFrame()
@@ -255,7 +234,7 @@ class AudioPlayer(QMainWindow):
         self.lyrics_container = QWidget()
         self.lyrics_container.setLayout(self.lyrics_layout)
 
-        self.lyrics_font_size = 72
+        self.lyrics_font_size = 62
         self.tabs.addTab(self.cover_label, "Portada")
         self.tabs.addTab(self.lyrics_container, "Letras")
         self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
@@ -307,12 +286,6 @@ class AudioPlayer(QMainWindow):
         # Conexiones para lazy loading
         self._connect_lazy_loading_signals()
 
-        # Conexiones para extraer lyrics
-        self._connect_lyrics_extractor()
-
-    def _connect_lyrics_extractor(self):
-        self.sig_lyrics_ready = pyqtSignal(str)
-        self.lyrics_extraction_error = pyqtSignal(str)
 
     def _connect_lazy_loading_signals(self):
         self.lazy_playlist.playlist_updated.connect(self._on_song_loaded)
@@ -365,7 +338,8 @@ class AudioPlayer(QMainWindow):
         self.cover_label.setPixmap(pixmap)
 
     def _handle_lyrics_loaded(self, lyrics_data: list):
-        self.lyrics = lyrics_data
+        self.lyrics = lyrics_data or []
+        self.update_lyrics_menu_state()
 
         # 1.  Header  (siempre visible)
         song = self.playlist[self.current_index]
@@ -379,15 +353,16 @@ class AudioPlayer(QMainWindow):
 
         # 3.  Conecta timer si no está conectado
         if not hasattr(self, 'lyrics_timer'):
+            print("[DEBUG] Creando lyrics_timer")
             self.lyrics_timer = QTimer(self)
             self.lyrics_timer.timeout.connect(self.update_lyrics_display)
         self.lyrics_timer.start(100)
 
     def _handle_lyrics_error(self, error_msg):
-        self.lyrics_text.setHtml(f'<center>Error: {error_msg}</center>')
+        self.lyrics_current.setHtml(f'<center>Error: {error_msg}</center>')
 
     def _handle_lyrics_not_found(self):
-        self.lyrics_text.setHtml('<center>No hay letras disponibles</center>')
+        self.lyrics_current.setHtml('<center>No hay letras disponibles</center>')
 
     def _on_playlist_loaded(self):
         self.status_bar.showMessage(f"Playlist cargada: {len(self.playlist)} canciones")
@@ -417,7 +392,7 @@ class AudioPlayer(QMainWindow):
                 Qt.TransformationMode.SmoothTransformation
             ))
 
-        # Asegurar que el background esté detrás de todo
+        # Asegurar que el background esté detrás de lo demas
         self.background_label.lower()
 
         # Estilo para el main_frame (transparente)
@@ -451,8 +426,6 @@ class AudioPlayer(QMainWindow):
     def load_demucs_model(self):
         from demucs_worker import DemucsWorker
         try:
-            # Primero verifica el PATH del sistema
-            self._log_system_path()
 
             # Verificación directa con subprocess
             result = subprocess.run(
@@ -483,19 +456,6 @@ class AudioPlayer(QMainWindow):
             ,QMessageBox.Icon.Critical)
             self.demucs_available = False
 
-    def _log_system_path(self):
-        """Registra el PATH del sistema para debugging"""
-        try:
-            path = subprocess.run(
-                ['cmd', '/c', 'echo', '%PATH%'],
-                capture_output=True,
-                text=True,
-                shell=True
-            ).stdout
-
-        except Exception as e:
-            with open("system_path.log", "w") as f:
-                f.write(f"Error getting PATH: {str(e)}\n")
 
 
     def init_leds(self):
@@ -563,7 +523,6 @@ class AudioPlayer(QMainWindow):
                     btn.setChecked(False)
 
     def track_buttons(self):
-        # Configurar botones
         self.drums_btn = QPushButton()
         self.setup_button(self.drums_btn, 'drums_btn', 'drums')
         self.drums_slider = QSlider(Qt.Orientation.Horizontal)
@@ -723,14 +682,6 @@ class AudioPlayer(QMainWindow):
         self.show_playlist_action.triggered.connect(self._toggle_playlist_visibility)
         options_menu.addAction(self.show_playlist_action)
 
-        # Opción de búsqueda
-        search_action = QAction("&Buscar...", self)
-        search_action.setStatusTip("Buscar en la playlist")
-        search_action.setShortcut(QKeySequence("Ctrl+F"))
-        search_action.triggered.connect(self.show_search_dialog)
-        options_menu.addAction(search_action)
-        self.addAction(search_action)
-
         # Opción de modificar Lyrics
         lyrics_menu = options_menu.addMenu("Modificar Lyrics")
         self.advance_action = QAction(">> Mostrar Despues 0.5s", self)
@@ -748,11 +699,6 @@ class AudioPlayer(QMainWindow):
         self.decrease_font_action = QAction("Disminuir tamaño", self)
         self.decrease_font_action.setShortcut("Ctrl+Shift+Down")
         self.decrease_font_action.triggered.connect(self.decrease_lyrics_font)
-
-        self.regenerate_action = QAction("Regenerar letras desde voz", self)
-        self.regenerate_action.setShortcut("Ctrl+R")
-        self.regenerate_action.triggered.connect(self._manual_regenerate_lyrics)
-        lyrics_menu.addAction(self.regenerate_action)
 
         lyrics_menu.addAction(self.advance_action)
         lyrics_menu.addAction(self.delay_action)
@@ -775,25 +721,17 @@ class AudioPlayer(QMainWindow):
         self.advance_action.setEnabled(False)
         self.delay_action.setEnabled(False)
 
-    def _manual_regenerate_lyrics(self):
-        if self.current_index == -1:
-            styled_message_box(self, "Error", "No hay canción seleccionada.",
-                               QMessageBox.Icon.Warning)
-            return
-        song = self.playlist[self.current_index]
-        self.extract_lyrics_from_vocals(song["artist"], song["song"],
-                                        Path(song["path"]))
 
     def increase_lyrics_font(self):
         self.lyrics_font_size += 2
-        if self.lyrics_font_size > 80:  # Límite máximo
+        if self.lyrics_font_size > 82:  # Límite máximo
             self.lyrics_font_size = 20
         self.apply_lyrics_font()
 
     def decrease_lyrics_font(self):
         self.lyrics_font_size -= 2
         if self.lyrics_font_size < 20:  # Límite mínimo
-            self.lyrics_font_size = 80
+            self.lyrics_font_size = 82
         self.apply_lyrics_font()
 
     def apply_lyrics_font(self):
@@ -963,12 +901,64 @@ class AudioPlayer(QMainWindow):
             self.verification_timer.start(30000)  # 30 segundos
             self.check_files()
 
-    def check_files(self,):
-        for archivo in self.audio_files:
-            file = f"music_library/{self.last_in_queue['artist']}/{self.last_in_queue['song']}/separated/{archivo}"
-            if os.path.exists(file):
-                self.verification_timer.stop()
-                self.scan_folder(Path("music_library"))
+    def check_files(self):
+        """
+        Verifica que TODOS los archivos de audio separados existan.
+        Incluye contador de reintentos para evitar bucles infinitos.
+        """
+        # Inicializar contador si no existe
+        if not hasattr(self, '_verification_attempts'):
+            self._verification_attempts = 0
+
+        # Límite máximo de intentos (60 intentos = 30 minutos con timer de 30 seg)
+        MAX_ATTEMPTS = 60
+
+        if self._verification_attempts >= MAX_ATTEMPTS:
+            self.verification_timer.stop()
+            self._verification_attempts = 0
+            styled_message_box(
+                self,
+                "Timeout",
+                f"No se pudieron verificar todos los archivos de:\n"
+                f"{self.last_in_queue['artist']} - {self.last_in_queue['song']}\n\n"
+                f"Verifique manualmente la carpeta separated/",
+                QMessageBox.Icon.Warning
+            )
+            return
+
+        # Validar datos
+        if not self.last_in_queue.get('artist') or not self.last_in_queue.get('song'):
+            self.verification_timer.stop()
+            self._verification_attempts = 0
+            return
+
+        # Construir ruta
+        base_path = Path(f"music_library/{self.last_in_queue['artist']}/{self.last_in_queue['song']}/separated")
+
+        if not base_path.exists():
+            self._verification_attempts += 1
+            return
+
+        # Archivos requeridos
+        required_files = ['drums.mp3', 'vocals.mp3', 'bass.mp3', 'other.mp3']
+
+        # Verificar cada archivo
+        all_present = True
+        for archivo in required_files:
+            if not (base_path / archivo).exists():
+                all_present = False
+                break
+
+        if all_present:
+            # ✅ Todos presentes
+            self.verification_timer.stop()
+            self._verification_attempts = 0
+            self.scan_folder(Path("music_library"))
+            print(f"✅ Verificación completa: {self.last_in_queue['artist']} - {self.last_in_queue['song']}")
+        else:
+            # ⏳ Faltan archivos, incrementar contador
+            self._verification_attempts += 1
+            print(f"⏳ Intento {self._verification_attempts}/{MAX_ATTEMPTS} - Esperando archivos completos...")
 
     def _cleanup_current_job(self):
         self.demucs_active = False
@@ -1093,84 +1083,6 @@ class AudioPlayer(QMainWindow):
                     styled_message_box(self, "Error", f"Error cargando {json_file}: {str(e)}",QMessageBox.Icon.Critical)
         self.update_status()
 
-    def _ask_replace_lyrics(self, lrc_path: Path) -> bool:
-        dlg = BaseDialog(self, title="Letras existentes", size=(400, 180))
-        label = QLabel("Ya hay un archivo de letras. ¿Deseas sobrescribirlo?")
-        label.setWordWrap(True)
-        dlg.layout.addWidget(label)
-
-        btn_layout = QHBoxLayout()
-        yes_btn = QPushButton("Sí")
-        no_btn = QPushButton("No")
-        btn_layout.addWidget(yes_btn)
-        btn_layout.addWidget(no_btn)
-        dlg.layout.addLayout(btn_layout)
-
-        yes_btn.clicked.connect(dlg.accept)
-        no_btn.clicked.connect(dlg.reject)
-
-        bg_image(dlg, "images/split_dialog/split.png")  # tu fondo
-        return dlg.exec() == dlg.DialogCode.Accepted
-
-    def extract_lyrics_from_vocals(self, artist: str, song: str, dir_path: Path,
-                                   model_name: str = "base"):
-        vocals = dir_path / "separated" / "vocals.mp3"
-        lrc = dir_path / "lyrics.lrc"
-
-        if not vocals.exists():
-            self.lyrics_extraction_error.emit("No se encontró vocals.mp3")
-            return
-
-        # Preguntar antes de sobrescribir
-        if lrc.exists():
-            if not self._ask_replace_lyrics(lrc):
-                return
-
-        params = LyricsParams(
-            vocals_path=vocals,
-            lrc_path=lrc,
-            artist=artist,
-            song=song,
-            model_name=model_name
-        )
-
-#        self._start_extraction_thread(params)
-
-        # Diálogo de progreso
-        self.whisper_dlg = WhisperDialog(self)
-        self.whisper_dlg.model_selected.connect(
-            lambda m: self._start_extraction_thread(params))
-        self.whisper_dlg.show()
-
-    def _start_extraction_thread(self, params: LyricsParams):
-        self.extract_thread = QThread()
-        if params.model_name == "large-v2":
-            self.extract_worker = LyricsExtractorWhisperX(params)
-        else:
-            self.extract_worker = LyricsExtractorWorker(params)
-        self.extract_worker.moveToThread(self.extract_thread)
-
-        self.extract_thread.started.connect(self.extract_worker.run)
-        self.extract_worker.finished.connect(self._lyrics_extraction_done)
-        self.extract_worker.error.connect(self._on_lyrics_extraction_error)
-        self.extract_worker.progress.connect(self.whisper_dlg.set_progress)
-
-        # self.extract_worker.finished.connect(self.extract_thread.quit)
-        # self.extract_worker.error.connect(self.extract_thread.quit)
-        self.extract_worker.finished.connect(self.whisper_dlg._close_after_job)
-        self.extract_worker.error.connect(self.whisper_dlg._close_after_job)
-        self.extract_thread.finished.connect(self.extract_thread.deleteLater)
-
-        self.extract_thread.start()
-
-    def _lyrics_extraction_done(self, lrc_path: str):
-        self.load_lyrics(Path(lrc_path))
-        styled_message_box(self, "Listo", "Letras extraídas desde la voz.")
-
-    def _on_lyrics_extraction_error(self, msg: str):
-        styled_message_box(self, "Error", f"No se pudieron extraer las letras:\n{msg}",
-                           QMessageBox.Icon.Critical)
-
     def _check_and_fetch_lyrics_async(self, dir_path, artist, song):
         def check_lyrics():
             lrc_path = dir_path / "lyrics.lrc"
@@ -1234,7 +1146,7 @@ class AudioPlayer(QMainWindow):
 
         if not lyrics:
             # Caso sin letras
-            content = '[00:00.00]<center style="color: #ff2626;">Letras no encontradas, Intenta extraer desde audio</center>\n'
+            content = '[00:00.00]<center style="color: #ff2626;">Letras no encontradas</center>\n'
         else:
             # Procesar cada línea de letras
             processed_lines = []
@@ -1435,6 +1347,8 @@ class AudioPlayer(QMainWindow):
         self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
         self.progress_song.setValue(0)
         self.current_channels = []
+        self.lyrics = []
+        self._last_progress_seconds = -1
         self.update_lyrics_menu_state()
         self.lyrics_header.clear()
         self.lyrics_current.clear()
@@ -1478,9 +1392,16 @@ class AudioPlayer(QMainWindow):
 
     def _update_metadata(self):
         try:
+            self.lyrics_header.clear()
+            self.lyrics_current.clear()
+            self.lyrics_next.clear()
+
             song = self.playlist[self.current_index]
             path = Path(song["path"])
             lrc_path = path / "lyrics.lrc"
+            # if lrc_path.exists():
+            #     with open(lrc_path, 'r', encoding='utf-8') as f:
+            #          print(f"[DEBUG] Primera línea: {f.readline().strip()}")
 
             # Actualizar título de ventana
             title = f"{song['artist']} - {song['song']}"
@@ -1623,6 +1544,7 @@ class AudioPlayer(QMainWindow):
                     if current_time is not None:
                         self.lyrics.append((current_time, '\n'.join(current_text)))
 
+
                     # Nuevo timestamp
                     minutos = int(time_match.group(1))
                     segundos = float(time_match.group(2))
@@ -1636,6 +1558,7 @@ class AudioPlayer(QMainWindow):
             # Agregar el último bloque
             if current_time is not None:
                 self.lyrics.append((current_time, '\n'.join(current_text)))
+
 
         # Actualizar al cargar lyrics
         self.update_lyrics_menu_state()
@@ -1680,9 +1603,13 @@ class AudioPlayer(QMainWindow):
         self.delay_action.setEnabled(enabled)
 
     def _lyrics_has_error(self):
-        if not self.lyrics:
+        if not self.lyrics or not isinstance(self.lyrics, list):
             return True
-        return any("no se encontraron las letras" in line[1] for line in self.lyrics)
+        for _, html in self.lyrics:
+            text = html.lower()
+            if "no se encontraron" in text or "letras no encontradas" in text:
+                return True
+        return False
 
     def adjust_lyrics_timing(self, offset):
         try:
@@ -1822,18 +1749,39 @@ class AudioPlayer(QMainWindow):
             del self.playlist[row]
         self.update_status()
 
+
     def update_display(self):
-        if self.playback_state == "Activa" and self.current_channels:
-            pos = pygame.mixer.get_busy()
-            if not pos:
+        # Early return para evitar procesamiento innecesario
+        if self.playback_state != "Activa" or not self.current_channels:
+            return
+
+        try:
+            # Verificar si el mixer sigue ocupado
+            if not pygame.mixer.get_busy():
+                # La canción terminó naturalmente, pasar a la siguiente
                 self.play_next()
-            else:
-                current_time_ms = self.progress_song.value() + 1000
+                return
+
+            # Actualizar progreso solo si hay cambios significativos
+            current_time_ms = self.progress_song.value() + 1000
+
+            # Verificar límites para evitar desbordamiento
+            if current_time_ms <= self.progress_song.maximum():
                 self.progress_song.setValue(current_time_ms)
 
-                # Actualizar el texto del progreso
+                # Actualizar el texto del progreso de forma más eficiente
                 current_seconds = current_time_ms // 1000
                 total_seconds = self.progress_song.maximum() // 1000
+
+                # Inicializar el atributo si no existe
+                if not hasattr(self, '_last_progress_seconds'):
+                    self._last_progress_seconds = -1
+
+                # Evitar recálculos innecesarios si los valores no cambiaron
+                if self._last_progress_seconds == current_seconds:
+                    return
+
+                self._last_progress_seconds = current_seconds
 
                 current_mins, current_secs = divmod(current_seconds, 60)
                 total_mins, total_secs = divmod(total_seconds, 60)
@@ -1841,6 +1789,18 @@ class AudioPlayer(QMainWindow):
                 self.progress_song.setFormat(
                     f"{current_mins:02d}:{current_secs:02d} / {total_mins:02d}:{total_secs:02d}"
                 )
+            else:
+                # Si se excedió el máximo, terminar la canción
+                self.play_next()
+
+        except pygame.error as e:
+            # Manejar errores del mixer de forma elegante
+            print(f"Error en mixer durante actualización: {e}")
+            self.stop_playback()
+        except Exception as e:
+            # Manejar cualquier otro error inesperado
+            print(f"Error inesperado en update_display: {e}")
+            self.stop_playback()
 
     def update_status(self):
         try:
