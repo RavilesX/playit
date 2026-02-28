@@ -12,7 +12,8 @@ class VisualCWorker(QObject):
                 'winget', 'install', 'Microsoft.VCRedist.2015+.x64',
                 '--accept-source-agreements', '--accept-package-agreements'
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
+                                    creationflags=subprocess.CREATE_NO_WINDOW)
             if result.returncode != 0:
                 self.error.emit(f"Error instalando Visual C++:\n{result.stderr}")
             else:

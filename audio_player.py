@@ -465,10 +465,13 @@ class AudioPlayer(QMainWindow):
             self.python_available = False
 
     def _check_vc_installation(self):
-        """Verifica si Visual C++ 2022 X64 está instalado mediante reg query."""
+        """Verifica si Visual C++ 2022 X64 está instalado, sin mostrar ventana."""
         try:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
             cmd = 'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall" /s /f "Visual C++ 2022 X64" 2>nul | findstr /i "DisplayName"'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, startupinfo=startupinfo)
             self.vc_available = (result.returncode == 0)
         except Exception:
             self.vc_available = False
