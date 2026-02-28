@@ -424,8 +424,6 @@ class AudioPlayer(QMainWindow):
                     Qt.AspectRatioMode.IgnoreAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 ))
-            #self.background_label.lower()
-
 
     def load_demucs_model(self):
         try:
@@ -613,6 +611,56 @@ class AudioPlayer(QMainWindow):
         icon = self.lazy_images.load_icon_cached(resource_path(path), (120, 120))
         btn.setIcon(icon)
 
+    def install_python(self):
+        styled_message_box(
+            self,
+            "Instalar Python",
+            "Puede descargar Python desde https://www.python.org/downloads/\n\n"
+            "Una vez instalado, asegúrese de agregarlo al PATH.",
+            QMessageBox.Icon.Information
+        )
+
+    def install_demucs(self):
+        styled_message_box(
+            self,
+            "Instalar Demucs",
+            "Ejecute el siguiente comando en su terminal:\n\n"
+            "pip install demucs\n\n"
+            "Asegúrese de tener Python y pip instalados.",
+            QMessageBox.Icon.Information
+        )
+
+    def add_env_vars(self):
+        styled_message_box(
+            self,
+            "Variables de Ambiente",
+            "Para agregar Python y sus scripts al PATH:\n\n"
+            "1. Busque 'Variables de entorno' en Windows.\n"
+            "2. En 'Variables del sistema', edite la variable 'Path'.\n"
+            "3. Agregue las rutas donde instaló Python (ej. C:\\Python39 y C:\\Python39\\Scripts).\n"
+            "4. Acepte los cambios y reinicie la aplicación.",
+            QMessageBox.Icon.Information
+        )
+
+    def install_ytdlp(self):
+        styled_message_box(
+            self,
+            "Instalar YT-DLP",
+            "Ejecute el siguiente comando en su terminal:\n\n"
+            "pip install yt-dlp\n\n"
+            "Luego podrá descargar audio desde YouTube.",
+            QMessageBox.Icon.Information
+        )
+
+    def download_mp3(self):
+        styled_message_box(
+            self,
+            "Descargar MP3",
+            "Funcionalidad en desarrollo.\n\n"
+            "Próximamente podrá descargar audio desde YouTube directamente.",
+            QMessageBox.Icon.Information
+        )
+
     def show_about_dialog(self):
         dialog = AboutDialog(self)
         bg_image(dialog, 'images/split_dialog/split.png')
@@ -706,6 +754,31 @@ class AudioPlayer(QMainWindow):
         cleanup_action = QAction("Limpiar Cache", self)
         cleanup_action.triggered.connect(self.cleanup_resources_manual)
         options_menu.addAction(cleanup_action)
+
+        dependencias_menu = options_menu.addMenu("Dependencias")
+
+        install_python_action = QAction("Instalar Python", self)
+        install_python_action.triggered.connect(self.install_python)
+        dependencias_menu.addAction(install_python_action)
+
+        install_demucs_action = QAction("Instalar Demucs", self)
+        install_demucs_action.triggered.connect(self.install_demucs)
+        dependencias_menu.addAction(install_demucs_action)
+
+        add_env_vars_action = QAction("Agregar Variables de Ambiente", self)
+        add_env_vars_action.triggered.connect(self.add_env_vars)
+        dependencias_menu.addAction(add_env_vars_action)
+
+        install_ytdlp_action = QAction("Instalar YT-DLP (Youtube -> MP3)", self)
+        install_ytdlp_action.triggered.connect(self.install_ytdlp)
+        dependencias_menu.addAction(install_ytdlp_action)
+
+        # Separador opcional
+        options_menu.addSeparator()
+
+        download_mp3_action = QAction("Descargar MP3...", self)
+        download_mp3_action.triggered.connect(self.download_mp3)
+        options_menu.addAction(download_mp3_action)
 
         about_action = QAction("Sobre Playit", self)
         about_action.triggered.connect(self.show_about_dialog)
@@ -1417,9 +1490,6 @@ class AudioPlayer(QMainWindow):
             song = self.playlist[self.current_index]
             path = Path(song["path"])
             lrc_path = path / "lyrics.lrc"
-            # if lrc_path.exists():
-            #     with open(lrc_path, 'r', encoding='utf-8') as f:
-            #          print(f"[DEBUG] Primera línea: {f.readline().strip()}")
 
             # Actualizar título de ventana
             title = f"{song['artist']} - {song['song']}"
@@ -1563,8 +1633,6 @@ class AudioPlayer(QMainWindow):
                     if current_time is not None:
                         self.lyrics.append((current_time, '\n'.join(current_text)))
 
-
-                    # Nuevo timestamp
                     minutos = int(time_match.group(1))
                     segundos = float(time_match.group(2))
                     current_time = minutos * 60 + segundos
@@ -1851,9 +1919,7 @@ class AudioPlayer(QMainWindow):
             status_parts = [part for part in status_parts if part]
 
             self.status_label.setText(" | ".join(status_parts))
-            # self.status_bar.showMessage(" | ".join(status_parts))
-            # self.status_bar.raise_()
-            # self.status_bar.setVisible(True)
+
 
         except Exception as e:
             # Status de emergencia
