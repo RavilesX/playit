@@ -178,6 +178,7 @@ class AudioPlayer(QMainWindow):
 
         # Inicializar menú y barra de estado
         self.init_menu()
+        # self.menuBar().installEventFilter(self)
         self.init_status_bar()
 
     def _create_main_frame(self):
@@ -365,7 +366,8 @@ class AudioPlayer(QMainWindow):
         self.lyrics_current.setHtml('<center>No hay letras disponibles</center>')
 
     def _on_playlist_loaded(self):
-        self.status_bar.showMessage(f"Playlist cargada: {len(self.playlist)} canciones")
+        # self.status_bar.showMessage(f"Playlist cargada: {len(self.playlist)} canciones")
+        self.status_label.setText(f"Playlist cargada: {len(self.playlist)} canciones")
         self.update_status()
 
     def _setup_timers(self):
@@ -422,11 +424,11 @@ class AudioPlayer(QMainWindow):
                     Qt.AspectRatioMode.IgnoreAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 ))
+            #self.background_label.lower()
+
 
     def load_demucs_model(self):
-        from demucs_worker import DemucsWorker
         try:
-
             # Verificación directa con subprocess
             result = subprocess.run(
                 ['demucs', '--help'],
@@ -434,26 +436,14 @@ class AudioPlayer(QMainWindow):
                 text=True,
                 shell=True
             )
-
             if result.returncode != 0:
                 raise RuntimeError(f"Demucs returned error: {result.stderr}")
-
             self.demucs_available = True
-
         except Exception as e:
-
             error_msg = f"Error checking Demucs: {str(e)}"
             with open("demucs_error.log", "w") as f:
                 f.write(error_msg)
-            styled_message_box(
-                self,
-                "Error",
-                f"No se pudo acceder a Demucs:\n{error_msg}\n\n"
-                "Asegúrese que:\n"
-                "1. Demucs está instalado (pip install demucs)\n"
-                "2. Python está en el PATH del sistema\n"
-                "3. El ejecutable se usa en la misma terminal donde funciona demucs"
-            ,QMessageBox.Icon.Critical)
+
             self.demucs_available = False
 
 
@@ -649,6 +639,11 @@ class AudioPlayer(QMainWindow):
         painter.setBrush(QColor(0, 0, 0, 50))
         painter.drawRoundedRect(self.rect(), 8, 8)
 
+    # def eventFilter(self, obj, event):
+    #     if obj is self.menuBar() and event.type() == QEvent.Type.Enter:
+    #         print("Menú activado - barra visible:", self.status_bar.isVisible())
+    #     return super().eventFilter(obj, event)
+
     def init_menu(self):
         menu = self.menuBar()
         file_menu = menu.addMenu("Archivo")
@@ -663,6 +658,9 @@ class AudioPlayer(QMainWindow):
         split_action = QAction("Dividir...", self)
         split_action.setShortcut(QKeySequence("Ctrl+D"))
         split_action.triggered.connect(self.show_split_dialog)
+        split_action.setEnabled(self.demucs_available)
+        if not self.demucs_available:
+            split_action.setToolTip("Demucs no está instalado o no es accesible")
         file_menu.addAction(split_action)
 
         remove_action = QAction("Remover", self)
@@ -790,6 +788,16 @@ class AudioPlayer(QMainWindow):
             self.search_index += 1
 
     def show_split_dialog(self):
+        if not self.demucs_available:
+            styled_message_box(
+                self,
+                "Funcionalidad no disponible",
+                "La separación de pistas requiere Demucs, pero no está instalado o no es accesible.\n\n"
+                "Puede instalar Demucs con: pip install demucs",
+                QMessageBox.Icon.Warning
+            )
+            return
+
         self.split_dialog = SplitDialog(self)
         bg_image(self.split_dialog, 'images/split_dialog/split.png')
         self.split_dialog.process_started.connect(self.process_song)
@@ -1009,6 +1017,16 @@ class AudioPlayer(QMainWindow):
     def init_status_bar(self):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+
+        # Crear QLabel permanente (siempre visible)
+        self.status_label = QLabel()
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        # Añadirlo como widget permanente
+        self.status_bar.addPermanentWidget(self.status_label, stretch=1)
+
+        # Mensaje temporal opcional (se borrará después de 3 segundos)
+        self.status_bar.showMessage("Listo", 3000)
+
         self.update_status()
 
     def load_folder(self, path: str = None):
@@ -1023,14 +1041,14 @@ class AudioPlayer(QMainWindow):
             self.clear_playlist()
 
             # Mostrar indicador de carga
-            self.status_bar.showMessage("Cargando playlist...")
+            self.status_label.setText("Cargando playlist...")
 
             # Usar lazy loading para cargar la carpeta
             try:
                 self.lazy_playlist.load_playlist_lazy(Path(path))
             except Exception as e:
                 styled_message_box(self, "Error", f"Error iniciando carga: {str(e)}", QMessageBox.Icon.Critical)
-                self.status_bar.showMessage("Error cargando playlist")
+                self.status_label.setText("Error cargando playlist")
 
     def reset_search_indices(self):
         self.search_results = []
@@ -1528,6 +1546,7 @@ class AudioPlayer(QMainWindow):
                 f"Error durante la limpieza: {str(e)}",
                 QMessageBox.Icon.Warning
             )
+        self.update_status()
 
     def load_lyrics(self, file_path):
         self.lyrics = []
@@ -1827,14 +1846,18 @@ class AudioPlayer(QMainWindow):
                 f"Hora: {datetime.now().strftime('%H:%M')}"
             ]
 
+
             # Filtrar partes vacías
             status_parts = [part for part in status_parts if part]
 
-            self.status_bar.showMessage(" | ".join(status_parts))
+            self.status_label.setText(" | ".join(status_parts))
+            # self.status_bar.showMessage(" | ".join(status_parts))
+            # self.status_bar.raise_()
+            # self.status_bar.setVisible(True)
 
         except Exception as e:
             # Status de emergencia
-            self.status_bar.showMessage(f"Canciones: {len(self.playlist)} | Estado: {self.playback_state}")
+            self.status_label.setText(f"Canciones: {len(self.playlist)} | Estado: {self.playback_state}")
 
     def _format_demucs_progress(self):
         if not self.demucs_active and not self.demucs_queue:
