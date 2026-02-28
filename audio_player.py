@@ -16,6 +16,7 @@ import requests
 from urllib.parse import quote
 import unicodedata
 from demucs_worker import DemucsWorker
+from python_worker import PythonInstallWorker
 from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
 from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog
@@ -99,6 +100,7 @@ class AudioPlayer(QMainWindow):
         self.demucs_queue = []  # Cola de trabajos pendientes
         self.processing_multiple = False  # Indica si hay múltiples trabajos
         self.lyrics_lock = threading.Lock()
+        self.python_available = False
 
         # Variables de audio
         self.volume = 25
@@ -144,9 +146,10 @@ class AudioPlayer(QMainWindow):
     def _setup_audio_system(self):
         self._initialize_pygame_mixer()
 
-        # verificación modelo Demucs
+        # verificación modelo Demucs y python
         self.demucs_model = None
         self.load_demucs_model()
+        self._check_python_installation()
 
     def _initialize_pygame_mixer(self):
         """Inicializa el sistema de audio Pygame."""
@@ -444,7 +447,19 @@ class AudioPlayer(QMainWindow):
 
             self.demucs_available = False
 
-
+    def _check_python_installation(self):
+        """Verifica si Python está instalado ejecutando 'python --version'."""
+        try:
+            result = subprocess.run(
+                ['python', '--version'],
+                capture_output=True,
+                text=True,
+                shell=True,
+                timeout=5
+            )
+            self.python_available = (result.returncode == 0)
+        except Exception:
+            self.python_available = False
 
     def init_leds(self):
         self.prev_btn = QPushButton()
@@ -612,13 +627,68 @@ class AudioPlayer(QMainWindow):
         btn.setIcon(icon)
 
     def install_python(self):
+        if self.python_available:
+            styled_message_box(
+                self,
+                "Python ya instalado",
+                "Python ya está instalado en el sistema.",
+                QMessageBox.Icon.Information
+            )
+            return
+
+        # Confirmación del usuario
+        reply = styled_message_box(
+            self,
+            "Confirmar instalación",
+            "Se instalará Python 3.11.0 mediante winget.\n"
+            "Esto puede tomar varios minutos y requiere permisos de administrador.\n\n"
+            "¿Desea continuar?",
+            QMessageBox.Icon.Question,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Ejecutar en un hilo separado
+        self.install_thread = QThread()
+        self.install_worker = PythonInstallWorker()
+        self.install_worker.moveToThread(self.install_thread)
+
+        self.install_thread.started.connect(self.install_worker.run)
+        self.install_worker.finished.connect(self._on_python_install_finished)
+        self.install_worker.error.connect(self._on_python_install_error)
+        self.install_worker.finished.connect(self.install_thread.quit)
+        self.install_worker.finished.connect(self.install_worker.deleteLater)
+        self.install_thread.finished.connect(self.install_thread.deleteLater)
+
+        # Mostrar indicador en barra de estado
+        self.status_label.setText("Instalando Python...")
+        self.install_thread.start()
+
+    def _on_python_install_finished(self):
+        self.status_label.setText("Python instalado correctamente.")
+        self.python_available = True
+        self._update_python_menu_action()
         styled_message_box(
             self,
-            "Instalar Python",
-            "Puede descargar Python desde https://www.python.org/downloads/\n\n"
-            "Una vez instalado, asegúrese de agregarlo al PATH.",
+            "Instalación completada",
+            "Python se instaló correctamente.\n"
+            "Es posible que necesite reiniciar la aplicación para que los cambios surtan efecto.",
             QMessageBox.Icon.Information
         )
+
+    def _on_python_install_error(self, error_msg):
+        self.status_label.setText("Error instalando Python.")
+        styled_message_box(
+            self,
+            "Error de instalación",
+            error_msg,
+            QMessageBox.Icon.Critical
+        )
+
+    def _update_python_menu_action(self):
+        if hasattr(self, 'install_python_action'):
+            self.install_python_action.setEnabled(not self.python_available)
 
     def install_demucs(self):
         styled_message_box(
@@ -627,6 +697,14 @@ class AudioPlayer(QMainWindow):
             "Ejecute el siguiente comando en su terminal:\n\n"
             "pip install demucs\n\n"
             "Asegúrese de tener Python y pip instalados.",
+            QMessageBox.Icon.Information
+        )
+
+    def install_CUDA(self):
+        styled_message_box(
+            self,
+            "Instalar CUDA:",
+            "Funcionalidad en Desarrollo todavía:",
             QMessageBox.Icon.Information
         )
 
@@ -757,13 +835,18 @@ class AudioPlayer(QMainWindow):
 
         dependencias_menu = options_menu.addMenu("Dependencias")
 
-        install_python_action = QAction("Instalar Python", self)
-        install_python_action.triggered.connect(self.install_python)
-        dependencias_menu.addAction(install_python_action)
+        self.install_python_action = QAction("Instalar Python", self)
+        self.install_python_action.triggered.connect(self.install_python)
+        self.install_python_action.setEnabled(not self.python_available)
+        dependencias_menu.addAction(self.install_python_action)
 
         install_demucs_action = QAction("Instalar Demucs", self)
         install_demucs_action.triggered.connect(self.install_demucs)
         dependencias_menu.addAction(install_demucs_action)
+
+        install_CUDA_action = QAction("Instalar CUDA (chip Nvidia)", self)
+        install_CUDA_action.triggered.connect(self.install_CUDA)
+        dependencias_menu.addAction(install_CUDA_action)
 
         add_env_vars_action = QAction("Agregar Variables de Ambiente", self)
         add_env_vars_action.triggered.connect(self.add_env_vars)
