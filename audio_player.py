@@ -17,6 +17,7 @@ from urllib.parse import quote
 import unicodedata
 from demucs_worker import DemucsWorker
 from python_worker import PythonInstallWorker
+from visualc_worker import VisualCWorker
 from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
 from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog
@@ -101,6 +102,7 @@ class AudioPlayer(QMainWindow):
         self.processing_multiple = False  # Indica si hay múltiples trabajos
         self.lyrics_lock = threading.Lock()
         self.python_available = False
+        self.vc_available = False
 
         # Variables de audio
         self.volume = 25
@@ -150,6 +152,7 @@ class AudioPlayer(QMainWindow):
         self.demucs_model = None
         self.load_demucs_model()
         self._check_python_installation()
+        self._check_vc_installation()
 
     def _initialize_pygame_mixer(self):
         """Inicializa el sistema de audio Pygame."""
@@ -461,6 +464,15 @@ class AudioPlayer(QMainWindow):
         except Exception:
             self.python_available = False
 
+    def _check_vc_installation(self):
+        """Verifica si Visual C++ 2022 X64 está instalado mediante reg query."""
+        try:
+            cmd = 'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall" /s /f "Visual C++ 2022 X64" 2>nul | findstr /i "DisplayName"'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            self.vc_available = (result.returncode == 0)
+        except Exception:
+            self.vc_available = False
+
     def init_leds(self):
         self.prev_btn = QPushButton()
         self.prev_btn.setObjectName('prev_btn')
@@ -690,6 +702,66 @@ class AudioPlayer(QMainWindow):
         if hasattr(self, 'install_python_action'):
             self.install_python_action.setEnabled(not self.python_available)
 
+    def install_vc(self):
+        if self.vc_available:
+            styled_message_box(
+                self,
+                "Visual C++ ya instalado",
+                "Visual C++ Redistributable ya está instalado en el sistema.",
+                QMessageBox.Icon.Information
+            )
+            return
+
+        reply = styled_message_box(
+            self,
+            "Confirmar instalación",
+            "Se instalará Microsoft Visual C++ Redistributable (x64) mediante winget.\n"
+            "Esto requiere permisos de administrador.\n\n"
+            "¿Desea continuar?",
+            QMessageBox.Icon.Question,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.vc_thread = QThread()
+        self.vc_worker = VisualCWorker()
+        self.vc_worker.moveToThread(self.vc_thread)
+
+        self.vc_thread.started.connect(self.vc_worker.run)
+        self.vc_worker.finished.connect(self._on_vc_install_finished)
+        self.vc_worker.error.connect(self._on_vc_install_error)
+        self.vc_worker.finished.connect(self.vc_thread.quit)
+        self.vc_worker.finished.connect(self.vc_worker.deleteLater)
+        self.vc_thread.finished.connect(self.vc_thread.deleteLater)
+
+        self.status_label.setText("Instalando Visual C++...")
+        self.vc_thread.start()
+
+    def _on_vc_install_finished(self):
+        self.status_label.setText("Visual C++ instalado correctamente.")
+        self.vc_available = True
+        self._update_vc_menu_action()
+        styled_message_box(
+            self,
+            "Instalación completada",
+            "Visual C++ Redistributable se instaló correctamente.",
+            QMessageBox.Icon.Information
+        )
+
+    def _on_vc_install_error(self, error_msg):
+        self.status_label.setText("Error instalando Visual C++.")
+        styled_message_box(
+            self,
+            "Error de instalación",
+            error_msg,
+            QMessageBox.Icon.Critical
+        )
+
+    def _update_vc_menu_action(self):
+        if hasattr(self, 'install_vc_action'):
+            self.install_vc_action.setEnabled(not self.vc_available)
+
     def install_demucs(self):
         styled_message_box(
             self,
@@ -847,6 +919,11 @@ class AudioPlayer(QMainWindow):
         install_CUDA_action = QAction("Instalar CUDA (chip Nvidia)", self)
         install_CUDA_action.triggered.connect(self.install_CUDA)
         dependencias_menu.addAction(install_CUDA_action)
+
+        self.install_vc_action = QAction("Instalar Visual C++", self)
+        self.install_vc_action.triggered.connect(self.install_vc)
+        self.install_vc_action.setEnabled(not self.vc_available)
+        dependencias_menu.addAction(self.install_vc_action)
 
         add_env_vars_action = QAction("Agregar Variables de Ambiente", self)
         add_env_vars_action.triggered.connect(self.add_env_vars)
