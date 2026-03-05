@@ -18,6 +18,9 @@ import unicodedata
 from demucs_worker import DemucsWorker
 from python_worker import PythonInstallWorker
 from visualc_worker import VisualCWorker
+from ytdlp_worker import YTDLPWorker
+from ffmpeg_worker import FFmpegWorker
+from demucs_install_worker import DemucsInstallWorker
 from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
 from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog
@@ -103,6 +106,9 @@ class AudioPlayer(QMainWindow):
         self.lyrics_lock = threading.Lock()
         self.python_available = False
         self.vc_available = False
+        self.ytdlp_available = False
+        self.demucs_install_in_progress = False
+        self.ffmpeg_available = False
 
         # Variables de audio
         self.volume = 25
@@ -148,11 +154,13 @@ class AudioPlayer(QMainWindow):
     def _setup_audio_system(self):
         self._initialize_pygame_mixer()
 
-        # verificación modelo Demucs y python
+        # verificación de dependencias
         self.demucs_model = None
         self.load_demucs_model()
         self._check_python_installation()
+        self._check_ffmpeg_installation()
         self._check_vc_installation()
+        self._check_ytdlp_installation()
 
     def _initialize_pygame_mixer(self):
         """Inicializa el sistema de audio Pygame."""
@@ -476,6 +484,40 @@ class AudioPlayer(QMainWindow):
         except Exception:
             self.vc_available = False
 
+    def _check_ytdlp_installation(self):
+        """Verifica si yt-dlp está instalado ejecutando 'yt-dlp --version'."""
+        try:
+            result = subprocess.run(
+                ['yt-dlp', '--version'],
+                capture_output=True,
+                text=True,
+                shell=True,
+                timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            self.ytdlp_available = (result.returncode == 0)
+        except Exception:
+            self.ytdlp_available = False
+
+    def _check_ffmpeg_installation(self):
+        """Verifica si FFmpeg está instalado ejecutando 'ffmpeg -version'."""
+        try:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+
+            result = subprocess.run(
+                ['ffmpeg', '-version'],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            self.ffmpeg_available = (result.returncode == 0)
+        except Exception:
+            self.ffmpeg_available = False
+
     def init_leds(self):
         self.prev_btn = QPushButton()
         self.prev_btn.setObjectName('prev_btn')
@@ -641,6 +683,67 @@ class AudioPlayer(QMainWindow):
         icon = self.lazy_images.load_icon_cached(resource_path(path), (120, 120))
         btn.setIcon(icon)
 
+    def install_ffmpeg(self):
+        if self.ffmpeg_available:
+            styled_message_box(
+                self,
+                "FFmpeg ya instalado",
+                "FFmpeg ya está instalado en el sistema.",
+                QMessageBox.Icon.Information
+            )
+            return
+
+        reply = styled_message_box(
+            self,
+            "Confirmar instalación",
+            "Se instalará FFmpeg mediante winget.\n"
+            "Esto requiere permisos de administrador.\n\n"
+            "¿Desea continuar?",
+            QMessageBox.Icon.Question,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.ffmpeg_thread = QThread()
+        self.ffmpeg_worker = FFmpegWorker()
+        self.ffmpeg_worker.moveToThread(self.ffmpeg_thread)
+
+        self.ffmpeg_thread.started.connect(self.ffmpeg_worker.run)
+        self.ffmpeg_worker.finished.connect(self._on_ffmpeg_install_finished)
+        self.ffmpeg_worker.error.connect(self._on_ffmpeg_install_error)
+        self.ffmpeg_worker.finished.connect(self.ffmpeg_thread.quit)
+        self.ffmpeg_worker.finished.connect(self.ffmpeg_worker.deleteLater)
+        self.ffmpeg_thread.finished.connect(self.ffmpeg_thread.deleteLater)
+
+        self.status_label.setText("Instalando FFmpeg...")
+        self.ffmpeg_thread.start()
+
+    def _on_ffmpeg_install_finished(self):
+        self.status_label.setText("FFmpeg instalado correctamente.")
+        self.ffmpeg_available = True
+        self._update_ffmpeg_menu_action()
+        styled_message_box(
+            self,
+            "Instalación completada",
+            "FFmpeg se instaló correctamente.",
+            QMessageBox.Icon.Information
+        )
+
+    def _on_ffmpeg_install_error(self, error_msg):
+        self.status_label.setText("Error instalando FFmpeg.")
+        styled_message_box(
+            self,
+            "Error de instalación",
+            error_msg,
+            QMessageBox.Icon.Critical
+        )
+
+    def _update_ffmpeg_menu_action(self):
+        if hasattr(self, 'install_ffmpeg_action'):
+            self.install_ffmpeg_action.setEnabled(not self.ffmpeg_available)
+
+
     def install_python(self):
         if self.python_available:
             styled_message_box(
@@ -692,6 +795,7 @@ class AudioPlayer(QMainWindow):
             QMessageBox.Icon.Information
         )
 
+
     def _on_python_install_error(self, error_msg):
         self.status_label.setText("Error instalando Python.")
         styled_message_box(
@@ -704,6 +808,7 @@ class AudioPlayer(QMainWindow):
     def _update_python_menu_action(self):
         if hasattr(self, 'install_python_action'):
             self.install_python_action.setEnabled(not self.python_available)
+            self._update_demucs_menu_actions()
 
     def install_vc(self):
         if self.vc_available:
@@ -745,6 +850,7 @@ class AudioPlayer(QMainWindow):
         self.status_label.setText("Visual C++ instalado correctamente.")
         self.vc_available = True
         self._update_vc_menu_action()
+        self._update_demucs_menu_actions()
         styled_message_box(
             self,
             "Instalación completada",
@@ -766,14 +872,90 @@ class AudioPlayer(QMainWindow):
             self.install_vc_action.setEnabled(not self.vc_available)
 
     def install_demucs(self):
+        if self.demucs_available:
+            styled_message_box(
+                self,
+                "Demucs ya instalado",
+                "Demucs ya está instalado en el sistema.",
+                QMessageBox.Icon.Information
+            )
+            return
+
+        if not self.python_available:
+            styled_message_box(
+                self,
+                "Python requerido",
+                "Debe instalar Python antes de instalar Demucs.",
+                QMessageBox.Icon.Warning
+            )
+            return
+
+        if self.demucs_install_in_progress:
+            styled_message_box(
+                self,
+                "Instalación en curso",
+                "Ya hay una instalación de Demucs en progreso.",
+                QMessageBox.Icon.Information
+            )
+            return
+
+        reply = styled_message_box(
+            self,
+            "Confirmar instalación",
+            "Se instalará Demucs y se descargará el modelo htdemucs_ft.\n"
+            "Esto puede tomar varios minutos y requiere conexión a internet.\n\n"
+            "¿Desea continuar?",
+            QMessageBox.Icon.Question,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.demucs_install_in_progress = True
+        self.demucs_install_thread = QThread()
+        self.demucs_install_worker = DemucsInstallWorker()
+        self.demucs_install_worker.moveToThread(self.demucs_install_thread)
+
+        self.demucs_install_thread.started.connect(self.demucs_install_worker.run)
+        self.demucs_install_worker.finished.connect(self._on_demucs_install_finished)
+        self.demucs_install_worker.error.connect(self._on_demucs_install_error)
+        self.demucs_install_worker.finished.connect(self.demucs_install_thread.quit)
+        self.demucs_install_worker.finished.connect(self.demucs_install_worker.deleteLater)
+        self.demucs_install_thread.finished.connect(self.demucs_install_thread.deleteLater)
+
+        self.status_label.setText("Instalando Demucs...")
+        self.demucs_install_thread.start()
+
+    def _on_demucs_install_finished(self):
+        self.status_label.setText("Demucs instalado correctamente.")
+        self.demucs_available = True
+        self.demucs_install_in_progress = False
+        self.load_demucs_model()
+        self._update_demucs_menu_actions()
         styled_message_box(
             self,
-            "Instalar Demucs",
-            "Ejecute el siguiente comando en su terminal:\n\n"
-            "pip install demucs\n\n"
-            "Asegúrese de tener Python y pip instalados.",
+            "Instalación completada",
+            "Demucs se instaló correctamente y el modelo htdemucs_ft está listo.",
             QMessageBox.Icon.Information
         )
+
+    def _on_demucs_install_error(self, error_msg):
+        self.status_label.setText("Error instalando Demucs.")
+        self.demucs_install_in_progress = False
+        styled_message_box(
+            self,
+            "Error de instalación",
+            error_msg,
+            QMessageBox.Icon.Critical
+        )
+
+    def _update_demucs_menu_actions(self):
+        if hasattr(self, 'install_demucs_action'):
+            self.install_demucs_action.setEnabled(
+                self.python_available and self.vc_available and not self.demucs_available
+            )
+        if hasattr(self, 'split_action'):
+            self.split_action.setEnabled(self.demucs_available)
 
     def install_CUDA(self):
         styled_message_box(
@@ -783,29 +965,80 @@ class AudioPlayer(QMainWindow):
             QMessageBox.Icon.Information
         )
 
-    def add_env_vars(self):
-        styled_message_box(
-            self,
-            "Variables de Ambiente",
-            "Para agregar Python y sus scripts al PATH:\n\n"
-            "1. Busque 'Variables de entorno' en Windows.\n"
-            "2. En 'Variables del sistema', edite la variable 'Path'.\n"
-            "3. Agregue las rutas donde instaló Python (ej. C:\\Python39 y C:\\Python39\\Scripts).\n"
-            "4. Acepte los cambios y reinicie la aplicación.",
-            QMessageBox.Icon.Information
-        )
+
 
     def install_ytdlp(self):
+        if self.ytdlp_available:
+            styled_message_box(
+                self,
+                "yt-dlp ya instalado",
+                "yt-dlp ya está instalado en el sistema.",
+                QMessageBox.Icon.Information
+            )
+            return
+
+        reply = styled_message_box(
+            self,
+            "Confirmar instalación",
+            "Se instalará yt-dlp mediante winget.\n"
+            "Esto requiere permisos de administrador.\n\n"
+            "¿Desea continuar?",
+            QMessageBox.Icon.Question,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.ytdlp_thread = QThread()
+        self.ytdlp_worker = YTDLPWorker()
+        self.ytdlp_worker.moveToThread(self.ytdlp_thread)
+
+        self.ytdlp_thread.started.connect(self.ytdlp_worker.run)
+        self.ytdlp_worker.finished.connect(self._on_ytdlp_install_finished)
+        self.ytdlp_worker.error.connect(self._on_ytdlp_install_error)
+        self.ytdlp_worker.finished.connect(self.ytdlp_thread.quit)
+        self.ytdlp_worker.finished.connect(self.ytdlp_worker.deleteLater)
+        self.ytdlp_thread.finished.connect(self.ytdlp_thread.deleteLater)
+
+        self.status_label.setText("Instalando yt-dlp...")
+        self.ytdlp_thread.start()
+
+    def _on_ytdlp_install_finished(self):
+        self.status_label.setText("yt-dlp instalado correctamente.")
+        self.ytdlp_available = True
+        self._update_ytdlp_menu_actions()
         styled_message_box(
             self,
-            "Instalar YT-DLP",
-            "Ejecute el siguiente comando en su terminal:\n\n"
-            "pip install yt-dlp\n\n"
-            "Luego podrá descargar audio desde YouTube.",
+            "Instalación completada",
+            "yt-dlp se instaló correctamente.\n"
+            "Ahora puede usar la opción 'Descargar MP3...'.",
             QMessageBox.Icon.Information
         )
 
+    def _on_ytdlp_install_error(self, error_msg):
+        self.status_label.setText("Error instalando yt-dlp.")
+        styled_message_box(
+            self,
+            "Error de instalación",
+            error_msg,
+            QMessageBox.Icon.Critical
+        )
+
+    def _update_ytdlp_menu_actions(self):
+        if hasattr(self, 'install_ytdlp_action'):
+            self.install_ytdlp_action.setEnabled(not self.ytdlp_available)
+        if hasattr(self, 'download_mp3_action'):
+            self.download_mp3_action.setEnabled(self.ytdlp_available)
+
     def download_mp3(self):
+        if not self.ytdlp_available:
+            styled_message_box(
+                self,
+                "yt-dlp no instalado",
+                "Debe instalar yt-dlp primero desde el menú Opciones > Dependencias.",
+                QMessageBox.Icon.Warning
+            )
+            return
         styled_message_box(
             self,
             "Descargar MP3",
@@ -856,13 +1089,14 @@ class AudioPlayer(QMainWindow):
         load_action.triggered.connect(self.load_folder)
         file_menu.addAction(load_action)
 
-        split_action = QAction("Dividir...", self)
-        split_action.setShortcut(QKeySequence("Ctrl+D"))
-        split_action.triggered.connect(self.show_split_dialog)
-        split_action.setEnabled(self.demucs_available)
+        self.split_action = QAction("Dividir...", self)
+        self.split_action.setShortcut(QKeySequence("Ctrl+D"))
+        self.split_action.triggered.connect(self.show_split_dialog)
+        self.split_action.setEnabled(self.demucs_available)
         if not self.demucs_available:
-            split_action.setToolTip("Demucs no está instalado o no es accesible")
-        file_menu.addAction(split_action)
+            self.split_action.setToolTip("Demucs no está instalado o no es accesible"
+        )
+        file_menu.addAction(self.split_action)
 
         remove_action = QAction("Remover", self)
         remove_action.triggered.connect(self.remove_selected)
@@ -915,33 +1149,41 @@ class AudioPlayer(QMainWindow):
         self.install_python_action.setEnabled(not self.python_available)
         dependencias_menu.addAction(self.install_python_action)
 
-        install_demucs_action = QAction("Instalar Demucs", self)
-        install_demucs_action.triggered.connect(self.install_demucs)
-        dependencias_menu.addAction(install_demucs_action)
-
-        install_CUDA_action = QAction("Instalar CUDA (chip Nvidia)", self)
-        install_CUDA_action.triggered.connect(self.install_CUDA)
-        dependencias_menu.addAction(install_CUDA_action)
-
         self.install_vc_action = QAction("Instalar Visual C++", self)
         self.install_vc_action.triggered.connect(self.install_vc)
         self.install_vc_action.setEnabled(not self.vc_available)
         dependencias_menu.addAction(self.install_vc_action)
 
-        add_env_vars_action = QAction("Agregar Variables de Ambiente", self)
-        add_env_vars_action.triggered.connect(self.add_env_vars)
-        dependencias_menu.addAction(add_env_vars_action)
+        self.install_ffmpeg_action = QAction("Instalar FFmpeg", self)
+        self.install_ffmpeg_action.triggered.connect(self.install_ffmpeg)
+        self.install_ffmpeg_action.setEnabled(not self.ffmpeg_available)
+        dependencias_menu.addAction(self.install_ffmpeg_action)
 
-        install_ytdlp_action = QAction("Instalar YT-DLP (Youtube -> MP3)", self)
-        install_ytdlp_action.triggered.connect(self.install_ytdlp)
-        dependencias_menu.addAction(install_ytdlp_action)
+        self.install_demucs_action = QAction("Instalar Demucs", self)
+        self.install_demucs_action.triggered.connect(self.install_demucs)
+        # Habilita solo si Python y Visual C++ están instalados y Demucs no lo está
+        self.install_demucs_action.setEnabled(
+            self.python_available and self.vc_available and not self.demucs_available
+        )
+        dependencias_menu.addAction(self.install_demucs_action)
 
-        # Separador opcional
+        install_CUDA_action = QAction("Instalar CUDA (chip Nvidia)", self)
+        install_CUDA_action.triggered.connect(self.install_CUDA)
+        dependencias_menu.addAction(install_CUDA_action)
+
+
+        self.install_ytdlp_action = QAction("Instalar YT-DLP (Youtube -> MP3)", self)
+        self.install_ytdlp_action.triggered.connect(self.install_ytdlp)
+        self.install_ytdlp_action.setEnabled(not self.ytdlp_available)
+        dependencias_menu.addAction(self.install_ytdlp_action)
+
+        # Separador
         options_menu.addSeparator()
 
-        download_mp3_action = QAction("Descargar MP3...", self)
-        download_mp3_action.triggered.connect(self.download_mp3)
-        options_menu.addAction(download_mp3_action)
+        self.download_mp3_action = QAction("Descargar MP3...", self)
+        self.download_mp3_action.triggered.connect(self.download_mp3)
+        self.download_mp3_action.setEnabled(self.ytdlp_available)
+        options_menu.addAction(self.download_mp3_action)
 
         about_action = QAction("Sobre Playit", self)
         about_action.triggered.connect(self.show_about_dialog)
