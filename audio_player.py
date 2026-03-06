@@ -20,10 +20,11 @@ from python_worker import PythonInstallWorker
 from visualc_worker import VisualCWorker
 from ytdlp_worker import YTDLPWorker
 from ffmpeg_worker import FFmpegWorker
+from ytdlp_download_worker import YTDLPDownloadWorker
 from demucs_install_worker import DemucsInstallWorker
 from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
-from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog
+from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog,DownloadDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
 
 class AudioPlayer(QMainWindow):
@@ -952,7 +953,7 @@ class AudioPlayer(QMainWindow):
     def _update_demucs_menu_actions(self):
         if hasattr(self, 'install_demucs_action'):
             self.install_demucs_action.setEnabled(
-                self.python_available and self.vc_available and not self.demucs_available
+                self.python_available and self.vc_available and self.ffmpeg_available and not self.demucs_available
             )
         if hasattr(self, 'split_action'):
             self.split_action.setEnabled(self.demucs_available)
@@ -1039,12 +1040,53 @@ class AudioPlayer(QMainWindow):
                 QMessageBox.Icon.Warning
             )
             return
+
+        # Crear y mostrar el diálogo
+        dialog = DownloadDialog(self)
+        bg_image(dialog, 'images/split_dialog/split.png')  # mismo fondo que otros diálogos
+        dialog.download_requested.connect(self._start_ytdlp_download)
+        dialog.exec()
+
+    def _start_ytdlp_download(self, url: str):
+        """Inicia la descarga en un hilo separado."""
+        # Crear hilo y worker
+        self.download_thread = QThread()
+        self.download_worker = YTDLPDownloadWorker(url)
+        self.download_worker.moveToThread(self.download_thread)
+
+        # Conectar señales
+        self.download_thread.started.connect(self.download_worker.run)
+        self.download_worker.finished.connect(self._on_download_finished)
+        self.download_worker.error.connect(self._on_download_error)
+        self.download_worker.finished.connect(self.download_thread.quit)
+        self.download_worker.finished.connect(self.download_worker.deleteLater)
+        self.download_worker.error.connect(self.download_thread.quit)
+        self.download_worker.error.connect(self.download_worker.deleteLater)
+        self.download_thread.finished.connect(self.download_thread.deleteLater)
+
+        # Actualizar barra de estado
+        self.status_label.setText("Descargando MP3...")
+
+        # Iniciar
+        self.download_thread.start()
+
+    def _on_download_finished(self, message):
+        self.status_label.setText("Descarga completada.")
         styled_message_box(
             self,
-            "Descargar MP3",
-            "Funcionalidad en desarrollo.\n\n"
-            "Próximamente podrá descargar audio desde YouTube directamente.",
+            "Descarga finalizada",
+            message,
             QMessageBox.Icon.Information
+        )
+
+
+    def _on_download_error(self, error_msg):
+        self.status_label.setText("Error en descarga.")
+        styled_message_box(
+            self,
+            "Error de descarga",
+            error_msg,
+            QMessageBox.Icon.Critical
         )
 
     def show_about_dialog(self):
@@ -1102,6 +1144,8 @@ class AudioPlayer(QMainWindow):
         remove_action.triggered.connect(self.remove_selected)
         file_menu.addAction(remove_action)
 
+        file_menu.addSeparator()
+
         # Opción Salir
         exit_action = QAction("&Salir", self)
         exit_action.setShortcut("Ctrl+Q")
@@ -1135,6 +1179,7 @@ class AudioPlayer(QMainWindow):
 
         lyrics_menu.addAction(self.advance_action)
         lyrics_menu.addAction(self.delay_action)
+        lyrics_menu.addSeparator()
         lyrics_menu.addAction(self.increase_font_action)
         lyrics_menu.addAction(self.decrease_font_action)
 
@@ -1171,6 +1216,7 @@ class AudioPlayer(QMainWindow):
         install_CUDA_action.triggered.connect(self.install_CUDA)
         dependencias_menu.addAction(install_CUDA_action)
 
+        dependencias_menu.addSeparator()
 
         self.install_ytdlp_action = QAction("Instalar YT-DLP (Youtube -> MP3)", self)
         self.install_ytdlp_action.triggered.connect(self.install_ytdlp)

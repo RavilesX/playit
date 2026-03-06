@@ -144,43 +144,6 @@ class AboutDialog(BaseDialog):
         <p>Software Libre</p>        
         """
 
-class WhisperDialog(BaseDialog):
-    model_selected = pyqtSignal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent, title="Opciones de transcripción", size=(350, 250))
-        self._setup_content()
-
-    def _setup_content(self):
-        label = QLabel("Modelo (Ordenados de menor a mayor calidad)")
-        self.combo = QComboBox()
-        self.combo.addItems(["base", "small", "medium", "large-v2"])
-        self.combo.setCurrentText("large-v2")
-
-        self.bar = QProgressBar()
-        self.bar.setRange(0, 100)
-        self.bar.setTextVisible(True)
-
-        self.layout.addWidget(label)
-        self.layout.addWidget(self.combo)
-        self.layout.addWidget(self.bar)
-
-        self.buttons = StyledButtons(self)
-        self.buttons.accepted.connect(self._accept)  # o self.accept, según caso
-        self.buttons.rejected.connect(self.reject)
-        self.layout.addWidget(self.buttons)  # directo, sin layout intermedio
-
-        bg_image(self, "images/split_dialog/split.png")   # fondo igual
-
-    def _accept(self):
-        self.buttons.setEnabled(False)
-        self.model_selected.emit(self.combo.currentText())
-
-    def set_progress(self, value: int):
-        self.bar.setValue(value)
-
-    def _close_after_job(self):
-        self.accept()
 
 class SearchDialog(BaseDialog):
     search_requested = pyqtSignal(str)
@@ -434,3 +397,57 @@ class SplitDialog(BaseDialog):
 
             self.artist.setText(artist)
             self.song.setText(song)
+
+class DownloadDialog(BaseDialog):
+    download_requested = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent, "Descargar MP3 de YouTube", (400, 200))
+        # No llamar a _setup_ui aquí, ya se llama desde la base
+        self._setup_validation()
+
+    def _setup_ui(self):
+        # Primero, crear la estructura base (title_bar y layout)
+        super()._setup_ui()
+
+        # Ahora agregar nuestros widgets
+        label = QLabel("Youtube URL:")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet("color: #3AABEF; font-size: 14px; font-weight: bold;")
+
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText("https://www.youtube.com/watch?v=...")
+        self.url_edit.setStyleSheet("""
+            QLineEdit {
+                background: rgba(0,0,0,0.5);
+                color: white;
+                border: 1px solid #404040;
+                border-radius: 5px;
+                padding: 5px;
+                font-size: 12px;
+            }
+        """)
+
+        self.buttons = StyledButtons(self)
+        self.buttons.yes_btn.clicked.connect(self._accept)
+        self.buttons.no_btn.clicked.connect(self.reject)
+
+        # Añadir al layout existente (que ya contiene el title_bar)
+        self.layout.addWidget(label)
+        self.layout.addWidget(self.url_edit)
+        self.layout.addWidget(self.buttons, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def _setup_validation(self):
+        self.url_edit.textChanged.connect(self._validate_url)
+        self._validate_url()  # estado inicial
+
+    def _validate_url(self):
+        url = self.url_edit.text().strip()
+        valid = (url.startswith('https://www.youtube.com') or
+                 url.startswith('https://youtu.be'))
+        self.buttons.setEnabled(valid)
+
+    def _accept(self):
+        url = self.url_edit.text().strip()
+        self.download_requested.emit(url)
+        self.accept()
