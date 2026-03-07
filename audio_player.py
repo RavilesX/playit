@@ -1,4 +1,5 @@
 import re
+import sys
 import threading
 from pathlib import Path
 import subprocess
@@ -20,6 +21,7 @@ from python_worker import PythonInstallWorker
 from visualc_worker import VisualCWorker
 from ytdlp_worker import YTDLPWorker
 from ffmpeg_worker import FFmpegWorker
+from cuda_worker import CudaInstallWorker
 from ytdlp_download_worker import YTDLPDownloadWorker
 from demucs_install_worker import DemucsInstallWorker
 from resources import styled_message_box, bg_image, resource_path
@@ -110,6 +112,9 @@ class AudioPlayer(QMainWindow):
         self.ytdlp_available = False
         self.demucs_install_in_progress = False
         self.ffmpeg_available = False
+        self.gpu_available = False
+        self.pytorch_cuda_available = False
+        self.cuda_install_in_progress = False
 
         # Variables de audio
         self.volume = 25
@@ -162,6 +167,8 @@ class AudioPlayer(QMainWindow):
         self._check_ffmpeg_installation()
         self._check_vc_installation()
         self._check_ytdlp_installation()
+        self._check_gpu()
+        self._check_pytorch_cuda()
 
     def _initialize_pygame_mixer(self):
         """Inicializa el sistema de audio Pygame."""
@@ -500,6 +507,38 @@ class AudioPlayer(QMainWindow):
         except Exception:
             self.ytdlp_available = False
 
+    def _check_gpu(self):
+        """Verifica si hay una tarjeta NVIDIA mediante wmic."""
+        try:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            result = subprocess.run(
+                ['wmic', 'path', 'win32_VideoController', 'get', 'name'],
+                capture_output=True, text=True, timeout=10,
+                startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            output = result.stdout.lower()
+            self.gpu_available = 'nvidia' in output
+        except Exception:
+            self.gpu_available = False
+
+    def _check_pytorch_cuda(self):
+        """Verifica si PyTorch con CUDA está instalado."""
+        try:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            cmd = ['python', '-c', 'import torch; exit(0 if torch.cuda.is_available() else 1)']
+            result = subprocess.run(
+                cmd,
+                capture_output=True, text=True, timeout=10,
+                startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            self.pytorch_cuda_available = (result.returncode == 0)
+        except Exception:
+            self.pytorch_cuda_available = False
+
     def _check_ffmpeg_installation(self):
         """Verifica si FFmpeg está instalado ejecutando 'ffmpeg -version'."""
         try:
@@ -684,6 +723,66 @@ class AudioPlayer(QMainWindow):
         icon = self.lazy_images.load_icon_cached(resource_path(path), (120, 120))
         btn.setIcon(icon)
 
+    def install_cuda(self):
+        if self.pytorch_cuda_available:
+            styled_message_box(self, "CUDA ya instalado", "...", QMessageBox.Icon.Information)
+            return
+        if not self.python_available:
+            styled_message_box(self, "Python requerido", "Instale Python primero.", QMessageBox.Icon.Warning)
+            return
+        if not self.gpu_available:
+            styled_message_box(self, "Sin GPU NVIDIA", "No se detectó tarjeta NVIDIA compatible.",
+                               QMessageBox.Icon.Warning)
+            return
+        if self.cuda_install_in_progress:
+            styled_message_box(self, "Instalación en curso", "Ya hay una instalación de CUDA en progreso.",
+                               QMessageBox.Icon.Information)
+            return
+
+        reply = styled_message_box(
+            self,
+            "Confirmar instalación",
+            "Se instalará PyTorch 2.6.0 con soporte CUDA 11.8.\n"
+            "Esto puede tomar varios minutos.\n\n"
+            "¿Desea continuar?",
+            QMessageBox.Icon.Question,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.cuda_install_in_progress = True
+        self.cuda_thread = QThread()
+        self.cuda_worker = CudaInstallWorker()
+        self.cuda_worker.moveToThread(self.cuda_thread)
+        self.cuda_thread.started.connect(self.cuda_worker.run)
+        self.cuda_worker.finished.connect(self._on_cuda_install_finished)
+        self.cuda_worker.error.connect(self._on_cuda_install_error)
+        self.cuda_worker.finished.connect(self.cuda_thread.quit)
+        self.cuda_worker.finished.connect(self.cuda_worker.deleteLater)
+        self.cuda_thread.finished.connect(self.cuda_thread.deleteLater)
+        self.status_label.setText("Instalando CUDA (PyTorch)...")
+        self.cuda_thread.start()
+
+    def _on_cuda_install_finished(self):
+        self.status_label.setText("CUDA instalado correctamente.")
+        self.pytorch_cuda_available = True
+        self.cuda_install_in_progress = False
+        self._update_cuda_menu_action()
+        styled_message_box(self, "Instalación completada", "PyTorch con CUDA se instaló correctamente.",
+                           QMessageBox.Icon.Information)
+
+    def _on_cuda_install_error(self, error_msg):
+        self.status_label.setText("Error instalando CUDA.")
+        self.cuda_install_in_progress = False
+        styled_message_box(self, "Error de instalación", error_msg, QMessageBox.Icon.Critical)
+
+    def _update_cuda_menu_action(self):
+        if hasattr(self, 'install_cuda_action'):
+            self.install_cuda_action.setEnabled(
+                self.python_available and self.gpu_available and not self.pytorch_cuda_available
+            )
+
     def install_ffmpeg(self):
         if self.ffmpeg_available:
             styled_message_box(
@@ -788,6 +887,7 @@ class AudioPlayer(QMainWindow):
         self.status_label.setText("Python instalado correctamente.")
         self.python_available = True
         self._update_python_menu_action()
+        self._update_cuda_menu_action()
         styled_message_box(
             self,
             "Instalación completada",
@@ -795,6 +895,7 @@ class AudioPlayer(QMainWindow):
             "Es posible que necesite reiniciar la aplicación para que los cambios surtan efecto.",
             QMessageBox.Icon.Information
         )
+
 
 
     def _on_python_install_error(self, error_msg):
@@ -852,6 +953,7 @@ class AudioPlayer(QMainWindow):
         self.vc_available = True
         self._update_vc_menu_action()
         self._update_demucs_menu_actions()
+        self._update_cuda_menu_action()
         styled_message_box(
             self,
             "Instalación completada",
@@ -1212,9 +1314,12 @@ class AudioPlayer(QMainWindow):
         )
         dependencias_menu.addAction(self.install_demucs_action)
 
-        install_CUDA_action = QAction("Instalar CUDA (chip Nvidia)", self)
-        install_CUDA_action.triggered.connect(self.install_CUDA)
-        dependencias_menu.addAction(install_CUDA_action)
+        self.install_cuda_action = QAction("Instalar PyTorch+CUDA", self)
+        self.install_cuda_action.triggered.connect(self.install_cuda)
+        self.install_cuda_action.setEnabled(
+            self.python_available and self.gpu_available and not self.pytorch_cuda_available
+        )
+        dependencias_menu.addAction(self.install_cuda_action)
 
         dependencias_menu.addSeparator()
 

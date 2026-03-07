@@ -55,7 +55,7 @@ class DemucsInstallWorker(QObject):
             )
             if result.returncode != 0:
                 # Si falla, puede ser que el modelo no se descargó; intentamos con un comando alternativo
-                model_cmd_alt = [sys.executable, '-c', 'from demucs import pretrained; pretrained.get_model("htdemucs_ft")']
+                model_cmd_alt = ['python', '-c', 'from demucs import pretrained; pretrained.get_model("htdemucs_ft")']
                 result = subprocess.run(
                     model_cmd_alt,
                     capture_output=True,
