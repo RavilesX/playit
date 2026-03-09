@@ -1,5 +1,4 @@
 import re
-import sys
 import threading
 from pathlib import Path
 import subprocess
@@ -12,7 +11,7 @@ from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                              QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
                              QPushButton, QSlider, QStatusBar, QMessageBox,
-                             QProgressBar, QFrame, QListWidgetItem, QWidget)
+                             QProgressBar, QFrame, QListWidgetItem, QWidget,QFileDialog)
 import requests
 from urllib.parse import quote
 import unicodedata
@@ -26,141 +25,128 @@ from ytdlp_download_worker import YTDLPDownloadWorker
 from demucs_install_worker import DemucsInstallWorker
 from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
-from dialogs import AboutDialog, SearchDialog, QueueDialog, SplitDialog,DownloadDialog
+from dialogs import AboutDialog, QueueDialog, SplitDialog,DownloadDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
 
+# ──────────────────────────────────────────────────────────────────────────────
+# ── Constantes ────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+TRACK_NAMES = ("drums", "vocals", "bass", "other")
+DEFAULT_LIBRARY = Path("music_library")
+DEFAULT_VOLUME = 25
+LYRICS_FONT_MIN = 20
+LYRICS_FONT_MAX = 82
+LYRICS_FONT_DEFAULT = 62
+STATUS_CACHE_TTL = 5.0          # segundos entre actualizaciones de caché en status
+VERIFICATION_MAX_ATTEMPTS = 60  # 60 × 30 s = 30 min máximo
+VERIFICATION_INTERVAL_MS = 30_000
+
+
 class AudioPlayer(QMainWindow):
+    """Ventana principal"""
     cover_loaded = pyqtSignal(QPixmap)
     lyrics_loaded = pyqtSignal(list)
     lyrics_error = pyqtSignal(str)
     lyrics_not_found = pyqtSignal()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Inicialización ────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
     def __init__(self):
         super().__init__()
-
-        # 1. Primero se cargan los managers que se usan en lazy
         self._setup_lazy_managers()
-
-        # 2. Configuración básica de la ventana
         self._setup_window_properties()
-
-        # 3. Inicializar variables de estado
         self._initialize_state_variables()
-
-        # 4. Configurar audio y dependencias
         self._setup_audio_system()
-
-        # 5. Crear y configurar la interfaz
         self._setup_user_interface()
-
-        # 6. Configurar conexiones y eventos
         self._setup_connections()
-
-        # 7. Inicializar timers y actualizaciones
         self._setup_timers()
-
-        # 8. Validaciones finales
         self._perform_final_setup()
-
-        QTimer.singleShot(200, lambda: self._delayed_start())
+        QTimer.singleShot(200, self._delayed_start)
 
     def _delayed_start(self):
-        """Se ejecuta después de mostrar la ventana"""
-        # Cargar playlist si existe
-        default_lib = Path("music_library")
-        if default_lib.exists():
-            self.load_folder(str(default_lib))
+        """Carga la librería por defecto después de mostrar la ventana."""
+        if DEFAULT_LIBRARY.exists():
+            self.load_folder(str(DEFAULT_LIBRARY))
 
     def _setup_lazy_managers(self):
-        """Inicializa los gestores de lazy loading"""
         self.lazy_audio = LazyAudioManager()
         self.lazy_images = LazyImageManager()
         self.lazy_lyrics = LazyLyricsManager()
         self.lazy_playlist = LazyPlaylistLoader()
 
     def _setup_window_properties(self):
-        """Configura propiedades básicas de la ventana principal."""
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setWindowIcon(QIcon(resource_path('images/main_window/main_icon.png')))
         self.resize(1098, 813)
         self.center()
-
-        # Configurar background y atributos de estilo
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-
-        # Cargar y aplicar estilos CSS
         self._load_stylesheet()
 
     def _load_stylesheet(self):
-        """Carga y aplica el archivo de estilos"""
         try:
-            with open('estilos.css', 'r') as file:
-                style = file.read()
-            self.setStyleSheet(style)
+            with open('estilos.css', 'r') as f:
+                self.setStyleSheet(f.read())
         except FileNotFoundError:
-            print("Warning: estilos.css not found, using default styles")
+            styled_message_box(self, "Error de estilos", "Archivo de estilos no encontrado", QMessageBox.Icon.Critical)
 
     def _initialize_state_variables(self):
-        self.playlist = []
+        # Playlist
+        self.playlist: list[dict] = []
         self.current_index = -1
         self.playback_state = "Detenido"
-        self.current_channels = []
-        self.demucs_queue = []  # Cola de trabajos pendientes
-        self.processing_multiple = False  # Indica si hay múltiples trabajos
-        self.lyrics_lock = threading.Lock()
+        self.current_channels: list = []
+
+        # Cola Demucs
+        self.demucs_queue: list[dict] = []
+        self.demucs_active = False
+        self.demucs_progress = 0
+        self.processing = False
+        self.processing_multiple = False
+        self.demucs_thread = None
+        self.demucs_worker = None
+        self.last_in_queue = {"artist": "", "song": ""}
+        self._verification_attempts = 0
+
+        # Dependencias
         self.python_available = False
         self.vc_available = False
         self.ytdlp_available = False
-        self.demucs_install_in_progress = False
         self.ffmpeg_available = False
         self.gpu_available = False
         self.pytorch_cuda_available = False
-        self.cuda_install_in_progress = False
-
-        # Variables de audio
-        self.volume = 25
-        self.individual_volumes = {
-            "drums": 1.0,
-            "vocals": 1.0,
-            "bass": 1.0,
-            "other": 1.0
-        }
-        self.mute_states = {
-            "drums": False,
-            "vocals": False,
-            "bass": False,
-            "other": False
-        }
-
-        # Variables de búsqueda
-        self.search_index = 0
-        self.search_results = []
-        self.current_search = ""
-
-        # Variables de procesamiento
-        self.processing = False
-        self.demucs_progress = 0
-        self.demucs_active = False
-        self.last_in_queue = {"artist":"","song":""}
-
-        # Variables de diálogos
-        self.split_dialog = None
-        self.demucs_thread = None
-        self.demucs_worker = None
-
-        # Variables de letras
-        self.lyrics = []
-
-        # Variables de dependencias
-        self._initialize_dependency_flags()
-
-    def _initialize_dependency_flags(self):
         self.demucs_available = True
         self.pygame_available = True
+        self.demucs_install_in_progress = False
+        self.cuda_install_in_progress = False
+
+        # Audio / volumen
+        self.volume = DEFAULT_VOLUME
+        self.individual_volumes = {t: 1.0 for t in TRACK_NAMES}
+        self.mute_states = {t: False for t in TRACK_NAMES}
+
+        # Búsqueda
+        self.search_index = 0
+        self.search_results: list = []
+        self.current_search = ""
+
+        # Letras
+        self.lyrics: list = []
+        self.lyrics_lock = threading.Lock()
+        self.lyrics_font_size = LYRICS_FONT_DEFAULT
+        self._last_current_html = None
+        self._last_progress_seconds = -1
+
+        # Diálogos
+        self.split_dialog = None
+
+        # Caché de status
+        self._last_stats_update = 0.0
+        self._cached_stats: dict = {"total_cached_items": 0}
+
 
     def _setup_audio_system(self):
         self._initialize_pygame_mixer()
-
-        # verificación de dependencias
         self.demucs_model = None
         self.load_demucs_model()
         self._check_python_installation()
@@ -171,22 +157,20 @@ class AudioPlayer(QMainWindow):
         self._check_pytorch_cuda()
 
     def _initialize_pygame_mixer(self):
-        """Inicializa el sistema de audio Pygame."""
         try:
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
                 pygame.mixer.set_num_channels(4)
-        except pygame.error as e:
+        except pygame.error:
             self.pygame_available = False
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── UI ────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _setup_user_interface(self):
-        # Crear frame principal y layout
         self._create_main_frame()
-
-        # Configurar background
         self._setup_background()
-
-        # Crear componentes principales
         self._create_title_bar()
         self._create_size_grips()
         self._create_tab_widget()
@@ -194,13 +178,8 @@ class AudioPlayer(QMainWindow):
         self._create_control_buttons()
         self._create_track_controls()
         self._create_playlist_dock()
-
-        # Configurar layout principal
         self._setup_main_layout()
-
-        # Inicializar menú y barra de estado
         self.init_menu()
-        # self.menuBar().installEventFilter(self)
         self.init_status_bar()
 
     def _create_main_frame(self):
@@ -218,21 +197,16 @@ class AudioPlayer(QMainWindow):
         self.title_bar = TitleBar(self)
 
     def _create_size_grips(self):
-        self.size_grips = {
-            "top": SizeGrip(self, "top"),
-            "bottom": SizeGrip(self, "bottom"),
-            "left": SizeGrip(self, "left"),
-            "right": SizeGrip(self, "right"),
-            "top_left": SizeGrip(self, "top_left"),
-            "top_right": SizeGrip(self, "top_right"),
-            "bottom_left": SizeGrip(self, "bottom_left"),
-            "bottom_right": SizeGrip(self, "bottom_right"),
-        }
+        positions = ("top", "bottom", "left", "right",
+                     "top_left", "top_right", "bottom_left", "bottom_right")
+        self.size_grips = {pos: SizeGrip(self, pos) for pos in positions}
 
     def _create_tab_widget(self):
         self.tabs = QTabWidget()
+
         self.cover_label = QLabel()
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
 
         self.lyrics_header = QTextEdit()
         self.lyrics_header.setReadOnly(True)
@@ -248,19 +222,17 @@ class AudioPlayer(QMainWindow):
         self.lyrics_next.setFixedHeight(60)
         self.lyrics_next.setObjectName("lyrics_next")
 
-        self.lyrics_layout = QVBoxLayout()
-        self.lyrics_layout.setContentsMargins(0, 0, 0, 0)
-        self.lyrics_layout.addWidget(self.lyrics_header)
-        self.lyrics_layout.addWidget(self.lyrics_current)
-        self.lyrics_layout.addWidget(self.lyrics_next)
+        lyrics_layout = QVBoxLayout()
+        lyrics_layout.setContentsMargins(0, 0, 0, 0)
+        for w in (self.lyrics_header, self.lyrics_current, self.lyrics_next):
+            lyrics_layout.addWidget(w)
 
         self.lyrics_container = QWidget()
-        self.lyrics_container.setLayout(self.lyrics_layout)
+        self.lyrics_container.setLayout(lyrics_layout)
 
-        self.lyrics_font_size = 62
         self.tabs.addTab(self.cover_label, "Portada")
         self.tabs.addTab(self.lyrics_container, "Letras")
-        self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
+
 
     def _create_progress_bar(self):
         self.progress_song = QProgressBar(self)
@@ -288,35 +260,45 @@ class AudioPlayer(QMainWindow):
         layout = QVBoxLayout(self.main_frame)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-        # Añadir componentes al layout
         layout.addWidget(self.title_bar)
         layout.addWidget(self.tabs)
         layout.addLayout(self.track_buttons_layout)
         layout.addWidget(self.progress_song)
         layout.addLayout(self.controls_layout)
 
+    def _setup_background(self):
+        self.background_label = QLabel(self)
+        self.background_label.setGeometry(0, 0, self.width(), self.height())
+        self.background_label.setScaledContents(True)
+        self._apply_background_pixmap()
+        self.background_label.lower()
+        self.main_frame.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+        """)
+
+    def _apply_background_pixmap(self):
+        pixmap = QPixmap(resource_path('images/main_window/background.png'))
+        if not pixmap.isNull():
+            self.background_label.setPixmap(pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            ))
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Conexiones ────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _setup_connections(self):
-        # Conexiones de control de audio
         self._connect_playback_controls()
-
-        # Conexiones de playlist
         self._connect_playlist_events()
-
-        # Conexiones de dock
         self._connect_dock_events()
-
-        # Conexiones para lazy loading
         self._connect_lazy_loading_signals()
 
-
-    def _connect_lazy_loading_signals(self):
-        self.lazy_playlist.playlist_updated.connect(self._on_song_loaded)
-        self.lazy_playlist.loading_finished.connect(self._on_playlist_loaded)
-        self.cover_loaded.connect(self._handle_cover_loaded)
-        self.lyrics_loaded.connect(self._handle_lyrics_loaded)
-        self.lyrics_error.connect(self._handle_lyrics_error)
-        self.lyrics_not_found.connect(self._handle_lyrics_not_found)
     def _connect_playback_controls(self):
         self.play_btn.clicked.connect(self.toggle_play_pause)
         self.prev_btn.clicked.connect(self.play_previous)
@@ -329,68 +311,17 @@ class AudioPlayer(QMainWindow):
     def _connect_dock_events(self):
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
 
-    def _on_song_loaded(self, song_data):
-        # Verificar si ya existe en la playlist
-        exists = any(
-            track['artist'] == song_data['artist'] and
-            track['song'] == song_data['song']
-            for track in self.playlist
-        )
+    def _connect_lazy_loading_signals(self):
+        self.lazy_playlist.playlist_updated.connect(self._on_song_loaded)
+        self.lazy_playlist.loading_finished.connect(self._on_playlist_loaded)
+        self.cover_loaded.connect(self._handle_cover_loaded)
+        self.lyrics_loaded.connect(self._handle_lyrics_loaded)
+        self.lyrics_error.connect(self._handle_lyrics_error)
+        self.lyrics_not_found.connect(self._handle_lyrics_not_found)
 
-        if not exists:
-            # Añadir a la playlist
-            self.playlist.append(song_data)
-
-            # Añadir a la UI
-            icon = QIcon(resource_path('images/main_window/audio_icon.png'))
-            item_text = f"{song_data['artist']} - {song_data['song']}"
-            item = QListWidgetItem(item_text)
-            item.setIcon(icon)
-            self.playlist_widget.addItem(item)
-
-            # Habilitar botones si es la primera canción
-            if len(self.playlist) == 1:
-                self.prev_btn.setEnabled(True)
-                self.next_btn.setEnabled(True)
-                self.play_btn.setEnabled(True)
-
-            # Obtener letras de forma asíncrona
-            self._check_and_fetch_lyrics_async(song_data['path'], song_data['artist'], song_data['song'])
-
-    def _handle_cover_loaded(self, pixmap):
-        self.cover_label.setPixmap(pixmap)
-
-    def _handle_lyrics_loaded(self, lyrics_data: list):
-        self.lyrics = lyrics_data or []
-        self.update_lyrics_menu_state()
-
-        # 1.  Header  (siempre visible)
-        song = self.playlist[self.current_index]
-        self.lyrics_header.setHtml(
-            f'<H1 style="color: #3AABEF;"><center>{song["artist"]}</center></H1>'
-            f'<H2 style="color: #7E54AF;"><center>{song["song"]}</center></H2>'
-        )
-
-        # 2.  Limpia next
-        self.lyrics_next.clear()
-
-        # 3.  Conecta timer si no está conectado
-        if not hasattr(self, 'lyrics_timer'):
-            print("[DEBUG] Creando lyrics_timer")
-            self.lyrics_timer = QTimer(self)
-            self.lyrics_timer.timeout.connect(self.update_lyrics_display)
-        self.lyrics_timer.start(100)
-
-    def _handle_lyrics_error(self, error_msg):
-        self.lyrics_current.setHtml(f'<center>Error: {error_msg}</center>')
-
-    def _handle_lyrics_not_found(self):
-        self.lyrics_current.setHtml('<center>No hay letras disponibles</center>')
-
-    def _on_playlist_loaded(self):
-        # self.status_bar.showMessage(f"Playlist cargada: {len(self.playlist)} canciones")
-        self.status_label.setText(f"Playlist cargada: {len(self.playlist)} canciones")
-        self.update_status()
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Timers ────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
 
     def _setup_timers(self):
         self.timer = QTimer(self)
@@ -400,1055 +331,761 @@ class AudioPlayer(QMainWindow):
     def _perform_final_setup(self):
         self.update_status()
 
-    def _setup_background(self):
-        # Crear QLabel para el background
-        self.background_label = QLabel(self)
-        self.background_label.setGeometry(0, 0, self.width(), self.height())
-
-        # Cargar imagen
-        bg_path = resource_path('images/main_window/background.png')
-        pixmap = QPixmap(bg_path)
-
-        if not pixmap.isNull():
-            self.background_label.setPixmap(pixmap.scaled(
-                self.size(),
-                Qt.AspectRatioMode.IgnoreAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            ))
-
-        # Asegurar que el background esté detrás de lo demas
-        self.background_label.lower()
-
-        # Estilo para el main_frame (transparente)
-        self.main_frame.setStyleSheet("""
-            QFrame {
-                background: transparent;
-                border: 1px solid #404040;
-                border-radius: 8px;
-            }
-        """)
-
-        # Ajustar cuando cambie el tamaño
-        self.background_label.setScaledContents(True)
-
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Eventos de ventana ────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
     def resizeEvent(self, event):
-        #Redimensiona el background cuando cambia el tamaño de la ventana
         super().resizeEvent(event)
         if hasattr(self, 'background_label'):
             self.background_label.resize(self.size())
-
-            # Volver a cargar la imagen para evitar el pixelado feo
-            bg_path = resource_path('images/main_window/background.png')
-            pixmap = QPixmap(bg_path)
-            if not pixmap.isNull():
-                self.background_label.setPixmap(pixmap.scaled(
-                    self.size(),
-                    Qt.AspectRatioMode.IgnoreAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                ))
-
-    def load_demucs_model(self):
-        try:
-            # Verificación directa con subprocess
-            result = subprocess.run(
-                ['demucs', '--help'],
-                capture_output=True,
-                text=True,
-                shell=True
-            )
-            if result.returncode != 0:
-                raise RuntimeError(f"Demucs returned error: {result.stderr}")
-            self.demucs_available = True
-        except Exception as e:
-            error_msg = f"Error checking Demucs: {str(e)}"
-            with open("demucs_error.log", "w") as f:
-                f.write(error_msg)
-
-            self.demucs_available = False
-
-    def _check_python_installation(self):
-        """Verifica si Python está instalado ejecutando 'python --version'."""
-        try:
-            result = subprocess.run(
-                ['python', '--version'],
-                capture_output=True,
-                text=True,
-                shell=True,
-                timeout=5
-            )
-            self.python_available = (result.returncode == 0)
-        except Exception:
-            self.python_available = False
-
-    def _check_vc_installation(self):
-        """Verifica si Visual C++ 2022 X64 está instalado, sin mostrar ventana."""
-        try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-            cmd = 'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall" /s /f "Visual C++ 2022 X64" 2>nul | findstr /i "DisplayName"'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, startupinfo=startupinfo)
-            self.vc_available = (result.returncode == 0)
-        except Exception:
-            self.vc_available = False
-
-    def _check_ytdlp_installation(self):
-        """Verifica si yt-dlp está instalado ejecutando 'yt-dlp --version'."""
-        try:
-            result = subprocess.run(
-                ['yt-dlp', '--version'],
-                capture_output=True,
-                text=True,
-                shell=True,
-                timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            self.ytdlp_available = (result.returncode == 0)
-        except Exception:
-            self.ytdlp_available = False
-
-    def _check_gpu(self):
-        """Verifica si hay una tarjeta NVIDIA mediante wmic."""
-        try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-            result = subprocess.run(
-                ['wmic', 'path', 'win32_VideoController', 'get', 'name'],
-                capture_output=True, text=True, timeout=10,
-                startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            output = result.stdout.lower()
-            self.gpu_available = 'nvidia' in output
-        except Exception:
-            self.gpu_available = False
-
-    def _check_pytorch_cuda(self):
-        """Verifica si PyTorch con CUDA está instalado."""
-        try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-            cmd = ['python', '-c', 'import torch; exit(0 if torch.cuda.is_available() else 1)']
-            result = subprocess.run(
-                cmd,
-                capture_output=True, text=True, timeout=10,
-                startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            self.pytorch_cuda_available = (result.returncode == 0)
-        except Exception:
-            self.pytorch_cuda_available = False
-
-    def _check_ffmpeg_installation(self):
-        """Verifica si FFmpeg está instalado ejecutando 'ffmpeg -version'."""
-        try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-
-            result = subprocess.run(
-                ['ffmpeg', '-version'],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            self.ffmpeg_available = (result.returncode == 0)
-        except Exception:
-            self.ffmpeg_available = False
-
-    def init_leds(self):
-        self.prev_btn = QPushButton()
-        self.prev_btn.setObjectName('prev_btn')
-        self.prev_btn.setFixedSize(40, 40)
-        self.prev_btn.setEnabled(False)
-        bg_image(self.prev_btn,"images/main_window/prev.png")
-
-
-        self.play_btn = QPushButton()
-        self.play_btn.setObjectName('play_btn')
-        self.play_btn.setFixedSize(80, 80)
-        self.play_btn.setEnabled(False)
-        bg_image(self.play_btn, "images/main_window/play.png")
-
-        self.next_btn = QPushButton()
-        self.next_btn.setObjectName('next_btn')
-        self.next_btn.setFixedSize(40, 40)
-        self.next_btn.setEnabled(False)
-        bg_image(self.next_btn, "images/main_window/next.png")
-
-        self.stop_btn = QPushButton()
-        self.stop_btn.setObjectName('stop_btn')
-        self.stop_btn.setFixedSize(40, 40)
-        self.stop_btn.setEnabled(False)
-        bg_image(self.stop_btn, "images/main_window/stop.png")
-
-        self.volume_dial = CustomDial()
-        self.volume_dial.setRange(0, 100)
-        self.volume_dial.setValue(25)
-        self.volume_dial.setFixedSize(120, 120)
-        self.volume_dial.setNotchesVisible(True)
-        self.volume_dial.valueChanged.connect(self.set_volume)
-
-        # Layout
-        controls_layout = QHBoxLayout()
-        controls_layout.addWidget(self.prev_btn)
-        controls_layout.addWidget(self.play_btn)
-        controls_layout.addWidget(self.next_btn)
-        controls_layout.addWidget(self.stop_btn)
-        controls_layout.addWidget(self.volume_dial)
-
-        return controls_layout
-
-    def center(self):
-        frame = self.frameGeometry()
-        screen = self.screen().availableGeometry().center()
-        frame.moveCenter(screen)
-        self.move(frame.topLeft())
-
-    def enable_disable_buttons(self, state):
-        self.drums_btn.setEnabled(state)
-        self.vocals_btn.setEnabled(state)
-        self.bass_btn.setEnabled(state)
-        self.other_btn.setEnabled(state)
-        if state:
-            # Solo actualizar si no están muteados
-            for track_name, btn in zip(
-                    ["drums", "vocals", "bass", "other"],
-                    [self.drums_btn, self.vocals_btn, self.bass_btn, self.other_btn]
-            ):
-                if not self.mute_states[track_name]:
-                    btn.setIcon(QIcon(resource_path(f'images/main_window/icons01/{track_name}.png')))
-                    btn.setChecked(False)
-
-    def track_buttons(self):
-        self.drums_btn = QPushButton()
-        self.setup_button(self.drums_btn, 'drums_btn', 'drums')
-        self.drums_slider = QSlider(Qt.Orientation.Horizontal)
-        self.setup_slider(self.drums_slider, 'drums')
-
-        self.vocals_btn = QPushButton()
-        self.setup_button(self.vocals_btn, 'vocals_btn', 'vocals')
-        self.vocals_slider = QSlider(Qt.Orientation.Horizontal)
-        self.setup_slider(self.vocals_slider, 'vocals')
-
-        self.bass_btn = QPushButton()
-        self.setup_button(self.bass_btn, 'bass_btn', 'bass')
-        self.bass_slider = QSlider(Qt.Orientation.Horizontal)
-        self.setup_slider(self.bass_slider, 'bass')
-
-        self.other_btn = QPushButton()
-        self.setup_button(self.other_btn, 'other_btn', 'other')
-        self.other_slider = QSlider(Qt.Orientation.Horizontal)
-        self.setup_slider(self.other_slider, 'other')
-
-        # Layout para cada instrumento (botón + slider)
-        drums_layout = QVBoxLayout()
-        drums_layout.addWidget(self.drums_btn)
-        drums_layout.addWidget(self.drums_slider)
-
-        vocals_layout = QVBoxLayout()
-        vocals_layout.addWidget(self.vocals_btn)
-        vocals_layout.addWidget(self.vocals_slider)
-
-        bass_layout = QVBoxLayout()
-        bass_layout.addWidget(self.bass_btn)
-        bass_layout.addWidget(self.bass_slider)
-
-        other_layout = QVBoxLayout()
-        other_layout.addWidget(self.other_btn)
-        other_layout.addWidget(self.other_slider)
-
-        # Inicializar lista de botones mute
-        self.mute_buttons = [
-            self.drums_btn,
-            self.vocals_btn,
-            self.bass_btn,
-            self.other_btn
-        ]
-
-        # Layout
-        buttons_layout = QHBoxLayout()
-        buttons_layout.addLayout(drums_layout)
-        buttons_layout.addLayout(vocals_layout)
-        buttons_layout.addLayout(bass_layout)
-        buttons_layout.addLayout(other_layout)
-
-        self.enable_disable_buttons(False)
-
-        return buttons_layout
-
-    def setup_slider(self, slider, track_name):
-        slider.setRange(0, 100)
-        slider.setValue(100)
-        slider.setFixedWidth(120)
-        slider.valueChanged.connect(lambda value: self.set_individual_volume(track_name, value))
-
-    def set_individual_volume(self, track_name, value):
-        # Guardar el volumen actual (antes de mute)
-        self.individual_volumes[track_name] = value / 100.0
-
-        # Si no está muteado, aplicar el volumen
-        if not self.mute_states[track_name]:
-            self.apply_volume_to_track(track_name, value / 100.0)
-
-    def apply_volume_to_track(self, track_name, volume):
-        if not self.current_channels:
-            return
-
-        track_index = {
-            "drums": 0,
-            "vocals": 1,
-            "bass": 2,
-            "other": 3
-        }.get(track_name)
-
-        if track_index is not None and track_index < len(self.current_channels):
-            self.current_channels[track_index].set_volume(volume * (self.volume / 100.0))
-
-    def setup_button(self, button, object_name, icon_name):
-        button.setObjectName(object_name)
-        button.setIconSize(QSize(120, 120))
-
-        button._icon_path = f'images/main_window/icons01/{icon_name}.png'
-        button._icon_disabled = f'images/main_window/icons01/no_{icon_name}.png'
-        self._lazy_load_icon(button, False)
-
-        button.setCheckable(True)
-        button.clicked.connect(self.toggle_mute)
-
-    def _lazy_load_icon(self, btn, muted: bool):
-        path = btn._icon_disabled if muted else btn._icon_path
-        icon = self.lazy_images.load_icon_cached(resource_path(path), (120, 120))
-        btn.setIcon(icon)
-
-    def install_cuda(self):
-        if self.pytorch_cuda_available:
-            styled_message_box(self, "CUDA ya instalado", "...", QMessageBox.Icon.Information)
-            return
-        if not self.python_available:
-            styled_message_box(self, "Python requerido", "Instale Python primero.", QMessageBox.Icon.Warning)
-            return
-        if not self.gpu_available:
-            styled_message_box(self, "Sin GPU NVIDIA", "No se detectó tarjeta NVIDIA compatible.",
-                               QMessageBox.Icon.Warning)
-            return
-        if self.cuda_install_in_progress:
-            styled_message_box(self, "Instalación en curso", "Ya hay una instalación de CUDA en progreso.",
-                               QMessageBox.Icon.Information)
-            return
-
-        reply = styled_message_box(
-            self,
-            "Confirmar instalación",
-            "Se instalará PyTorch 2.6.0 con soporte CUDA 11.8.\n"
-            "Esto puede tomar varios minutos.\n\n"
-            "¿Desea continuar?",
-            QMessageBox.Icon.Question,
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        self.cuda_install_in_progress = True
-        self.cuda_thread = QThread()
-        self.cuda_worker = CudaInstallWorker()
-        self.cuda_worker.moveToThread(self.cuda_thread)
-        self.cuda_thread.started.connect(self.cuda_worker.run)
-        self.cuda_worker.finished.connect(self._on_cuda_install_finished)
-        self.cuda_worker.error.connect(self._on_cuda_install_error)
-        self.cuda_worker.finished.connect(self.cuda_thread.quit)
-        self.cuda_worker.finished.connect(self.cuda_worker.deleteLater)
-        self.cuda_thread.finished.connect(self.cuda_thread.deleteLater)
-        self.status_label.setText("Instalando CUDA (PyTorch)...")
-        self.cuda_thread.start()
-
-    def _on_cuda_install_finished(self):
-        self.status_label.setText("CUDA instalado correctamente.")
-        self.pytorch_cuda_available = True
-        self.cuda_install_in_progress = False
-        self._update_cuda_menu_action()
-        styled_message_box(self, "Instalación completada", "PyTorch con CUDA se instaló correctamente.",
-                           QMessageBox.Icon.Information)
-
-    def _on_cuda_install_error(self, error_msg):
-        self.status_label.setText("Error instalando CUDA.")
-        self.cuda_install_in_progress = False
-        styled_message_box(self, "Error de instalación", error_msg, QMessageBox.Icon.Critical)
-
-    def _update_cuda_menu_action(self):
-        if hasattr(self, 'install_cuda_action'):
-            self.install_cuda_action.setEnabled(
-                self.python_available and self.gpu_available and not self.pytorch_cuda_available
-            )
-
-    def install_ffmpeg(self):
-        if self.ffmpeg_available:
-            styled_message_box(
-                self,
-                "FFmpeg ya instalado",
-                "FFmpeg ya está instalado en el sistema.",
-                QMessageBox.Icon.Information
-            )
-            return
-
-        reply = styled_message_box(
-            self,
-            "Confirmar instalación",
-            "Se instalará FFmpeg mediante winget.\n"
-            "Esto requiere permisos de administrador.\n\n"
-            "¿Desea continuar?",
-            QMessageBox.Icon.Question,
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        self.ffmpeg_thread = QThread()
-        self.ffmpeg_worker = FFmpegWorker()
-        self.ffmpeg_worker.moveToThread(self.ffmpeg_thread)
-
-        self.ffmpeg_thread.started.connect(self.ffmpeg_worker.run)
-        self.ffmpeg_worker.finished.connect(self._on_ffmpeg_install_finished)
-        self.ffmpeg_worker.error.connect(self._on_ffmpeg_install_error)
-        self.ffmpeg_worker.finished.connect(self.ffmpeg_thread.quit)
-        self.ffmpeg_worker.finished.connect(self.ffmpeg_worker.deleteLater)
-        self.ffmpeg_thread.finished.connect(self.ffmpeg_thread.deleteLater)
-
-        self.status_label.setText("Instalando FFmpeg...")
-        self.ffmpeg_thread.start()
-
-    def _on_ffmpeg_install_finished(self):
-        self.status_label.setText("FFmpeg instalado correctamente.")
-        self.ffmpeg_available = True
-        self._update_ffmpeg_menu_action()
-        styled_message_box(
-            self,
-            "Instalación completada",
-            "FFmpeg se instaló correctamente.",
-            QMessageBox.Icon.Information
-        )
-
-    def _on_ffmpeg_install_error(self, error_msg):
-        self.status_label.setText("Error instalando FFmpeg.")
-        styled_message_box(
-            self,
-            "Error de instalación",
-            error_msg,
-            QMessageBox.Icon.Critical
-        )
-
-    def _update_ffmpeg_menu_action(self):
-        if hasattr(self, 'install_ffmpeg_action'):
-            self.install_ffmpeg_action.setEnabled(not self.ffmpeg_available)
-
-
-    def install_python(self):
-        if self.python_available:
-            styled_message_box(
-                self,
-                "Python ya instalado",
-                "Python ya está instalado en el sistema.",
-                QMessageBox.Icon.Information
-            )
-            return
-
-        # Confirmación del usuario
-        reply = styled_message_box(
-            self,
-            "Confirmar instalación",
-            "Se instalará Python 3.11.0 mediante winget.\n"
-            "Esto puede tomar varios minutos y requiere permisos de administrador.\n\n"
-            "¿Desea continuar?",
-            QMessageBox.Icon.Question,
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        # Ejecutar en un hilo separado
-        self.install_thread = QThread()
-        self.install_worker = PythonInstallWorker()
-        self.install_worker.moveToThread(self.install_thread)
-
-        self.install_thread.started.connect(self.install_worker.run)
-        self.install_worker.finished.connect(self._on_python_install_finished)
-        self.install_worker.error.connect(self._on_python_install_error)
-        self.install_worker.finished.connect(self.install_thread.quit)
-        self.install_worker.finished.connect(self.install_worker.deleteLater)
-        self.install_thread.finished.connect(self.install_thread.deleteLater)
-
-        # Mostrar indicador en barra de estado
-        self.status_label.setText("Instalando Python...")
-        self.install_thread.start()
-
-    def _on_python_install_finished(self):
-        self.status_label.setText("Python instalado correctamente.")
-        self.python_available = True
-        self._update_python_menu_action()
-        self._update_cuda_menu_action()
-        styled_message_box(
-            self,
-            "Instalación completada",
-            "Python se instaló correctamente.\n"
-            "Es posible que necesite reiniciar la aplicación para que los cambios surtan efecto.",
-            QMessageBox.Icon.Information
-        )
-
-
-
-    def _on_python_install_error(self, error_msg):
-        self.status_label.setText("Error instalando Python.")
-        styled_message_box(
-            self,
-            "Error de instalación",
-            error_msg,
-            QMessageBox.Icon.Critical
-        )
-
-    def _update_python_menu_action(self):
-        if hasattr(self, 'install_python_action'):
-            self.install_python_action.setEnabled(not self.python_available)
-            self._update_demucs_menu_actions()
-
-    def install_vc(self):
-        if self.vc_available:
-            styled_message_box(
-                self,
-                "Visual C++ ya instalado",
-                "Visual C++ Redistributable ya está instalado en el sistema.",
-                QMessageBox.Icon.Information
-            )
-            return
-
-        reply = styled_message_box(
-            self,
-            "Confirmar instalación",
-            "Se instalará Microsoft Visual C++ Redistributable (x64) mediante winget.\n"
-            "Esto requiere permisos de administrador.\n\n"
-            "¿Desea continuar?",
-            QMessageBox.Icon.Question,
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        self.vc_thread = QThread()
-        self.vc_worker = VisualCWorker()
-        self.vc_worker.moveToThread(self.vc_thread)
-
-        self.vc_thread.started.connect(self.vc_worker.run)
-        self.vc_worker.finished.connect(self._on_vc_install_finished)
-        self.vc_worker.error.connect(self._on_vc_install_error)
-        self.vc_worker.finished.connect(self.vc_thread.quit)
-        self.vc_worker.finished.connect(self.vc_worker.deleteLater)
-        self.vc_thread.finished.connect(self.vc_thread.deleteLater)
-
-        self.status_label.setText("Instalando Visual C++...")
-        self.vc_thread.start()
-
-    def _on_vc_install_finished(self):
-        self.status_label.setText("Visual C++ instalado correctamente.")
-        self.vc_available = True
-        self._update_vc_menu_action()
-        self._update_demucs_menu_actions()
-        self._update_cuda_menu_action()
-        styled_message_box(
-            self,
-            "Instalación completada",
-            "Visual C++ Redistributable se instaló correctamente.",
-            QMessageBox.Icon.Information
-        )
-
-    def _on_vc_install_error(self, error_msg):
-        self.status_label.setText("Error instalando Visual C++.")
-        styled_message_box(
-            self,
-            "Error de instalación",
-            error_msg,
-            QMessageBox.Icon.Critical
-        )
-
-    def _update_vc_menu_action(self):
-        if hasattr(self, 'install_vc_action'):
-            self.install_vc_action.setEnabled(not self.vc_available)
-
-    def install_demucs(self):
-        if self.demucs_available:
-            styled_message_box(
-                self,
-                "Demucs ya instalado",
-                "Demucs ya está instalado en el sistema.",
-                QMessageBox.Icon.Information
-            )
-            return
-
-        if not self.python_available:
-            styled_message_box(
-                self,
-                "Python requerido",
-                "Debe instalar Python antes de instalar Demucs.",
-                QMessageBox.Icon.Warning
-            )
-            return
-
-        if self.demucs_install_in_progress:
-            styled_message_box(
-                self,
-                "Instalación en curso",
-                "Ya hay una instalación de Demucs en progreso.",
-                QMessageBox.Icon.Information
-            )
-            return
-
-        reply = styled_message_box(
-            self,
-            "Confirmar instalación",
-            "Se instalará Demucs y se descargará el modelo htdemucs_ft.\n"
-            "Esto puede tomar varios minutos y requiere conexión a internet.\n\n"
-            "¿Desea continuar?",
-            QMessageBox.Icon.Question,
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        self.demucs_install_in_progress = True
-        self.demucs_install_thread = QThread()
-        self.demucs_install_worker = DemucsInstallWorker()
-        self.demucs_install_worker.moveToThread(self.demucs_install_thread)
-
-        self.demucs_install_thread.started.connect(self.demucs_install_worker.run)
-        self.demucs_install_worker.finished.connect(self._on_demucs_install_finished)
-        self.demucs_install_worker.error.connect(self._on_demucs_install_error)
-        self.demucs_install_worker.finished.connect(self.demucs_install_thread.quit)
-        self.demucs_install_worker.finished.connect(self.demucs_install_worker.deleteLater)
-        self.demucs_install_thread.finished.connect(self.demucs_install_thread.deleteLater)
-
-        self.status_label.setText("Instalando Demucs...")
-        self.demucs_install_thread.start()
-
-    def _on_demucs_install_finished(self):
-        self.status_label.setText("Demucs instalado correctamente.")
-        self.demucs_available = True
-        self.demucs_install_in_progress = False
-        self.load_demucs_model()
-        self._update_demucs_menu_actions()
-        styled_message_box(
-            self,
-            "Instalación completada",
-            "Demucs se instaló correctamente y el modelo htdemucs_ft está listo.",
-            QMessageBox.Icon.Information
-        )
-
-    def _on_demucs_install_error(self, error_msg):
-        self.status_label.setText("Error instalando Demucs.")
-        self.demucs_install_in_progress = False
-        styled_message_box(
-            self,
-            "Error de instalación",
-            error_msg,
-            QMessageBox.Icon.Critical
-        )
-
-    def _update_demucs_menu_actions(self):
-        if hasattr(self, 'install_demucs_action'):
-            self.install_demucs_action.setEnabled(
-                self.python_available and self.vc_available and self.ffmpeg_available and not self.demucs_available
-            )
-        if hasattr(self, 'split_action'):
-            self.split_action.setEnabled(self.demucs_available)
-
-    def install_CUDA(self):
-        styled_message_box(
-            self,
-            "Instalar CUDA:",
-            "Funcionalidad en Desarrollo todavía:",
-            QMessageBox.Icon.Information
-        )
-
-
-
-    def install_ytdlp(self):
-        if self.ytdlp_available:
-            styled_message_box(
-                self,
-                "yt-dlp ya instalado",
-                "yt-dlp ya está instalado en el sistema.",
-                QMessageBox.Icon.Information
-            )
-            return
-
-        reply = styled_message_box(
-            self,
-            "Confirmar instalación",
-            "Se instalará yt-dlp mediante winget.\n"
-            "Esto requiere permisos de administrador.\n\n"
-            "¿Desea continuar?",
-            QMessageBox.Icon.Question,
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        self.ytdlp_thread = QThread()
-        self.ytdlp_worker = YTDLPWorker()
-        self.ytdlp_worker.moveToThread(self.ytdlp_thread)
-
-        self.ytdlp_thread.started.connect(self.ytdlp_worker.run)
-        self.ytdlp_worker.finished.connect(self._on_ytdlp_install_finished)
-        self.ytdlp_worker.error.connect(self._on_ytdlp_install_error)
-        self.ytdlp_worker.finished.connect(self.ytdlp_thread.quit)
-        self.ytdlp_worker.finished.connect(self.ytdlp_worker.deleteLater)
-        self.ytdlp_thread.finished.connect(self.ytdlp_thread.deleteLater)
-
-        self.status_label.setText("Instalando yt-dlp...")
-        self.ytdlp_thread.start()
-
-    def _on_ytdlp_install_finished(self):
-        self.status_label.setText("yt-dlp instalado correctamente.")
-        self.ytdlp_available = True
-        self._update_ytdlp_menu_actions()
-        styled_message_box(
-            self,
-            "Instalación completada",
-            "yt-dlp se instaló correctamente.\n"
-            "Ahora puede usar la opción 'Descargar MP3...'.",
-            QMessageBox.Icon.Information
-        )
-
-    def _on_ytdlp_install_error(self, error_msg):
-        self.status_label.setText("Error instalando yt-dlp.")
-        styled_message_box(
-            self,
-            "Error de instalación",
-            error_msg,
-            QMessageBox.Icon.Critical
-        )
-
-    def _update_ytdlp_menu_actions(self):
-        if hasattr(self, 'install_ytdlp_action'):
-            self.install_ytdlp_action.setEnabled(not self.ytdlp_available)
-        if hasattr(self, 'download_mp3_action'):
-            self.download_mp3_action.setEnabled(self.ytdlp_available)
-
-    def download_mp3(self):
-        if not self.ytdlp_available:
-            styled_message_box(
-                self,
-                "yt-dlp no instalado",
-                "Debe instalar yt-dlp primero desde el menú Opciones > Dependencias.",
-                QMessageBox.Icon.Warning
-            )
-            return
-
-        # Crear y mostrar el diálogo
-        dialog = DownloadDialog(self)
-        bg_image(dialog, 'images/split_dialog/split.png')  # mismo fondo que otros diálogos
-        dialog.download_requested.connect(self._start_ytdlp_download)
-        dialog.exec()
-
-    def _start_ytdlp_download(self, url: str):
-        """Inicia la descarga en un hilo separado."""
-        # Crear hilo y worker
-        self.download_thread = QThread()
-        self.download_worker = YTDLPDownloadWorker(url)
-        self.download_worker.moveToThread(self.download_thread)
-
-        # Conectar señales
-        self.download_thread.started.connect(self.download_worker.run)
-        self.download_worker.finished.connect(self._on_download_finished)
-        self.download_worker.error.connect(self._on_download_error)
-        self.download_worker.finished.connect(self.download_thread.quit)
-        self.download_worker.finished.connect(self.download_worker.deleteLater)
-        self.download_worker.error.connect(self.download_thread.quit)
-        self.download_worker.error.connect(self.download_worker.deleteLater)
-        self.download_thread.finished.connect(self.download_thread.deleteLater)
-
-        # Actualizar barra de estado
-        self.status_label.setText("Descargando MP3...")
-
-        # Iniciar
-        self.download_thread.start()
-
-    def _on_download_finished(self, message):
-        self.status_label.setText("Descarga completada.")
-        styled_message_box(
-            self,
-            "Descarga finalizada",
-            message,
-            QMessageBox.Icon.Information
-        )
-
-
-    def _on_download_error(self, error_msg):
-        self.status_label.setText("Error en descarga.")
-        styled_message_box(
-            self,
-            "Error de descarga",
-            error_msg,
-            QMessageBox.Icon.Critical
-        )
-
-    def show_about_dialog(self):
-        dialog = AboutDialog(self)
-        bg_image(dialog, 'images/split_dialog/split.png')
-        dialog.exec()
-
-    def show_queue_dialog(self):
-        queue_dialog = QueueDialog(self, parent=self)
-        bg_image(queue_dialog, 'images/split_dialog/split.png')
-        queue_dialog.exec()
-
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Delete:
-            self.remove_selected()
-
-        else:
-            super().keyPressEvent(event)
+            self._apply_background_pixmap()
 
     def paintEvent(self, event):
-        # Dibujar sombra exterior
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(0, 0, 0, 50))
         painter.drawRoundedRect(self.rect(), 8, 8)
 
-    # def eventFilter(self, obj, event):
-    #     if obj is self.menuBar() and event.type() == QEvent.Type.Enter:
-    #         print("Menú activado - barra visible:", self.status_bar.isVisible())
-    #     return super().eventFilter(obj, event)
 
-    def init_menu(self):
-        menu = self.menuBar()
-        file_menu = menu.addMenu("Archivo")
-        options_menu = menu.addMenu("Opciones")
-        help_menu = menu.addMenu("Ayuda")
-
-        load_action = QAction("Seleccionar Carpeta", self)
-        load_action.setShortcut(QKeySequence("Ctrl+O"))
-        load_action.triggered.connect(self.load_folder)
-        file_menu.addAction(load_action)
-
-        self.split_action = QAction("Dividir...", self)
-        self.split_action.setShortcut(QKeySequence("Ctrl+D"))
-        self.split_action.triggered.connect(self.show_split_dialog)
-        self.split_action.setEnabled(self.demucs_available)
-        if not self.demucs_available:
-            self.split_action.setToolTip("Demucs no está instalado o no es accesible"
-        )
-        file_menu.addAction(self.split_action)
-
-        remove_action = QAction("Remover", self)
-        remove_action.triggered.connect(self.remove_selected)
-        file_menu.addAction(remove_action)
-
-        file_menu.addSeparator()
-
-        # Opción Salir
-        exit_action = QAction("&Salir", self)
-        exit_action.setShortcut("Ctrl+Q")
-        exit_action.setStatusTip("Adios")
-        exit_action.triggered.connect(self.close_application)
-        file_menu.addAction(exit_action)
-
-        self.show_playlist_action = QAction("Mostrar lista", self)
-        self.show_playlist_action.setCheckable(True)
-        self.show_playlist_action.setChecked(True)
-        self.show_playlist_action.triggered.connect(self._toggle_playlist_visibility)
-        options_menu.addAction(self.show_playlist_action)
-
-        # Opción de modificar Lyrics
-        lyrics_menu = options_menu.addMenu("Modificar Lyrics")
-        self.advance_action = QAction(">> Mostrar Despues 0.5s", self)
-        self.advance_action.setShortcut("Ctrl+Shift+Right")
-        self.advance_action.triggered.connect(lambda: self.adjust_lyrics_timing(0.5))
-
-        self.delay_action = QAction("<< Mostrar Antes 0.5s", self)
-        self.delay_action.setShortcut("Ctrl+Shift+Left")
-        self.delay_action.triggered.connect(lambda: self.adjust_lyrics_timing(-0.5))
-
-        self.increase_font_action = QAction("Incrementar tamaño", self)
-        self.increase_font_action.setShortcut("Ctrl+Shift+Up")
-        self.increase_font_action.triggered.connect(self.increase_lyrics_font)
-
-        self.decrease_font_action = QAction("Disminuir tamaño", self)
-        self.decrease_font_action.setShortcut("Ctrl+Shift+Down")
-        self.decrease_font_action.triggered.connect(self.decrease_lyrics_font)
-
-        lyrics_menu.addAction(self.advance_action)
-        lyrics_menu.addAction(self.delay_action)
-        lyrics_menu.addSeparator()
-        lyrics_menu.addAction(self.increase_font_action)
-        lyrics_menu.addAction(self.decrease_font_action)
-
-        cleanup_action = QAction("Limpiar Cache", self)
-        cleanup_action.triggered.connect(self.cleanup_resources_manual)
-        options_menu.addAction(cleanup_action)
-
-        dependencias_menu = options_menu.addMenu("Dependencias")
-
-        self.install_python_action = QAction("Instalar Python", self)
-        self.install_python_action.triggered.connect(self.install_python)
-        self.install_python_action.setEnabled(not self.python_available)
-        dependencias_menu.addAction(self.install_python_action)
-
-        self.install_vc_action = QAction("Instalar Visual C++", self)
-        self.install_vc_action.triggered.connect(self.install_vc)
-        self.install_vc_action.setEnabled(not self.vc_available)
-        dependencias_menu.addAction(self.install_vc_action)
-
-        self.install_ffmpeg_action = QAction("Instalar FFmpeg", self)
-        self.install_ffmpeg_action.triggered.connect(self.install_ffmpeg)
-        self.install_ffmpeg_action.setEnabled(not self.ffmpeg_available)
-        dependencias_menu.addAction(self.install_ffmpeg_action)
-
-        self.install_demucs_action = QAction("Instalar Demucs", self)
-        self.install_demucs_action.triggered.connect(self.install_demucs)
-        # Habilita solo si Python y Visual C++ están instalados y Demucs no lo está
-        self.install_demucs_action.setEnabled(
-            self.python_available and self.vc_available and not self.demucs_available
-        )
-        dependencias_menu.addAction(self.install_demucs_action)
-
-        self.install_cuda_action = QAction("Instalar PyTorch+CUDA", self)
-        self.install_cuda_action.triggered.connect(self.install_cuda)
-        self.install_cuda_action.setEnabled(
-            self.python_available and self.gpu_available and not self.pytorch_cuda_available
-        )
-        dependencias_menu.addAction(self.install_cuda_action)
-
-        dependencias_menu.addSeparator()
-
-        self.install_ytdlp_action = QAction("Instalar YT-DLP (Youtube -> MP3)", self)
-        self.install_ytdlp_action.triggered.connect(self.install_ytdlp)
-        self.install_ytdlp_action.setEnabled(not self.ytdlp_available)
-        dependencias_menu.addAction(self.install_ytdlp_action)
-
-        # Separador
-        options_menu.addSeparator()
-
-        self.download_mp3_action = QAction("Descargar MP3...", self)
-        self.download_mp3_action.triggered.connect(self.download_mp3)
-        self.download_mp3_action.setEnabled(self.ytdlp_available)
-        options_menu.addAction(self.download_mp3_action)
-
-        about_action = QAction("Sobre Playit", self)
-        about_action.triggered.connect(self.show_about_dialog)
-        help_menu.addAction(about_action)
-
-        queue_action = QAction("Mostrar Queue", self)
-        queue_action.triggered.connect(self.show_queue_dialog)
-        help_menu.addAction(queue_action)
-
-        # Inicialmente deshabilitadas
-        self.advance_action.setEnabled(False)
-        self.delay_action.setEnabled(False)
-
-
-    def increase_lyrics_font(self):
-        self.lyrics_font_size += 2
-        if self.lyrics_font_size > 82:  # Límite máximo
-            self.lyrics_font_size = 20
-        self.apply_lyrics_font()
-
-    def decrease_lyrics_font(self):
-        self.lyrics_font_size -= 2
-        if self.lyrics_font_size < 20:  # Límite mínimo
-            self.lyrics_font_size = 82
-        self.apply_lyrics_font()
-
-    def apply_lyrics_font(self):
-        self.lyrics_current.setStyleSheet(f"""
-                                    QTextEdit {{
-                                        font-size: {self.lyrics_font_size}px;                                
-                                    }}
-                                """)
-    def _toggle_playlist_visibility(self, state):
-        self.playlist_dock.setVisible(state)
-
-    def _update_playlist_menu_state(self, visible):
-        self.show_playlist_action.setChecked(visible)
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Delete:
+            self.remove_selected()
+        else:
+            super().keyPressEvent(event)
 
     def closeEvent(self, event):
         if self.playlist_dock.isVisible():
             self.playlist_dock.close()
         super().closeEvent(event)
 
-    def show_search_dialog(self):
-        dialog = SearchDialog(self)
+    def center(self):
+        frame = self.frameGeometry()
+        frame.moveCenter(self.screen().availableGeometry().center())
+        self.move(frame.topLeft())
 
-        bg_image(dialog,'images/split_dialog/split.png')
-        dialog.search_requested.connect(self.handle_search)
-        dialog.exec()
 
-    def handle_search(self, search_text):
-        search_text = search_text.strip().lower()
-        if not search_text:
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Lazy loading callbacks ────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def _on_song_loaded(self, song_data: dict):
+        already_exists = any(
+            t['artist'] == song_data['artist'] and t['song'] == song_data['song']
+            for t in self.playlist
+        )
+        if already_exists:
             return
 
-        # Solo reiniciar si es una nueva búsqueda
-        if search_text != self.current_search:
-            self.current_search = search_text
-            self.search_results = [
-                (i, self.playlist_widget.item(i).text().lower())
-                for i in range(self.playlist_widget.count())
-            ]
-            self.search_results = [
-                idx for idx, text in self.search_results
-                if search_text in text
-            ]
-            self.search_index = 0  # Siempre comenzar desde el primero
+        self.playlist.append(song_data)
+        item = QListWidgetItem(f"{song_data['artist']} - {song_data['song']}")
+        item.setIcon(QIcon(resource_path('images/main_window/audio_icon.png')))
+        self.playlist_widget.addItem(item)
 
-        # Navegación ordenada
-        if self.search_results:
-            # Calcular índice relativo
-            current_idx = self.search_results[self.search_index % len(self.search_results)]
-            item = self.playlist_widget.item(current_idx)
+        if len(self.playlist) == 1:
+            self._set_playback_buttons_enabled(True)
 
-            # Seleccionar y scroll
+        self._check_and_fetch_lyrics_async(
+            song_data['path'], song_data['artist'], song_data['song']
+        )
+
+    def _on_playlist_loaded(self):
+        self.status_label.setText(f"Playlist cargada: {len(self.playlist)} canciones")
+        self.update_status()
+
+    def _handle_cover_loaded(self, pixmap: QPixmap):
+        self.cover_label.setPixmap(pixmap)
+
+    def _handle_lyrics_loaded(self, lyrics_data: list):
+        self.lyrics = lyrics_data or []
+        self.update_lyrics_menu_state()
+
+        song = self.playlist[self.current_index]
+        self.lyrics_header.setHtml(
+            f'<H1 style="color: #3AABEF;"><center>{song["artist"]}</center></H1>'
+            f'<H2 style="color: #7E54AF;"><center>{song["song"]}</center></H2>'
+        )
+        self.lyrics_next.clear()
+
+        if not hasattr(self, 'lyrics_timer'):
+            self.lyrics_timer = QTimer(self)
+            self.lyrics_timer.timeout.connect(self.update_lyrics_display)
+        self.lyrics_timer.start(100)
+
+    def _handle_lyrics_error(self, error_msg: str):
+        self.lyrics_current.setHtml(f'<center>Error: {error_msg}</center>')
+
+    def _handle_lyrics_not_found(self):
+        self.lyrics_current.setHtml('<center>No hay letras disponibles</center>')
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Controles de reproducción ─────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def play_current(self):
+        self.stop_playback()
+        if not (0 <= self.current_index < len(self.playlist)):
+            return
+        if not self._setup_audio():
+            return
+        self._restore_mute_states()
+        self._update_metadata()
+        self._update_playback_ui('Activa')
+        self.set_volume(self.volume)
+        self.update_lyrics_menu_state()
+        self.highlight_current_song()
+        self._control_channels('play')
+
+    def play_next(self):
+        self.next_btn.setEnabled(False)
+        self.stop_playback()
+        self.current_index = (self.current_index + 1) % len(self.playlist)
+        self.play_current()
+        self.next_btn.setEnabled(True)
+
+    def play_previous(self):
+        self.prev_btn.setEnabled(False)
+        self.stop_playback()
+        self.current_index = (self.current_index - 1) % len(self.playlist)
+        self.play_current()
+        self.prev_btn.setEnabled(True)
+
+    def play_selected(self):
+        self.current_index = self.playlist_widget.currentRow()
+        self.play_current()
+
+    def toggle_play_pause(self):
+        if self.playback_state == "Activa":
+            self._control_channels('pause')
+            self._update_playback_ui('Pausada')
+        else:
+            self._control_channels('unpause')
+            self._update_playback_ui('Activa')
+        self.update_lyrics_menu_state()
+
+    def stop_playback(self):
+        time.sleep(0.1)  # Evita arrastre al cambiar canción abruptamente
+        self._control_channels('stop')
+        self._update_playback_ui('Detenido')
+        self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
+        self.progress_song.setValue(0)
+        self.current_channels = []
+        self.lyrics = []
+        self._last_progress_seconds = -1
+        self.update_lyrics_menu_state()
+        for w in (self.lyrics_header, self.lyrics_current, self.lyrics_next):
+            w.clear()
+        self.clear_song_highlight()
+
+    def _control_channels(self, action: str):
+        """Ejecuta 'play', 'stop', 'pause' o 'unpause' en todos los canales activos."""
+        for channel in self.current_channels:
+            if action in ('play', 'unpause'):
+                channel.unpause()
+            elif action == 'stop':
+                channel.stop()
+            elif action == 'pause':
+                channel.pause()
+
+    def _setup_audio(self) -> bool:
+        if not (0 <= self.current_index < len(self.playlist)):
+            return False
+
+        song = self.playlist[self.current_index]
+        path = Path(song["path"])
+
+        try:
+            sounds = self.lazy_audio.load_audio_lazy(path)
+            if not sounds:
+                styled_message_box(
+                    self, "Error de Audio",
+                    f"No se encontraron las pistas separadas para:\n"
+                    f"{song['artist']} - {song['song']}\n\n"
+                    "Asegúrese de que exista la carpeta 'separated' con los archivos:\n"
+                    "• drums.mp3\n• vocals.mp3\n• bass.mp3\n• other.mp3",
+                    QMessageBox.Icon.Warning
+                )
+                return False
+
+            self.current_channels = []
+            for sound in sounds:
+                channel = sound.play()
+                channel.pause()
+                self.current_channels.append(channel)
+
+            for i, track in enumerate(TRACK_NAMES):
+                if i < len(self.current_channels):
+                    vol = 0.0 if self.mute_states[track] else (
+                        self.individual_volumes[track] * (self.volume / 100.0)
+                    )
+                    self.current_channels[i].set_volume(vol)
+
+            length_s = sounds[0].get_length()
+            length_ms = int(length_s * 1000)
+            total_m, total_s = divmod(int(length_s), 60)
+            self.progress_song.setFormat(f"00:00 / {total_m:02d}:{total_s:02d}")
+            self.progress_song.setRange(0, length_ms)
+            self.progress_song.setValue(0)
+            return True
+
+        except Exception as e:
+            styled_message_box(self, "Error", f"Error cargando audio: {str(e)}",
+                               QMessageBox.Icon.Critical)
+            return False
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── UI de reproducción ────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _update_playback_ui(self, state: str):
+        self.playback_state = state
+        stopped = state == "Detenido"
+        self.stop_btn.setEnabled(not stopped)
+        self.progress_song.setEnabled(not stopped)
+        for btn in (self.drums_btn, self.vocals_btn, self.bass_btn, self.other_btn):
+            btn.setEnabled(True)
+        self.update_status()
+
+    def _restore_mute_states(self):
+        btns = {
+            "drums": self.drums_btn, "vocals": self.vocals_btn,
+            "bass": self.bass_btn, "other": self.other_btn,
+        }
+        for track, btn in btns.items():
+            icon_name = f"no_{track}" if self.mute_states[track] else track
+            btn.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
+            btn.setChecked(self.mute_states[track])
+
+    def highlight_current_song(self):
+        self.clear_song_highlight()
+        if 0 <= self.current_index < self.playlist_widget.count():
+            item = self.playlist_widget.item(self.current_index)
+            font = item.font()
+            font.setItalic(True)
+            item.setFont(font)
+            item.setForeground(QColor("black"))
+            item.setBackground(QColor("#eea1cd"))
             self.playlist_widget.setCurrentItem(item)
-            self.playlist_widget.scrollToItem(item, QListWidget.ScrollHint.PositionAtCenter)
 
-            # Incrementar para siguiente iteración
-            self.search_index += 1
+    def clear_song_highlight(self):
+        for i in range(self.playlist_widget.count()):
+            item = self.playlist_widget.item(i)
+            font = item.font()
+            font.setItalic(False)
+            item.setFont(font)
+            item.setForeground(QColor("white"))
+            item.setBackground(QColor("transparent"))
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Volumen ───────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def set_volume(self, value: int):
+        self.volume = value
+        for track in TRACK_NAMES:
+            if not self.mute_states[track]:
+                self.apply_volume_to_track(track, self.individual_volumes[track])
+
+    def set_individual_volume(self, track_name: str, value: int):
+        self.individual_volumes[track_name] = value / 100.0
+        if not self.mute_states[track_name]:
+            self.apply_volume_to_track(track_name, value / 100.0)
+
+    def apply_volume_to_track(self, track_name: str, volume: float):
+        if not self.current_channels:
+            return
+        track_index = {"drums": 0, "vocals": 1, "bass": 2, "other": 3}.get(track_name)
+        if track_index is not None and track_index < len(self.current_channels):
+            self.current_channels[track_index].set_volume(volume * (self.volume / 100.0))
+
+    def toggle_mute(self):
+        """Maneja el clic de cualquier botón de mute de pista."""
+        sender = self.sender()
+        btn_to_track = {
+            self.drums_btn: "drums", self.vocals_btn: "vocals",
+            self.bass_btn: "bass", self.other_btn: "other",
+        }
+        track_name = btn_to_track.get(sender)
+        if not track_name:
+            return
+        self.mute_states[track_name] = not self.mute_states[track_name]
+        muted = self.mute_states[track_name]
+        icon_name = f"no_{track_name}" if muted else track_name
+        sender.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
+        self.apply_volume_to_track(track_name, 0.0 if muted else self.individual_volumes[track_name])
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Actualización de display ──────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def update_display(self):
+        if self.playback_state != "Activa" or not self.current_channels:
+            return
+        try:
+            if not pygame.mixer.get_busy():
+                self.play_next()
+                return
+
+            current_ms = self.progress_song.value() + 1000
+            if current_ms > self.progress_song.maximum():
+                self.play_next()
+                return
+
+            self.progress_song.setValue(current_ms)
+            current_s = current_ms // 1000
+            if self._last_progress_seconds == current_s:
+                return
+            self._last_progress_seconds = current_s
+
+            total_s = self.progress_song.maximum() // 1000
+            cur_m, cur_s = divmod(current_s, 60)
+            tot_m, tot_s = divmod(total_s, 60)
+            self.progress_song.setFormat(
+                f"{cur_m:02d}:{cur_s:02d} / {tot_m:02d}:{tot_s:02d}"
+            )
+        except pygame.error as e:
+            print(f"Error en mixer durante actualización: {e}")
+            self.stop_playback()
+        except Exception as e:
+            print(f"Error inesperado en update_display: {e}")
+            self.stop_playback()
+
+
+    def update_status(self):
+        try:
+            now = time.time()
+            if now - self._last_stats_update > STATUS_CACHE_TTL:
+                self._cached_stats = self.get_cache_stats()
+                self._last_stats_update = now
+
+            parts = [
+                f"Canciones: {len(self.playlist)}",
+                f"Reproducción: {self.playback_state.capitalize()}",
+                self._format_demucs_progress(),
+                f"En cola: {len(self.demucs_queue)}" if self.demucs_queue else "",
+                f"Cache: {self._cached_stats.get('total_cached_items', 0)} elementos",
+                f"Fecha: {datetime.now().strftime('%A - %d/%m/%Y')}",
+                f"Hora: {datetime.now().strftime('%H:%M')}",
+            ]
+            self.status_label.setText(" | ".join(p for p in parts if p))
+        except Exception:
+            self.status_label.setText(
+                f"Canciones: {len(self.playlist)} | Estado: {self.playback_state}"
+            )
+
+    def _format_demucs_progress(self) -> str:
+        if self.demucs_active:
+            filled = int(self.demucs_progress / 100 * 10)
+            bar = '■' * filled + '▢' * (10 - filled)
+            return f"Separando: {bar} {self.demucs_progress}%"
+        if self.demucs_queue:
+            return f"En cola: {len(self.demucs_queue)} trabajos"
+        return ""
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Botones e init de controles ───────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def init_leds(self) -> QHBoxLayout:
+        def _make_btn(name, size, icon):
+            btn = QPushButton()
+            btn.setObjectName(name)
+            btn.setFixedSize(*size)
+            btn.setEnabled(False)
+            bg_image(btn, f"images/main_window/{icon}.png")
+            return btn
+
+        self.prev_btn = _make_btn('prev_btn', (40, 40), 'prev')
+        self.play_btn = _make_btn('play_btn', (80, 80), 'play')
+        self.next_btn = _make_btn('next_btn', (40, 40), 'next')
+        self.stop_btn = _make_btn('stop_btn', (40, 40), 'stop')
+
+        self.volume_dial = CustomDial()
+        self.volume_dial.setRange(0, 100)
+        self.volume_dial.setValue(DEFAULT_VOLUME)
+        self.volume_dial.setFixedSize(120, 120)
+        self.volume_dial.setNotchesVisible(True)
+        self.volume_dial.valueChanged.connect(self.set_volume)
+
+        layout = QHBoxLayout()
+        for w in (self.prev_btn, self.play_btn, self.next_btn,
+                  self.stop_btn, self.volume_dial):
+            layout.addWidget(w)
+        return layout
+
+    def track_buttons(self) -> QHBoxLayout:
+        self._track_buttons: dict[str, QPushButton] = {}
+        self._track_sliders: dict[str, QSlider] = {}
+
+        outer = QHBoxLayout()
+        for track in TRACK_NAMES:
+            btn = QPushButton()
+            self.setup_button(btn, f'{track}_btn', track)
+            setattr(self, f'{track}_btn', btn)
+            self._track_buttons[track] = btn
+
+            slider = QSlider(Qt.Orientation.Horizontal)
+            self.setup_slider(slider, track)
+            setattr(self, f'{track}_slider', slider)
+            self._track_sliders[track] = slider
+
+            col = QVBoxLayout()
+            col.addWidget(btn)
+            col.addWidget(slider)
+            outer.addLayout(col)
+
+        self.mute_buttons = list(self._track_buttons.values())
+        self.enable_disable_buttons(False)
+        return outer
+
+    def setup_button(self, button: QPushButton, object_name: str, icon_name: str):
+        button.setObjectName(object_name)
+        button.setIconSize(QSize(120, 120))
+        button._icon_path = f'images/main_window/icons01/{icon_name}.png'
+        button._icon_disabled = f'images/main_window/icons01/no_{icon_name}.png'
+        self._lazy_load_icon(button, False)
+        button.setCheckable(True)
+        button.clicked.connect(self.toggle_mute)
+
+    def setup_slider(self, slider: QSlider, track_name: str):
+        slider.setRange(0, 100)
+        slider.setValue(100)
+        slider.setFixedWidth(120)
+        slider.valueChanged.connect(
+            lambda v, t=track_name: self.set_individual_volume(t, v)
+        )
+
+    def _lazy_load_icon(self, btn: QPushButton, muted: bool):
+        path = btn._icon_disabled if muted else btn._icon_path
+        icon = self.lazy_images.load_icon_cached(resource_path(path), (120, 120))
+        btn.setIcon(icon)
+
+    def enable_disable_buttons(self, state: bool):
+        for track in TRACK_NAMES:
+            btn = self._track_buttons[track]
+            btn.setEnabled(state)
+            if state and not self.mute_states[track]:
+                btn.setIcon(QIcon(resource_path(
+                    f'images/main_window/icons01/{track}.png'
+                )))
+                btn.setChecked(False)
+
+    def _set_playback_buttons_enabled(self, state: bool):
+        for btn in (self.prev_btn, self.next_btn, self.play_btn):
+            btn.setEnabled(state)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Playlist ──────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def load_folder(self, path: str = None):
+        if not path:
+            from os.path import expanduser
+            path = QFileDialog.getExistingDirectory(
+                self, "Seleccionar Carpeta", expanduser("~/Music")
+            )
+        if not path:
+            return
+        self.clear_playlist()
+        self.status_label.setText("Cargando playlist...")
+        try:
+            self.lazy_playlist.load_playlist_lazy(Path(path))
+        except Exception as e:
+            styled_message_box(self, "Error", f"Error iniciando carga: {str(e)}",
+                               QMessageBox.Icon.Critical)
+            self.status_label.setText("Error cargando playlist")
+
+    def clear_playlist(self):
+        self.stop_playback()
+        self.playlist.clear()
+        self.playlist_widget.clear()
+        self.current_index = -1
+        self.reset_search_indices()
+        self._set_playback_buttons_enabled(False)
+        self.stop_btn.setEnabled(False)
+
+    def scan_folder(self, path: Path):
+        self.reset_search_indices()
+        icon = QIcon(resource_path('images/main_window/audio_icon.png'))
+        for json_file in path.rglob("*.json"):
+            try:
+                with open(json_file, "r") as f:
+                    data = json.load(f)
+                dir_path = json_file.parent
+                for artist, songs in data.items():
+                    for song in songs:
+                        if any(t['artist'] == artist and t['song'] == song
+                               for t in self.playlist):
+                            continue
+                        self.playlist.append({"artist": artist, "song": song, "path": dir_path})
+                        item = QListWidgetItem(f"{artist} - {song}")
+                        item.setIcon(icon)
+                        self.playlist_widget.addItem(item)
+                        if not self.prev_btn.isEnabled():
+                            self._set_playback_buttons_enabled(True)
+                        self._check_and_fetch_lyrics_async(dir_path, artist, song)
+            except Exception as e:
+                styled_message_box(self, "Error",
+                                   f"Error cargando {json_file}: {str(e)}",
+                                   QMessageBox.Icon.Critical)
+        self.update_status()
+
+    def remove_selected(self):
+        self.reset_search_indices()
+        for item in self.playlist_widget.selectedItems():
+            row = self.playlist_widget.row(item)
+            self.playlist_widget.takeItem(row)
+            del self.playlist[row]
+        self.update_status()
+
+    def reset_search_indices(self):
+        self.search_results = []
+        self.search_index = 0
+        self.current_search = ""
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Letras ────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def load_lyrics(self, file_path):
+        self.lyrics = []
+        current_time = None
+        current_text = []
+
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                match = re.match(r'\[(\d+):(\d+\.\d+)\]', line)
+                if match:
+                    if current_time is not None:
+                        self.lyrics.append((current_time, '\n'.join(current_text)))
+                    mins, secs = int(match.group(1)), float(match.group(2))
+                    current_time = mins * 60 + secs
+                    current_text = [line[match.end():]]
+                elif current_time is not None and line:
+                    current_text.append(line)
+
+        if current_time is not None:
+            self.lyrics.append((current_time, '\n'.join(current_text)))
+
+        self.update_lyrics_menu_state()
+        if not hasattr(self, 'lyrics_timer'):
+            self.lyrics_timer = QTimer(self)
+            self.lyrics_timer.timeout.connect(self.update_lyrics_display)
+        self.lyrics_timer.start(100)
+
+    def update_lyrics_display(self):
+        if not self.lyrics or self.playback_state != "Activa":
+            return
+        current_time = self.progress_song.value() / 1000.0
+        current_html = next_html = ""
+        for i, (t, html) in enumerate(self.lyrics):
+            if current_time >= t:
+                current_html = html
+                next_html = self.lyrics[i + 1][1] if i + 1 < len(self.lyrics) else ""
+            else:
+                break
+        self.lyrics_current.setHtml(current_html)
+        self.lyrics_next.setHtml(f'<center>{next_html}</center>')
+
+
+    def update_lyrics_menu_state(self):
+        enabled = (
+            self.playback_state == "Activa"
+            and self.current_index != -1
+            and not self._lyrics_has_error()
+        )
+        self.advance_action.setEnabled(enabled)
+        self.delay_action.setEnabled(enabled)
+
+    def _lyrics_has_error(self) -> bool:
+        if not self.lyrics or not isinstance(self.lyrics, list):
+            return True
+        error_keywords = ("no se encontraron", "letras no encontradas")
+        return any(
+            any(kw in html.lower() for kw in error_keywords)
+            for _, html in self.lyrics
+        )
+
+    def adjust_lyrics_timing(self, offset: float):
+        try:
+            lrc_path = self.playlist[self.current_index]["path"] / "lyrics.lrc"
+            with open(lrc_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            modified = self._process_lines(lines, offset)
+            with open(lrc_path, "w", encoding="utf-8") as f:
+                f.writelines(modified)
+            self.load_lyrics(lrc_path)
+        except Exception as e:
+            styled_message_box(self, "Error", f"No se pudo ajustar: {str(e)}",
+                               QMessageBox.Icon.Warning)
+
+    def _process_lines(self, lines: list, offset: float) -> list:
+        result = []
+        for i, line in enumerate(lines):
+            if i == 0 or not line.strip().startswith("["):
+                result.append(line)
+                continue
+            try:
+                time_str = line[1:line.index("]")]
+                new_time = self._adjust_time(time_str, offset)
+                result.append(f"[{new_time}]{line.split(']', 1)[1]}")
+            except Exception:
+                result.append(line)
+        return result
+
+    def _adjust_time(self, time_str: str, offset: float) -> str:
+        mins, rest = time_str.split(':', 1)
+        secs, ms = rest.split('.', 1)
+        total = max(0.0, int(mins) * 60 + int(secs) + int(ms) / 100 + offset)
+        m, s = divmod(int(total), 60)
+        centis = int((total - int(total)) * 100)
+        return f"{m:02d}:{s:02d}.{centis:02d}"
+
+    def increase_lyrics_font(self):
+        self.lyrics_font_size = min(self.lyrics_font_size + 2, LYRICS_FONT_MAX)
+        if self.lyrics_font_size > LYRICS_FONT_MAX:
+            self.lyrics_font_size = LYRICS_FONT_MIN
+        self.apply_lyrics_font()
+
+    def decrease_lyrics_font(self):
+        self.lyrics_font_size = max(self.lyrics_font_size - 2, LYRICS_FONT_MIN)
+        if self.lyrics_font_size < LYRICS_FONT_MIN:
+            self.lyrics_font_size = LYRICS_FONT_MAX
+        self.apply_lyrics_font()
+
+    def apply_lyrics_font(self):
+        self.lyrics_current.setStyleSheet(
+            f"QTextEdit {{ font-size: {self.lyrics_font_size}px; }}"
+        )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Letras async ──────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def _check_and_fetch_lyrics_async(self, dir_path, artist, song):
+        def worker():
+            lrc_path = Path(dir_path) / "lyrics.lrc"
+            default_text = "Letras no encontradas, revisa datos de artista/canción"
+            needs_update = not lrc_path.exists()
+            if not needs_update:
+                try:
+                    needs_update = default_text in lrc_path.read_text(encoding="utf-8")
+                except Exception:
+                    needs_update = True
+            if needs_update:
+                self._fetch_lyrics_from_api(artist, song, Path(dir_path))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _normalize_text(self, text: str) -> str:
+        normalized = unicodedata.normalize('NFKD', text.lower())
+        return ''.join(c for c in normalized if not unicodedata.combining(c))
+
+    def _fetch_lyrics_from_api(self, artist: str, song: str, output_dir: Path):
+        url = f"https://lrclib.net/api/search?q={quote(f'{artist} {song}')}"
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            norm_artist = self._normalize_text(artist)
+            norm_song = self._normalize_text(song)
+            synced = ""
+            for result in response.json():
+                if (self._normalize_text(result.get("artistName", "")) == norm_artist
+                        and self._normalize_text(result.get("trackName", "")) == norm_song
+                        and result.get("syncedLyrics")):
+                    synced = result["syncedLyrics"]
+                    break
+            self._write_lyrics_file(output_dir, artist, song, synced)
+        except Exception:
+            self._write_lyrics_file(output_dir, artist, song, None)
+
+
+    #DUDA: se pueden eliminar los parametros artist y song
+    def _write_lyrics_file(self, output_dir: Path, artist: str, song: str, lyrics):
+        if not lyrics:
+            content = '[00:00.00]<center style="color: #ff2626;">Letras no encontradas</center>\n'
+        else:
+            lines = []
+            for line in lyrics.split('\n'):
+                if line.strip():
+                    parts = line.split(']', 1)
+                    if len(parts) == 2:
+                        lines.append(f'{parts[0]}]<center>{parts[1].strip()}</center>')
+            content = '\n'.join(lines) + '\n'
+        (output_dir / "lyrics.lrc").write_text(content, encoding="utf-8")
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Metadatos ─────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def _update_metadata(self):
+        try:
+            for w in (self.lyrics_header, self.lyrics_current, self.lyrics_next):
+                w.clear()
+            song = self.playlist[self.current_index]
+            path = Path(song["path"])
+            lrc_path = path / "lyrics.lrc"
+            self.title_bar.title.setText(f"{song['artist']} - {song['song']}")
+
+            def load_cover():
+                try:
+                    self.cover_loaded.emit(
+                        self.lazy_images.load_cover_lazy(path, (500, 500))
+                    )
+                except Exception as e:
+                    print(f"❌ Error cargando portada: {e}")
+
+            def load_lyrics():
+                try:
+                    if not lrc_path.exists():
+                        self.lyrics_not_found.emit()
+                        return
+                    self.lyrics_loaded.emit(self.lazy_lyrics.load_lyrics_lazy(path))
+                except Exception as e:
+                    self.lyrics_error.emit(str(e))
+
+            threading.Thread(target=load_cover, daemon=True).start()
+            threading.Thread(target=load_lyrics, daemon=True).start()
+            self._preload_adjacent_resources()
+        except Exception as e:
+            print(f"❌ Error actualizando metadatos: {e}")
+
+
+    def _preload_adjacent_resources(self):
+        if not self.playlist:
+            return
+
+        def worker():
+            try:
+                self.lazy_lyrics.preload_lyrics(self.playlist, self.current_index)
+                for offset in (-1, 1):
+                    idx = (self.current_index + offset) % len(self.playlist)
+                    song_path = Path(self.playlist[idx]["path"])
+                    key = f"cover_{song_path}_(500, 500)"
+                    if key not in self.lazy_images.cache._cache:
+                        self.lazy_images.load_cover_lazy(song_path, (500, 500))
+            except Exception as e:
+                print(f"❌ Error en precarga: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Demucs ────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
     def show_split_dialog(self):
         if not self.demucs_available:
             styled_message_box(
-                self,
-                "Funcionalidad no disponible",
-                "La separación de pistas requiere Demucs, pero no está instalado o no es accesible.\n\n"
-                "Puede instalar Demucs con: pip install demucs",
+                self, "Funcionalidad no disponible",
+                "La separación de pistas requiere Demucs, pero no está instalado.\n\n"
+                "Puede instalar Demucs y demas dependencias desde las opciones del menú.",
                 QMessageBox.Icon.Warning
             )
             return
-
         self.split_dialog = SplitDialog(self)
         bg_image(self.split_dialog, 'images/split_dialog/split.png')
         self.split_dialog.process_started.connect(self.process_song)
-        # Conectar al método existente
         self.split_dialog.show()
 
-    def process_song(self, artist, song, file_path):
-        # Crear objeto de trabajo
-        job = {
-            'artist': artist,
-            'song': song,
-            'file_path': file_path
-        }
-
-        #Agrega o reemplaza la ultima cancion del queue
-        self.last_in_queue["artist"] = artist
-        self.last_in_queue["song"] = song
-
-        # Agregar a la cola
-        self.demucs_queue.append(job)
-
-        # Si no hay proceso activo, iniciar procesamiento
+    def process_song(self, artist: str, song: str, file_path: str):
+        self.last_in_queue = {"artist": artist, "song": song}
+        self.demucs_queue.append({"artist": artist, "song": song, "file_path": file_path})
         if not self.demucs_active:
             self._process_next_job()
         else:
@@ -1461,1038 +1098,666 @@ class AudioPlayer(QMainWindow):
             self.processing_multiple = False
             self.update_status()
             return
+        self._start_demucs_job(self.demucs_queue.pop(0))
 
-        # Obtener el próximo trabajo
-        job = self.demucs_queue.pop(0)
-        self._start_demucs_job(job)
-
-    def _start_demucs_job(self, job):
+    def _start_demucs_job(self, job: dict):
         try:
-            # Limpiar cualquier trabajo anterior
-            self._cleanup_previous_job()
-
+            self._cleanup_demucs_job()
             self.demucs_active = True
             self.demucs_progress = 0
             self.processing = True
             self.update_status()
 
-            # Crear worker y thread nuevos
-            self.demucs_worker = DemucsWorker(
-                job['artist'],
-                job['song'],
-                job['file_path']
-            )
+            self.demucs_worker = DemucsWorker(job['artist'], job['song'], job['file_path'])
             self.demucs_thread = QThread()
-
-            # Configurar conexiones más simples
             self.demucs_worker.moveToThread(self.demucs_thread)
             self.demucs_thread.started.connect(self.demucs_worker.run)
             self.demucs_worker.finished.connect(self._on_demucs_success)
             self.demucs_worker.error.connect(self._handle_demucs_error)
             self.demucs_worker.progress.connect(self._update_demucs_progress)
-
-            # Conexión de limpieza
             self.demucs_thread.finished.connect(self.demucs_thread.deleteLater)
-
-            # Iniciar proceso
             self.demucs_thread.start()
-
         except Exception as e:
-            self._handle_demucs_error(f"Error iniciando separación: {str(e)}")
+            self._handle_demucs_error(f"Error iniciando separación: {e}")
             self._process_next_job()
 
-    def _cleanup_previous_job(self):
+
+    def _cleanup_demucs_job(self):
+        """Detiene y libera el hilo/worker de Demucs si están activos."""
         try:
             if self.demucs_thread and self.demucs_thread.isRunning():
                 self.demucs_thread.quit()
-                self.demucs_thread.wait(1000)  # Esperar hasta 1 segundo
-        except:
+                self.demucs_thread.wait(1000)
+        except Exception:
             pass
-
         try:
             if self.demucs_worker:
                 self.demucs_worker.deleteLater()
-        except:
+        except Exception:
             pass
-
         self.demucs_thread = None
         self.demucs_worker = None
 
 
     def _on_demucs_success(self):
-        self.scan_folder(Path("music_library"))
-        """Maneja la finalización exitosa de un trabajo"""
-        # Primero limpiar el trabajo actual
-        self._cleanup_current_job()
-
-        # Procesar siguiente trabajo en la cola
+        self.scan_folder(DEFAULT_LIBRARY)
+        self._finish_demucs_job()
         self._process_next_job()
-
-        # Mostrar mensaje solo si fue el último trabajo
         if not self.demucs_queue and self.processing_multiple:
             self.processing_multiple = False
-            self.audio_files = {'drums.mp3', 'vocals.mp3', 'bass.mp3', 'other.mp3'}
+            self._start_file_verification()
 
-            self.verification_timer = QTimer(self)
-            self.verification_timer.timeout.connect(self.check_files)
-            self.verification_timer.start(30000)  # 30 segundos
-            self.check_files()
+    def _finish_demucs_job(self):
+        self.demucs_active = False
+        self.processing = False
+        self.update_status()
+        if self.demucs_thread and self.demucs_thread.isRunning():
+            self.demucs_thread.quit()
+            self.demucs_thread.wait(500)
+        self.demucs_thread = None
+        self.demucs_worker = None
+
+    def _handle_demucs_error(self, error_msg: str):
+        self._finish_demucs_job()
+        if not self.processing_multiple:
+            styled_message_box(self, "Error", error_msg, QMessageBox.Icon.Critical)
+        self._process_next_job()
+
+    def _update_demucs_progress(self, value: int):
+        self.demucs_progress = value
+        self.update_status()
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Verificación de archivos post-Demucs ──────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def _start_file_verification(self):
+        self._verification_attempts = 0
+        self.verification_timer = QTimer(self)
+        self.verification_timer.timeout.connect(self.check_files)
+        self.verification_timer.start(VERIFICATION_INTERVAL_MS)
+        self.check_files()
 
     def check_files(self):
-        """
-        Verifica que TODOS los archivos de audio separados existan.
-        Incluye contador de reintentos para evitar bucles infinitos.
-        """
-        # Inicializar contador si no existe
-        if not hasattr(self, '_verification_attempts'):
-            self._verification_attempts = 0
-
-        # Límite máximo de intentos (60 intentos = 30 minutos con timer de 30 seg)
-        MAX_ATTEMPTS = 60
-
-        if self._verification_attempts >= MAX_ATTEMPTS:
+        if self._verification_attempts >= VERIFICATION_MAX_ATTEMPTS:
             self.verification_timer.stop()
             self._verification_attempts = 0
             styled_message_box(
-                self,
-                "Timeout",
-                f"No se pudieron verificar todos los archivos de:\n"
+                self, "Timeout",
+                f"No se pudieron verificar los archivos de:\n"
                 f"{self.last_in_queue['artist']} - {self.last_in_queue['song']}\n\n"
-                f"Verifique manualmente la carpeta separated/",
+                "Verifique manualmente la carpeta separated/",
                 QMessageBox.Icon.Warning
             )
             return
 
-        # Validar datos
         if not self.last_in_queue.get('artist') or not self.last_in_queue.get('song'):
             self.verification_timer.stop()
             self._verification_attempts = 0
             return
 
-        # Construir ruta
-        base_path = Path(f"music_library/{self.last_in_queue['artist']}/{self.last_in_queue['song']}/separated")
+        base = (DEFAULT_LIBRARY / self.last_in_queue['artist']
+                / self.last_in_queue['song'] / "separated")
+        required = ['drums.mp3', 'vocals.mp3', 'bass.mp3', 'other.mp3']
 
-        if not base_path.exists():
+        if not base.exists() or not all((base / f).exists() for f in required):
             self._verification_attempts += 1
             return
 
-        # Archivos requeridos
-        required_files = ['drums.mp3', 'vocals.mp3', 'bass.mp3', 'other.mp3']
-
-        # Verificar cada archivo
-        all_present = True
-        for archivo in required_files:
-            if not (base_path / archivo).exists():
-                all_present = False
-                break
-
-        if all_present:
-            # ✅ Todos presentes
-            self.verification_timer.stop()
-            self._verification_attempts = 0
-            self.scan_folder(Path("music_library"))
-            print(f"✅ Verificación completa: {self.last_in_queue['artist']} - {self.last_in_queue['song']}")
-        else:
-            # ⏳ Faltan archivos, incrementar contador
-            self._verification_attempts += 1
-            print(f"⏳ Intento {self._verification_attempts}/{MAX_ATTEMPTS} - Esperando archivos completos...")
-
-    def _cleanup_current_job(self):
-        self.demucs_active = False
-        self.processing = False
-        self.update_status()
-
-        # Limpiar referencias
-        if self.demucs_thread and self.demucs_thread.isRunning():
-            self.demucs_thread.quit()
-            self.demucs_thread.wait(500)  # Esperar medio segundo
-
-        self.demucs_thread = None
-        self.demucs_worker = None
-
-    def _handle_demucs_error(self, error_msg):
-        # Primero limpiar el trabajo actual
-        self._cleanup_current_job()
-
-        # Mostrar error solo si es el único trabajo
-        if not self.processing_multiple:
-            styled_message_box(self, "Error", error_msg, QMessageBox.Icon.Critical)
-
-        # Continuar con el siguiente trabajo
-        self._process_next_job()
+        self.verification_timer.stop()
+        self._verification_attempts = 0
+        self.scan_folder(DEFAULT_LIBRARY)
 
 
-    def _update_demucs_progress(self, value):
-        self.demucs_progress = value
-        self.update_status()
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Dependencias ──────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def load_demucs_model(self):
+        try:
+            result = subprocess.run(
+                ['demucs', '--help'], capture_output=True, text=True, shell=True
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr)
+            self.demucs_available = True
+        except Exception as e:
+            Path("demucs_error.log").write_text(f"Error checking Demucs: {e}")
+            self.demucs_available = False
+
+    def _make_hidden_startupinfo(self):
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        return si
+
+    def _run_subprocess_check(self, cmd, **kwargs) -> bool:
+        """Ejecuta un comando y devuelve True si termina con código 0."""
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _check_python_installation(self):
+        self.python_available = self._run_subprocess_check(
+            ['python', '--version'], shell=True, timeout=5
+        )
+
+    def _check_ffmpeg_installation(self):
+        self.ffmpeg_available = self._run_subprocess_check(
+            ['ffmpeg', '-version'],
+            startupinfo=self._make_hidden_startupinfo(),
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=5,
+        )
+
+    def _check_vc_installation(self):
+        cmd = ('reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"'
+               ' /s /f "Visual C++ 2022 X64" 2>nul | findstr /i "DisplayName"')
+        self.vc_available = self._run_subprocess_check(
+            cmd, shell=True, startupinfo=self._make_hidden_startupinfo()
+        )
+
+    def _check_ytdlp_installation(self):
+        self.ytdlp_available = self._run_subprocess_check(
+            ['yt-dlp', '--version'],
+            shell=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=5,
+        )
+
+    def _check_gpu(self):
+        try:
+            result = subprocess.run(
+                ['wmic', 'path', 'win32_VideoController', 'get', 'name'],
+                capture_output=True, text=True, timeout=10,
+                startupinfo=self._make_hidden_startupinfo(),
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            self.gpu_available = 'nvidia' in result.stdout.lower()
+        except Exception:
+            self.gpu_available = False
+
+    def _check_pytorch_cuda(self):
+        self.pytorch_cuda_available = self._run_subprocess_check(
+            ['python', '-c', 'import torch; exit(0 if torch.cuda.is_available() else 1)'],
+            startupinfo=self._make_hidden_startupinfo(),
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=10,
+        )
 
 
-    def _create_json(self, path, artist, song, config):
-        data = {
-            artist: {
-                song: {
-                    k: str(v) for k, v in config.items()
-                }
-            }
-        }
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Instaladores (patrón genérico) ────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def _confirm_install(self, description: str) -> bool:
+        reply = styled_message_box(
+            self, "Confirmar instalación",
+            f"Se instalará {description}.\n"
+            "Esto puede tomar varios minutos y puede requerir permisos de administrador.\n\n"
+            "¿Desea continuar?",
+            QMessageBox.Icon.Question,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
-        with open(path / "data.json", "w") as f:
-            json.dump(data, f, indent=4)
+    def _start_worker_thread(self, worker, thread_attr: str, worker_attr: str,
+                             on_finished, on_error, status_msg: str):
+        """Lanza un worker en un QThread y conecta sus señales."""
+        thread = QThread()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(on_finished)
+        worker.error.connect(on_error)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        setattr(self, thread_attr, thread)
+        setattr(self, worker_attr, worker)
+        self.status_label.setText(status_msg)
+        thread.start()
 
-    def close_application(self):
-        QApplication.instance().quit()
+    def install_python(self):
+        if self.python_available:
+            return styled_message_box(self, "Python ya instalado",
+                                      "Python ya está instalado.",
+                                      QMessageBox.Icon.Information)
+        if not self._confirm_install("Python 3.11.0 mediante winget"):
+            return
+        self._start_worker_thread(
+            PythonInstallWorker(), 'install_thread', 'install_worker',
+            self._on_python_install_finished, self._on_python_install_error,
+            "Instalando Python..."
+        )
+
+    def _on_python_install_finished(self):
+        self.python_available = True
+        self.status_label.setText("Python instalado correctamente.")
+        self._update_python_menu_action()
+        self._update_cuda_menu_action()
+        styled_message_box(self, "Instalación completada",
+                           "Python se instaló correctamente.\n"
+                           "Es posible que necesite reiniciar la aplicación.",
+                           QMessageBox.Icon.Information)
+
+    def _on_python_install_error(self, msg: str):
+        self.status_label.setText("Error instalando Python.")
+        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
+
+    def install_vc(self):
+        if self.vc_available:
+            return styled_message_box(self, "Visual C++ ya instalado",
+                                      "Visual C++ Redistributable ya está instalado.",
+                                      QMessageBox.Icon.Information)
+        if not self._confirm_install("Microsoft Visual C++ Redistributable (x64) mediante winget"):
+            return
+        self._start_worker_thread(
+            VisualCWorker(), 'vc_thread', 'vc_worker',
+            self._on_vc_install_finished, self._on_vc_install_error,
+            "Instalando Visual C++..."
+        )
+
+    def _on_vc_install_finished(self):
+        self.vc_available = True
+        self.status_label.setText("Visual C++ instalado correctamente.")
+        self._update_vc_menu_action()
+        self._update_demucs_menu_actions()
+        self._update_cuda_menu_action()
+        styled_message_box(self, "Instalación completada",
+                           "Visual C++ Redistributable se instaló correctamente.",
+                           QMessageBox.Icon.Information)
+
+    def _on_vc_install_error(self, msg: str):
+        self.status_label.setText("Error instalando Visual C++.")
+        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
+
+    def install_ffmpeg(self):
+        if self.ffmpeg_available:
+            return styled_message_box(self, "FFmpeg ya instalado",
+                                      "FFmpeg ya está instalado.",
+                                      QMessageBox.Icon.Information)
+        if not self._confirm_install("FFmpeg mediante winget"):
+            return
+        self._start_worker_thread(
+            FFmpegWorker(), 'ffmpeg_thread', 'ffmpeg_worker',
+            self._on_ffmpeg_install_finished, self._on_ffmpeg_install_error,
+            "Instalando FFmpeg..."
+        )
+
+    def _on_ffmpeg_install_finished(self):
+        self.ffmpeg_available = True
+        self.status_label.setText("FFmpeg instalado correctamente.")
+        self._update_ffmpeg_menu_action()
+        styled_message_box(self, "Instalación completada",
+                           "FFmpeg se instaló correctamente.", QMessageBox.Icon.Information)
+
+    def _on_ffmpeg_install_error(self, msg: str):
+        self.status_label.setText("Error instalando FFmpeg.")
+        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
 
 
+    def install_demucs(self):
+        if self.demucs_available:
+            return styled_message_box(self, "Demucs ya instalado",
+                                      "Demucs ya está instalado.", QMessageBox.Icon.Information)
+        if not self.python_available:
+            return styled_message_box(self, "Python requerido",
+                                      "Debe instalar Python antes de instalar Demucs.",
+                                      QMessageBox.Icon.Warning)
+        if self.demucs_install_in_progress:
+            return styled_message_box(self, "Instalación en curso",
+                                      "Ya hay una instalación de Demucs en progreso.",
+                                      QMessageBox.Icon.Information)
+        if not self._confirm_install("Demucs y el modelo htdemucs_ft (requiere internet durante la instalación)"):
+            return
+        self.demucs_install_in_progress = True
+        self._start_worker_thread(
+            DemucsInstallWorker(), 'demucs_install_thread', 'demucs_install_worker',
+            self._on_demucs_install_finished, self._on_demucs_install_error,
+            "Instalando Demucs..."
+        )
+
+    def _on_demucs_install_finished(self):
+        self.demucs_available = True
+        self.demucs_install_in_progress = False
+        self.status_label.setText("Demucs instalado correctamente.")
+        self.load_demucs_model()
+        self._update_demucs_menu_actions()
+        styled_message_box(self, "Instalación completada",
+                           "Demucs se instaló y el modelo htdemucs_ft está listo.",
+                           QMessageBox.Icon.Information)
+
+    def _on_demucs_install_error(self, msg: str):
+        self.demucs_install_in_progress = False
+        self.status_label.setText("Error instalando Demucs.")
+        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
+
+    def install_cuda(self):
+        if self.pytorch_cuda_available:
+            return styled_message_box(self, "CUDA ya instalado",
+                                      "PyTorch+CUDA ya está instalado.",
+                                      QMessageBox.Icon.Information)
+        if not self.python_available:
+            return styled_message_box(self, "Python requerido",
+                                      "Instale Python primero.", QMessageBox.Icon.Warning)
+        if not self.gpu_available:
+            return styled_message_box(self, "Sin GPU NVIDIA",
+                                      "No se detectó tarjeta NVIDIA compatible.",
+                                      QMessageBox.Icon.Warning)
+        if self.cuda_install_in_progress:
+            return styled_message_box(self, "Instalación en curso",
+                                      "Ya hay una instalación de CUDA en progreso.",
+                                      QMessageBox.Icon.Information)
+        if not self._confirm_install("PyTorch 2.6.0 con soporte CUDA 11.8"):
+            return
+        self.cuda_install_in_progress = True
+        self._start_worker_thread(
+            CudaInstallWorker(), 'cuda_thread', 'cuda_worker',
+            self._on_cuda_install_finished, self._on_cuda_install_error,
+            "Instalando CUDA (PyTorch)..."
+        )
+
+    def _on_cuda_install_finished(self):
+        self.pytorch_cuda_available = True
+        self.cuda_install_in_progress = False
+        self.status_label.setText("CUDA instalado correctamente.")
+        self._update_cuda_menu_action()
+        styled_message_box(self, "Instalación completada",
+                           "PyTorch con CUDA se instaló correctamente.",
+                           QMessageBox.Icon.Information)
+
+    def _on_cuda_install_error(self, msg: str):
+        self.cuda_install_in_progress = False
+        self.status_label.setText("Error instalando CUDA.")
+        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
+
+    def install_ytdlp(self):
+        if self.ytdlp_available:
+            return styled_message_box(self, "yt-dlp ya instalado",
+                                      "yt-dlp ya está instalado.", QMessageBox.Icon.Information)
+        if not self._confirm_install("yt-dlp mediante winget"):
+            return
+        self._start_worker_thread(
+            YTDLPWorker(), 'ytdlp_thread', 'ytdlp_worker',
+            self._on_ytdlp_install_finished, self._on_ytdlp_install_error,
+            "Instalando yt-dlp..."
+        )
+
+    def _on_ytdlp_install_finished(self):
+        self.ytdlp_available = True
+        self.status_label.setText("yt-dlp instalado correctamente.")
+        self._update_ytdlp_menu_actions()
+        styled_message_box(self, "Instalación completada",
+                           "yt-dlp se instaló correctamente.\n"
+                           "Ahora puede usar 'Descargar MP3...'.",
+                           QMessageBox.Icon.Information)
+
+    def _on_ytdlp_install_error(self, msg: str):
+        self.status_label.setText("Error instalando yt-dlp.")
+        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Descarga MP3 ──────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def download_mp3(self):
+        if not self.ytdlp_available:
+            styled_message_box(self, "yt-dlp no instalado",
+                               "Debe instalar yt-dlp primero desde Opciones > Dependencias.",
+                               QMessageBox.Icon.Warning)
+            return
+        dialog = DownloadDialog(self)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        dialog.download_requested.connect(self._start_ytdlp_download)
+        dialog.exec()
+
+    def _start_ytdlp_download(self, url: str):
+        self._start_worker_thread(
+            YTDLPDownloadWorker(url), 'download_thread', 'download_worker',
+            self._on_download_finished, self._on_download_error,
+            "Descargando MP3..."
+        )
+
+    def _on_download_finished(self, message: str):
+        self.status_label.setText("Descarga completada.")
+        styled_message_box(self, "Descarga finalizada", message, QMessageBox.Icon.Information)
+
+    def _on_download_error(self, msg: str):
+        self.status_label.setText("Error en descarga.")
+        styled_message_box(self, "Error de descarga", msg, QMessageBox.Icon.Critical)
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Menú ──────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def init_menu(self):
+        menu = self.menuBar()
+        file_menu = menu.addMenu("Archivo")
+        options_menu = menu.addMenu("Opciones")
+        help_menu = menu.addMenu("Ayuda")
+
+        # Archivo
+        load_action = QAction("Seleccionar Carpeta", self)
+        load_action.setShortcut(QKeySequence("Ctrl+O"))
+        load_action.triggered.connect(self.load_folder)
+        file_menu.addAction(load_action)
+
+        self.split_action = QAction("Dividir...", self)
+        self.split_action.setShortcut(QKeySequence("Ctrl+D"))
+        self.split_action.triggered.connect(self.show_split_dialog)
+        self.split_action.setEnabled(self.demucs_available)
+        if not self.demucs_available:
+            self.split_action.setToolTip("Demucs no está instalado o no es accesible")
+        file_menu.addAction(self.split_action)
+
+        remove_action = QAction("Remover", self)
+        remove_action.triggered.connect(self.remove_selected)
+        file_menu.addAction(remove_action)
+        file_menu.addSeparator()
+
+        exit_action = QAction("&Salir", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close_application)
+        file_menu.addAction(exit_action)
+
+        # Opciones
+        self.show_playlist_action = QAction("Mostrar lista", self)
+        self.show_playlist_action.setCheckable(True)
+        self.show_playlist_action.setChecked(True)
+        self.show_playlist_action.triggered.connect(self._toggle_playlist_visibility)
+        options_menu.addAction(self.show_playlist_action)
+
+        lyrics_menu = options_menu.addMenu("Modificar Lyrics")
+        self.advance_action = QAction(">> Mostrar Después 0.5s", self)
+        self.advance_action.setShortcut("Ctrl+Shift+Right")
+        self.advance_action.triggered.connect(lambda: self.adjust_lyrics_timing(0.5))
+        self.delay_action = QAction("<< Mostrar Antes 0.5s", self)
+        self.delay_action.setShortcut("Ctrl+Shift+Left")
+        self.delay_action.triggered.connect(lambda: self.adjust_lyrics_timing(-0.5))
+        self.increase_font_action = QAction("Incrementar tamaño", self)
+        self.increase_font_action.setShortcut("Ctrl+Shift+Up")
+        self.increase_font_action.triggered.connect(self.increase_lyrics_font)
+        self.decrease_font_action = QAction("Disminuir tamaño", self)
+        self.decrease_font_action.setShortcut("Ctrl+Shift+Down")
+        self.decrease_font_action.triggered.connect(self.decrease_lyrics_font)
+        for a in (self.advance_action, self.delay_action):
+            lyrics_menu.addAction(a)
+            a.setEnabled(False)
+        lyrics_menu.addSeparator()
+        lyrics_menu.addAction(self.increase_font_action)
+        lyrics_menu.addAction(self.decrease_font_action)
+
+        cleanup_action = QAction("Limpiar Cache", self)
+        cleanup_action.triggered.connect(self.cleanup_resources_manual)
+        options_menu.addAction(cleanup_action)
+
+        # Dependencias
+        deps_menu = options_menu.addMenu("Dependencias")
+        dep_specs = [
+            ("install_python_action", "Instalar Python",       self.install_python,
+             not self.python_available),
+            ("install_vc_action",     "Instalar Visual C++",   self.install_vc,
+             not self.vc_available),
+            ("install_ffmpeg_action", "Instalar FFmpeg",       self.install_ffmpeg,
+             not self.ffmpeg_available),
+            ("install_demucs_action", "Instalar Demucs",       self.install_demucs,
+             self.python_available and self.vc_available and not self.demucs_available),
+            ("install_cuda_action",   "Instalar PyTorch+CUDA", self.install_cuda,
+             self.python_available and self.gpu_available and not self.pytorch_cuda_available),
+        ]
+        for attr, label, slot, enabled in dep_specs:
+            action = QAction(label, self)
+            action.triggered.connect(slot)
+            action.setEnabled(enabled)
+            deps_menu.addAction(action)
+            setattr(self, attr, action)
+
+        deps_menu.addSeparator()
+        self.install_ytdlp_action = QAction("Instalar YT-DLP (Youtube → MP3)", self)
+        self.install_ytdlp_action.triggered.connect(self.install_ytdlp)
+        self.install_ytdlp_action.setEnabled(not self.ytdlp_available)
+        deps_menu.addAction(self.install_ytdlp_action)
+
+        options_menu.addSeparator()
+        self.download_mp3_action = QAction("Descargar MP3...", self)
+        self.download_mp3_action.triggered.connect(self.download_mp3)
+        self.download_mp3_action.setEnabled(self.ytdlp_available)
+        options_menu.addAction(self.download_mp3_action)
+
+        # Ayuda
+        about_action = QAction("Sobre Playit", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
+        queue_action = QAction("Mostrar Queue", self)
+        queue_action.triggered.connect(self.show_queue_dialog)
+        help_menu.addAction(queue_action)
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Actualizaciones de menú ───────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def _update_python_menu_action(self):
+        if hasattr(self, 'install_python_action'):
+            self.install_python_action.setEnabled(not self.python_available)
+            self._update_demucs_menu_actions()
+
+    def _update_vc_menu_action(self):
+        if hasattr(self, 'install_vc_action'):
+            self.install_vc_action.setEnabled(not self.vc_available)
+
+    def _update_ffmpeg_menu_action(self):
+        if hasattr(self, 'install_ffmpeg_action'):
+            self.install_ffmpeg_action.setEnabled(not self.ffmpeg_available)
+
+    def _update_demucs_menu_actions(self):
+        if hasattr(self, 'install_demucs_action'):
+            self.install_demucs_action.setEnabled(
+                self.python_available and self.vc_available
+                and self.ffmpeg_available and not self.demucs_available
+            )
+        if hasattr(self, 'split_action'):
+            self.split_action.setEnabled(self.demucs_available)
+
+    def _update_cuda_menu_action(self):
+        if hasattr(self, 'install_cuda_action'):
+            self.install_cuda_action.setEnabled(
+                self.python_available and self.gpu_available
+                and not self.pytorch_cuda_available
+            )
+
+    def _update_ytdlp_menu_actions(self):
+        if hasattr(self, 'install_ytdlp_action'):
+            self.install_ytdlp_action.setEnabled(not self.ytdlp_available)
+        if hasattr(self, 'download_mp3_action'):
+            self.download_mp3_action.setEnabled(self.ytdlp_available)
+
+    def _toggle_playlist_visibility(self, state: bool):
+        self.playlist_dock.setVisible(state)
+
+    def _update_playlist_menu_state(self, visible: bool):
+        self.show_playlist_action.setChecked(visible)
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Barra de estado ───────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
     def init_status_bar(self):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-
-        # Crear QLabel permanente (siempre visible)
         self.status_label = QLabel()
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        # Añadirlo como widget permanente
+        self.status_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self.status_bar.addPermanentWidget(self.status_label, stretch=1)
-
-        # Mensaje temporal opcional (se borrará después de 3 segundos)
         self.status_bar.showMessage("Listo", 3000)
-
         self.update_status()
 
-    def load_folder(self, path: str = None):
-        from PyQt6.QtWidgets import QFileDialog
-        from os.path import expanduser
-        from pathlib import Path
 
-        if not path:
-            path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta", expanduser("~/Music"))
-        if path:
-            # Limpiar playlist actual primero
-            self.clear_playlist()
-
-            # Mostrar indicador de carga
-            self.status_label.setText("Cargando playlist...")
-
-            # Usar lazy loading para cargar la carpeta
-            try:
-                self.lazy_playlist.load_playlist_lazy(Path(path))
-            except Exception as e:
-                styled_message_box(self, "Error", f"Error iniciando carga: {str(e)}", QMessageBox.Icon.Critical)
-                self.status_label.setText("Error cargando playlist")
-
-    def reset_search_indices(self):
-        self.search_results = []
-        self.search_index = 0
-        self.current_search = ""
-
-    def clear_playlist(self):
-        self.stop_playback()
-        self.playlist.clear()
-        self.playlist_widget.clear()
-        self.current_index = -1
-        self.reset_search_indices()
-
-        # Deshabilitar botones
-        self.prev_btn.setEnabled(False)
-        self.next_btn.setEnabled(False)
-        self.play_btn.setEnabled(False)
-        self.stop_btn.setEnabled(False)
-
-    def scan_folder(self, path):
-        self.reset_search_indices()
-        icon = QIcon(resource_path('images/main_window/audio_icon.png'))
-        for json_file in path.rglob("*.json"):
-            with open(json_file, "r") as f:
-                try:
-                    data = json.load(f)
-                    dir_path = json_file.parent
-                    for artist, songs in data.items():
-                        for song, _ in songs.items():
-                            exist = False
-                            for track in self.playlist:
-                                if (track['artist'] == artist and track['song']==song):
-                                    exist=True
-                                    break
-                            if not exist:
-                                self.playlist.append({
-                                    "artist": artist,
-                                    "song": song,
-                                    "path": dir_path
-                                })
-                                item = QListWidgetItem(f"{artist} - {song}")
-                                item.setIcon(icon)
-                                self.playlist_widget.addItem(item)
-                                if not self.prev_btn.isEnabled():
-                                    self.prev_btn.setEnabled(True)
-                                    self.next_btn.setEnabled(True)
-                                    self.play_btn.setEnabled(True)
-                                self._check_and_fetch_lyrics_async(dir_path, artist, song)
-                except Exception as e:
-                    styled_message_box(self, "Error", f"Error cargando {json_file}: {str(e)}",QMessageBox.Icon.Critical)
-        self.update_status()
-
-    def _check_and_fetch_lyrics_async(self, dir_path, artist, song):
-        def check_lyrics():
-            lrc_path = dir_path / "lyrics.lrc"
-            default_text = "Letras no encontradas, revisa datos de artista/canción"
-
-            needs_update = False
-            if not lrc_path.exists():
-                needs_update = True
-            else:
-                try:
-                    with open(lrc_path, "r", encoding="utf-8") as f:
-                        if default_text in f.read():
-                            needs_update = True
-                except:
-                    needs_update = True
-
-            if needs_update:
-                self._fetch_lyrics_from_api(artist, song, dir_path)
-
-        # Ejecutar en un hilo separado para no bloquear
-        thread = threading.Thread(target=check_lyrics, daemon=True)
-        thread.start()
-
-    def _normalize_text(self, text):
-        normalized = unicodedata.normalize('NFKD', text.lower())
-        return ''.join([c for c in normalized if not unicodedata.combining(c)])
-
-    def _fetch_lyrics_from_api(self, artist, song, output_dir):
-        base_url = "https://lrclib.net/api/search"
-        query = f"{artist} {song}".replace(" ", "+")
-        url = f"{base_url}?q={quote(query)}"
-
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            results = response.json()
-
-            # Normalizar valores de referencia
-            norm_artist = self._normalize_text(artist)
-            norm_song = self._normalize_text(song)
-
-            synced_lyrics = ""
-            for result in results:
-                # Normalizar valores de la API
-                api_artist = self._normalize_text(result.get("artistName", ""))
-                api_song = self._normalize_text(result.get("trackName", ""))
-
-                if (api_artist == norm_artist and
-                        api_song == norm_song and
-                        result.get("syncedLyrics")):
-                    synced_lyrics = result["syncedLyrics"]
-                    break
-            self._write_lyrics_file(output_dir, artist, song, synced_lyrics)
-
-        except Exception as e:
-            self._write_lyrics_file(output_dir, artist, song, None)
-
-
-    def _write_lyrics_file(self, output_dir, artist, song, lyrics):
-        title_line = ''
-
-        if not lyrics:
-            # Caso sin letras
-            content = '[00:00.00]<center style="color: #ff2626;">Letras no encontradas</center>\n'
-        else:
-            # Procesar cada línea de letras
-            processed_lines = []
-            for line in lyrics.split('\n'):
-                if line.strip():  # Solo procesar líneas no vacías
-                    # Dividir en timestamp y texto
-                    parts = line.split(']', 1)
-                    if len(parts) == 2:
-                        timestamp, text = parts
-                        # Reconstruir la línea con el texto centrado
-                        processed_line = f'{timestamp}]<center>{text.strip()}</center>'
-                        processed_lines.append(processed_line)
-
-            # Unir el contenido
-            content = title_line + '\n'.join(processed_lines) + '\n'
-
-        # Escribir el archivo
-        with open(output_dir / "lyrics.lrc", "w", encoding="utf-8") as f:
-            f.write(content)
-
-    def play_selected(self):
-        # self.stop_playback()
-        self.current_index = self.playlist_widget.currentRow()
-        self.play_current()
-
-    def _control_channels(self, action: str):
-        """Control centralizado para operaciones en los canales de audio.
-        Acciones soportadas: 'play', 'stop', 'pause', 'unpause'
-        """
-        if not self.current_channels:
-            return
-
-        for channel in self.current_channels:
-            if action == 'play':
-                channel.unpause()
-            elif action == 'stop':
-                channel.stop()
-            elif action == 'pause':
-                channel.pause()
-            elif action == 'unpause':
-                channel.unpause()
-
-    def _setup_audio(self) -> bool:
-        """Método para usar lazy loading de audio"""
-        if not (0 <= self.current_index < len(self.playlist)):
-            return False
-
-        song = self.playlist[self.current_index]
-        path = Path(song["path"])
-
-        try:
-            # Usar lazy loading para cargar los sonidos
-            sounds = self.lazy_audio.load_audio_lazy(path)
-
-            if not sounds:
-                from PyQt6.QtWidgets import QMessageBox
-                from resources import styled_message_box
-                styled_message_box(
-                    self,
-                    "Error de Audio",
-                    f"No se encontraron las pistas separadas para:\n{song['artist']} - {song['song']}\n\n"
-                    "Asegúrese de que exista la carpeta 'separated' con los archivos:\n"
-                    "• drums.mp3\n• vocals.mp3\n• bass.mp3\n• other.mp3",
-                    QMessageBox.Icon.Warning
-                )
-                return False
-
-            # Crear canales de reproducción
-            self.current_channels = []
-            for i, sound in enumerate(sounds):
-                try:
-                    channel = sound.play()
-                    channel.pause()  # Pausar inmediatamente para control manual
-                    self.current_channels.append(channel)
-                except Exception as e:
-                    return False
-
-            # Aplicar volúmenes iniciales
-            for i, track_name in enumerate(["drums", "vocals", "bass", "other"]):
-                if i < len(self.current_channels):
-                    volume = 0 if self.mute_states[track_name] else (
-                            self.individual_volumes[track_name] * (self.volume / 100.0)
-                    )
-                    self.current_channels[i].set_volume(volume)
-
-            # Configurar barra de progreso
-            try:
-                length_seconds = sounds[0].get_length()
-                length_ms = int(length_seconds * 1000)
-                total_mins, total_secs = divmod(int(length_seconds), 60)
-
-                self.progress_song.setFormat(f"00:00 / {total_mins:02d}:{total_secs:02d}")
-                self.progress_song.setRange(0, length_ms)
-                self.progress_song.setValue(0)
-            except Exception as e:
-                print(f"⚠️ Error configurando progreso: {e}")
-
-            return True
-
-        except Exception as e:
-            from PyQt6.QtWidgets import QMessageBox
-            from resources import styled_message_box
-            styled_message_box(
-                self,
-                "Error",
-                f"Error cargando audio: {str(e)}",
-                QMessageBox.Icon.Critical
-            )
-            return False
-
-    def _update_playback_ui(self, state: str):
-        self.stop_btn.setEnabled(state != "Detenido")
-        self.progress_song.setEnabled(state != "Detenido")
-        self.playback_state = state
-
-        if self.current_index!=-1:
-            song = self.playlist[self.current_index]
-            path = song["path"]
-
-        # Habilitar botones
-        self.drums_btn.setEnabled(True)
-        self.vocals_btn.setEnabled(True)
-        self.bass_btn.setEnabled(True)
-        self.other_btn.setEnabled(True)
-
-        self.update_status()
-
-    def _restore_mute_states(self):
-        # Configurar iconos basados en los estados actuales
-        icon_map = {
-            "drums": ("drums", "no_drums"),
-            "vocals": ("vocals", "no_vocals"),
-            "bass": ("bass", "no_bass"),
-            "other": ("other", "no_other")
-        }
-
-        for track_name, btn in zip(
-                ["drums", "vocals", "bass", "other"],
-                [self.drums_btn, self.vocals_btn, self.bass_btn, self.other_btn]
-        ):
-            # Establecer el icono correcto basado en el estado de mute
-            icon_index = 1 if self.mute_states[track_name] else 0
-            icon_name = icon_map[track_name][icon_index]
-            btn.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
-
-            # Sincronizar el estado visual del botón
-            btn.setChecked(self.mute_states[track_name])
-
-    def play_current(self):
-        # Detener reproducción actual
-        self.stop_playback()
-
-        if not (0 <= self.current_index < len(self.playlist)):
-            return
-
-        # Configurar audio
-        if not self._setup_audio():
-            return
-
-        # Restaurar estados de mute
-        self._restore_mute_states()
-
-        # Actualizar metadatos (portada, letras, etc.)
-        self._update_metadata()
-
-        # Actualizar UI
-        self._update_playback_ui('Activa')
-        self.playback_state = "Activa"
-
-        # Aplicar volumen
-        self.set_volume(self.volume)
-
-        # Actualizar menú de letras
-        self.update_lyrics_menu_state()
-
-        # Actualizar resaltado en playlist
-        self.highlight_current_song()
-
-        # Iniciar reproducción
-        self._control_channels('play')
-
-    def toggle_play_pause(self):
-        if self.playback_state == "Activa":
-            self._control_channels('pause')
-            self._update_playback_ui('Pausada')
-            self.playback_state = "Pausada"
-        else:
-            self._control_channels('unpause')
-            self._update_playback_ui('Activa')
-            self.playback_state = "Activa"
-        self.update_lyrics_menu_state()
-
-    def stop_playback(self):
-        time.sleep(100 / 1000)    # Evita que haya un arrastre cuando se cambia de cancion abruptamente
-        self._control_channels('stop')
-        self._update_playback_ui('Detenido')
-        self.playback_state = "Detenido"
-        self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
-        self.progress_song.setValue(0)
-        self.current_channels = []
-        self.lyrics = []
-        self._last_progress_seconds = -1
-        self.update_lyrics_menu_state()
-        self.lyrics_header.clear()
-        self.lyrics_current.clear()
-        self.lyrics_next.clear()
-
-        # Quitar resaltado de la canción actual
-        self.clear_song_highlight()
-
-    def highlight_current_song(self):
-        # Primero quitar cualquier resaltado existente
-        self.clear_song_highlight()
-
-        # Resaltar el ítem actual si es válido
-        if 0 <= self.current_index < self.playlist_widget.count():
-            item = self.playlist_widget.item(self.current_index)
-
-            # Crear fuente cursiva
-            font = item.font()
-            font.setItalic(True)
-            item.setFont(font)
-
-            # Establecer color de texto
-            item.setForeground(QColor("black"))
-            item.setBackground(QColor("#eea1cd"))
-
-            # Seleccionar y hacer scroll al ítem
-            self.playlist_widget.setCurrentItem(item)
-
-    def clear_song_highlight(self):
-        for i in range(self.playlist_widget.count()):
-            item = self.playlist_widget.item(i)
-
-            # Restaurar fuente normal
-            font = item.font()
-            font.setItalic(False)
-            item.setFont(font)
-
-            # Restaurar color de texto por defecto
-            item.setForeground(QColor("white"))
-            item.setBackground(QColor("transparent"))
-
-    def _update_metadata(self):
-        try:
-            self.lyrics_header.clear()
-            self.lyrics_current.clear()
-            self.lyrics_next.clear()
-
-            song = self.playlist[self.current_index]
-            path = Path(song["path"])
-            lrc_path = path / "lyrics.lrc"
-
-            # Actualizar título de ventana
-            title = f"{song['artist']} - {song['song']}"
-            self.title_bar.title.setText(title)
-
-            # Cargar portada usando lazy loading (async)
-            def load_cover_async():
-                try:
-                    cover_pixmap = self.lazy_images.load_cover_lazy(path, (500, 500))
-                    self.cover_loaded.emit(cover_pixmap)
-                except Exception as e:
-                    print(f"❌ Error cargando portada async: {e}")
-
-            def load_lyrics_async():
-                try:
-                    # Verificar si el archivo existe primero
-                    if not lrc_path.exists():
-                        self.lyrics_not_found.emit()
-                        return
-
-                    # Usar el lazy manager para cargar las letras
-                    lyrics_data = self.lazy_lyrics.load_lyrics_lazy(path)
-                    self.lyrics_loaded.emit(lyrics_data)
-
-                except Exception as e:
-                    self.lyrics_error.emit(str(e))
-
-            #  Ejecutar carga asíncrona
-            threading.Thread(target=load_cover_async, daemon=True).start()
-            threading.Thread(target=load_lyrics_async, daemon=True).start()
-
-            # Precargar recursos de las siguientes canciones
-            self._preload_adjacent_resources()
-
-        except Exception as e:
-            print(f"❌ Error actualizando metadatos: {e}")
-
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Caché ─────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
     def get_cache_stats(self) -> dict:
         try:
-            audio_stats = self.lazy_audio.cache.get_stats()
-            image_stats = self.lazy_images.cache.get_stats()
-            lyrics_stats = self.lazy_lyrics.cache.get_stats()
-
-            total_hits = audio_stats['hits'] + image_stats['hits'] + lyrics_stats['hits']
-            total_requests = total_hits + audio_stats['misses'] + image_stats['misses'] + lyrics_stats['misses']
-
+            a = self.lazy_audio.cache.get_stats()
+            i = self.lazy_images.cache.get_stats()
+            lyr = self.lazy_lyrics.cache.get_stats()
+            total_hits = a['hits'] + i['hits'] + lyr['hits']
+            total_req = total_hits + a['misses'] + i['misses'] + lyr['misses']
             return {
-                "audio_cache": audio_stats,
-                "image_cache": image_stats,
-                "lyrics_cache": lyrics_stats,
-                "total_cached_items": (
-                        audio_stats['size'] + image_stats['size'] + lyrics_stats['size']
-                ),
-                "overall_hit_rate": (total_hits / max(1, total_requests) * 100),
+                "audio_cache": a, "image_cache": i, "lyrics_cache": lyr,
+                "total_cached_items": a['size'] + i['size'] + lyr['size'],
+                "overall_hit_rate": total_hits / max(1, total_req) * 100,
                 "memory_utilization": {
-                    "audio": audio_stats['utilization'],
-                    "images": image_stats['utilization'],
-                    "lyrics": lyrics_stats['utilization']
-                }
+                    "audio": a['utilization'],
+                    "images": i['utilization'],
+                    "lyrics": lyr['utilization'],
+                },
             }
         except Exception as e:
-            return {
-                "error": str(e),
-                "total_cached_items": 0,
-                "overall_hit_rate": 0,
-                "memory_utilization": {"audio": 0, "images": 0, "lyrics": 0}
-            }
-
-    def _preload_adjacent_resources(self):
-        if not self.playlist:
-            return
-
-        def preload_worker():
-            try:
-                # Precargar letras de canciones adyacentes
-                self.lazy_lyrics.preload_lyrics(self.playlist, self.current_index)
-
-                # Precargar portadas de canciones adyacentes
-                for offset in [-1, 1]:
-                    try:
-                        idx = (self.current_index + offset) % len(self.playlist)
-                        if 0 <= idx < len(self.playlist):
-                            song_path = Path(self.playlist[idx]["path"])
-                            cache_key = f"cover_{song_path}_(500, 500)"
-
-                            # Solo precargar si no está en cache
-                            if cache_key not in self.lazy_images.cache._cache:
-                                self.lazy_images.load_cover_lazy(song_path, (500, 500))
-                    except Exception as e:
-                        print(f"❌ Error precargando portada {offset}: {e}")
-
-            except Exception as e:
-                print(f"❌ Error en precarga general: {e}")
-
-        # Ejecutar en hilo separado para no bloquear
-        threading.Thread(target=preload_worker, daemon=True).start()
+            return {"error": str(e), "total_cached_items": 0,
+                    "overall_hit_rate": 0,
+                    "memory_utilization": {"audio": 0, "images": 0, "lyrics": 0}}
 
     def cleanup_resources_manual(self):
         try:
-            # Obtener estadísticas antes
-            before_stats = self.get_cache_stats()
-
-            # Limpiar caches
-            self.lazy_audio.cache.clear()
-            self.lazy_images.cache.clear()
-            self.lazy_lyrics.cache.clear()
-
-            # Obtener estadísticas después
-            after_stats = self.get_cache_stats()
-
-            # Mostrar mensaje al usuario
+            before = self.get_cache_stats()
+            for cache in (self.lazy_audio.cache, self.lazy_images.cache,
+                          self.lazy_lyrics.cache):
+                cache.clear()
+            after = self.get_cache_stats()
+            freed = before['total_cached_items'] - after['total_cached_items']
             styled_message_box(
-                self,
-                "Limpieza Completa",
+                self, "Limpieza Completa",
                 f"Cache limpiado exitosamente.\n"
-                f"Elementos eliminados: {before_stats['total_cached_items'] - after_stats['total_cached_items']}\n"
-                f"Memoria liberada aproximada: {(before_stats['total_cached_items'] - after_stats['total_cached_items']) * 2:.1f}MB"
+                f"Elementos eliminados: {freed}\n"
+                f"Memoria liberada aproximada: {freed * 2:.1f}MB"
             )
-
         except Exception as e:
-            styled_message_box(
-                self,
-                "Error",
-                f"Error durante la limpieza: {str(e)}",
-                QMessageBox.Icon.Warning
-            )
-        self.update_status()
-
-    def load_lyrics(self, file_path):
-        self.lyrics = []
-        current_time = None
-        current_text = []
-
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                # Buscar timestamp [mm:ss.xx]
-                time_match = re.match(r'\[(\d+):(\d+\.\d+)\]', line)
-
-                if time_match:
-                    # Guardar el bloque anterior
-                    if current_time is not None:
-                        self.lyrics.append((current_time, '\n'.join(current_text)))
-
-                    minutos = int(time_match.group(1))
-                    segundos = float(time_match.group(2))
-                    current_time = minutos * 60 + segundos
-                    current_text = [line[time_match.end():]]
-                else:
-                    # Línea sin timestamp: agregar al texto actual
-                    if current_time is not None and line:
-                        current_text.append(line)
-
-            # Agregar el último bloque
-            if current_time is not None:
-                self.lyrics.append((current_time, '\n'.join(current_text)))
-
-
-        # Actualizar al cargar lyrics
-        self.update_lyrics_menu_state()
-
-        # Conectar al temporizador de actualización
-        self.lyrics_timer = QTimer(self)
-        self.lyrics_timer.timeout.connect(self.update_lyrics_display)
-        self.lyrics_timer.start(100)  # Actualizar cada 100ms
-
-    def update_lyrics_display(self):
-        if not self.lyrics or self.playback_state != "Activa":
-            return
-
-        current_time = self.progress_song.value() / 1000.0
-
-        current_html = ""
-        next_html = ""
-        for i, (t, html) in enumerate(self.lyrics):
-            if current_time >= t:
-                current_html = html
-                if i + 1 < len(self.lyrics):
-                    next_html = self.lyrics[i + 1][1]
-                else:
-                    next_html = ""
-            else:
-                break
-
-        if getattr(self, "_last_current_html", None) != current_html:
-            self._last_current_html = current_html
-
-
-        self.lyrics_current.setHtml(current_html)
-        self.lyrics_next.setHtml(f'<center>{next_html}</center>')
-
-    def update_lyrics_menu_state(self):
-        enabled = (
-                self.playback_state == "Activa" and
-                self.current_index != -1 and
-                not self._lyrics_has_error()
-        )
-        self.advance_action.setEnabled(enabled)
-        self.delay_action.setEnabled(enabled)
-
-    def _lyrics_has_error(self):
-        if not self.lyrics or not isinstance(self.lyrics, list):
-            return True
-        for _, html in self.lyrics:
-            text = html.lower()
-            if "no se encontraron" in text or "letras no encontradas" in text:
-                return True
-        return False
-
-    def adjust_lyrics_timing(self, offset):
-        try:
-            song_data = self.playlist[self.current_index]
-            lrc_path = song_data["path"] / "lyrics.lrc"
-
-            # Leer y modificar archivo
-            with open(lrc_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-
-            modified = self._process_lines(lines, offset)
-
-            # Escribir cambios
-            with open(lrc_path, "w", encoding="utf-8") as f:
-                f.writelines(modified)
-
-            # Recargar lyrics
-            self.load_lyrics(lrc_path)
-
-        except Exception as e:
-            styled_message_box(self, "Error", f"No se pudo ajustar: {str(e)}",QMessageBox.Icon.Warning)
-
-    def _process_lines(self, lines, offset):
-        modified = []
-        for i, line in enumerate(lines):
-            if i == 0 or not line.strip().startswith("["):
-                modified.append(line)
-                continue
-
-            # Extraer tiempo
-            time_str = line[1:line.index("]")]
-            try:
-                new_time = self._adjust_time(time_str, offset)
-                modified_line = f"[{new_time}]{line.split(']', 1)[1]}"
-                modified.append(modified_line)
-            except:
-                modified.append(line)  # Conservar línea si hay error
-        return modified
-
-    def _adjust_time(self, time_str, offset):
-        minutes, rest = time_str.split(':', 1)
-        seconds, milliseconds = rest.split('.', 1)
-
-        total_seconds = (
-                int(minutes) * 60 +
-                int(seconds) +
-                int(milliseconds) / 100 +
-                offset
-        )
-
-        # Evitar tiempos negativos
-        total_seconds = max(0, total_seconds)
-
-        mins = int(total_seconds // 60)
-        secs = int(total_seconds % 60)
-        ms = int((total_seconds - int(total_seconds)) * 100)
-
-        return f"{mins:02d}:{secs:02d}.{ms:02d}"
-
-
-    def play_next(self):
-        self.next_btn.setEnabled(False)
-        self.stop_playback()
-        if self.current_index < len(self.playlist) - 1:
-            self.current_index += 1
-        else:
-            self.current_index = 0
-        self.play_current()
-        self.next_btn.setEnabled(True)
-
-    def play_previous(self):
-        self.prev_btn.setEnabled(False)
-        self.stop_playback()
-        if self.current_index > 0:
-            self.current_index -= 1
-        else:
-            self.current_index = len(self.playlist) - 1
-        self.play_current()
-        self.prev_btn.setEnabled(True)
-
-
-    def set_volume(self, value):
-        self.volume = value
-        try:
-            # Aplicar a todas las pistas no muteadas
-            for track_name in ["drums", "vocals", "bass", "other"]:
-                if not self.mute_states[track_name]:
-                    self.apply_volume_to_track(track_name, self.individual_volumes[track_name])
-        except Exception as e:
-            pass
-
-    def toggle_mute(self):
-        try:
-            sender = self.sender()
-            track_name=None
-
-            # Determinar qué botón fue presionado
-            if sender == self.drums_btn:
-                track_name = "drums"
-            elif sender == self.vocals_btn:
-                track_name = "vocals"
-            elif sender == self.bass_btn:
-                track_name = "bass"
-            elif sender == self.other_btn:
-                track_name = "other"
-
-            if track_name:
-                # Cambiar estado de mute
-                self.mute_states[track_name] = not self.mute_states[track_name]
-
-                # Cambiar icono
-                icon_map = {
-                    "drums": ("drums", "no_drums"),
-                    "vocals": ("vocals", "no_vocals"),
-                    "bass": ("bass", "no_bass"),
-                    "other": ("other","no_other")
-                }
-
-                icon_index = 1 if self.mute_states[track_name] else 0
-                icon_name = icon_map[track_name][icon_index]
-                sender.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
-
-                # Aplicar mute o volumen guardado
-                if self.mute_states[track_name]:
-                    self.apply_volume_to_track(track_name, 0)
-                else:
-                    self.apply_volume_to_track(track_name, self.individual_volumes[track_name])
-
-        except Exception as e:
-            pass
-
-    def remove_selected(self):
-        self.reset_search_indices()
-        for item in self.playlist_widget.selectedItems():
-            row = self.playlist_widget.row(item)
-            self.playlist_widget.takeItem(row)
-            del self.playlist[row]
+            styled_message_box(self, "Error", f"Error durante la limpieza: {e}",
+                               QMessageBox.Icon.Warning)
         self.update_status()
 
 
-    def update_display(self):
-        # Early return para evitar procesamiento innecesario
-        if self.playback_state != "Activa" or not self.current_channels:
-            return
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Diálogos ──────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def show_about_dialog(self):
+        dialog = AboutDialog(self)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        dialog.exec()
 
-        try:
-            # Verificar si el mixer sigue ocupado
-            if not pygame.mixer.get_busy():
-                # La canción terminó naturalmente, pasar a la siguiente
-                self.play_next()
-                return
-
-            # Actualizar progreso solo si hay cambios significativos
-            current_time_ms = self.progress_song.value() + 1000
-
-            # Verificar límites para evitar desbordamiento
-            if current_time_ms <= self.progress_song.maximum():
-                self.progress_song.setValue(current_time_ms)
-
-                # Actualizar el texto del progreso de forma más eficiente
-                current_seconds = current_time_ms // 1000
-                total_seconds = self.progress_song.maximum() // 1000
-
-                # Inicializar el atributo si no existe
-                if not hasattr(self, '_last_progress_seconds'):
-                    self._last_progress_seconds = -1
-
-                # Evitar recálculos innecesarios si los valores no cambiaron
-                if self._last_progress_seconds == current_seconds:
-                    return
-
-                self._last_progress_seconds = current_seconds
-
-                current_mins, current_secs = divmod(current_seconds, 60)
-                total_mins, total_secs = divmod(total_seconds, 60)
-
-                self.progress_song.setFormat(
-                    f"{current_mins:02d}:{current_secs:02d} / {total_mins:02d}:{total_secs:02d}"
-                )
-            else:
-                # Si se excedió el máximo, terminar la canción
-                self.play_next()
-
-        except pygame.error as e:
-            # Manejar errores del mixer de forma elegante
-            print(f"Error en mixer durante actualización: {e}")
-            self.stop_playback()
-        except Exception as e:
-            # Manejar cualquier otro error inesperado
-            print(f"Error inesperado en update_display: {e}")
-            self.stop_playback()
-
-    def update_status(self):
-        try:
-            # Solo calcular estadísticas cada 5 segundos para no impactar rendimiento
-            current_time = time.time()
-            if not hasattr(self, '_last_stats_update'):
-                self._last_stats_update = 0
-
-            if current_time - self._last_stats_update > 5.0:
-                cache_stats = self.get_cache_stats()
-                self._cached_stats = cache_stats
-                self._last_stats_update = current_time
-            else:
-                cache_stats = getattr(self, '_cached_stats', {'total_cached_items': 0})
-
-            status_parts = [
-                f"Canciones: {len(self.playlist)}",
-                f"Reproducción: {self.playback_state.capitalize()}",
-                self._format_demucs_progress(),
-                # Mostrar estado de la cola
-                f"En cola: {len(self.demucs_queue)}" if self.demucs_queue else "",
-                f"Cache: {cache_stats.get('total_cached_items', 0)} elementos",
-                f"Fecha: {datetime.now().strftime('%A - %d/%m/%Y')}",
-                f"Hora: {datetime.now().strftime('%H:%M')}"
-            ]
+    def show_queue_dialog(self):
+        dialog = QueueDialog(self, parent=self)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        dialog.exec()
 
 
-            # Filtrar partes vacías
-            status_parts = [part for part in status_parts if part]
+    # ──────────────────────────────────────────────────────────────────────────
+    # ── Utilidades ────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    def _create_json(self, path: Path, artist: str, song: str, config: dict):
+        data = {artist: {song: {k: str(v) for k, v in config.items()}}}
+        (path / "data.json").write_text(json.dumps(data, indent=4))
 
-            self.status_label.setText(" | ".join(status_parts))
-
-
-        except Exception as e:
-            # Status de emergencia
-            self.status_label.setText(f"Canciones: {len(self.playlist)} | Estado: {self.playback_state}")
-
-    def _format_demucs_progress(self):
-        if not self.demucs_active and not self.demucs_queue:
-            return ""
-
-        if self.demucs_active:
-            bars = 10
-            filled = int(self.demucs_progress / 100 * bars)
-            progress_bar = '■' * filled + '▢' * (bars - filled)
-            return f"Separando: {progress_bar} {self.demucs_progress}%"
-
-        if self.demucs_queue:
-            return f"En cola: {len(self.demucs_queue)} trabajos"
-
-        return ""
-
+    def close_application(self):
+        QApplication.instance().quit()
