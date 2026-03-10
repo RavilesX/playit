@@ -19,9 +19,6 @@ class DemucsWorker(QObject):
         self.song = song
         self.src_path = Path(src_path)
         self.base_path = Path("music_library") / artist / song
-        self.process = None
-        self.file_check_timer = None
-        self.file_verification_attempts = 0
 
     def run(self):
         try:
@@ -84,6 +81,7 @@ class DemucsWorker(QObject):
                 }
 
             cmd = [
+                "python", "-m",
                 "demucs",
                 "-n", "htdemucs_ft",
                 "-o", str(self.base_path / "separated"),
@@ -99,6 +97,8 @@ class DemucsWorker(QObject):
                 timeout=7200,  # 2 horas máximo
                 check=True
             )
+
+            print(cmd)
 
         except subprocess.TimeoutExpired:
             raise RuntimeError("Demucs excedió el tiempo límite (2 horas)")

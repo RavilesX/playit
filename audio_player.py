@@ -1602,7 +1602,7 @@ class AudioPlayer(QMainWindow):
              not self.ffmpeg_available),
             ("install_demucs_action", "Instalar Demucs",       self.install_demucs,
              self.python_available and self.vc_available and not self.demucs_available),
-            ("install_cuda_action",   "Instalar PyTorch+CUDA", self.install_cuda,
+            ("install_cuda_action",   "Instalar CUDA (Si se tiene GPU Nvidia)", self.install_cuda,
              self.python_available and self.gpu_available and not self.pytorch_cuda_available),
         ]
         for attr, label, slot, enabled in dep_specs:

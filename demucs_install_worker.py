@@ -31,7 +31,7 @@ class DemucsInstallWorker(QObject):
             # 2. Verificar que el comando 'demucs' esté disponible
             try:
                 subprocess.run(
-                    ['demucs', '--version'],
+                    ['python', '-m', 'demucs', '--version'],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -44,7 +44,7 @@ class DemucsInstallWorker(QObject):
 
             # 3. Forzar la descarga del modelo htdemucs_ft
             #    Ejecutar demucs con --help y el modelo especificado; esto carga el modelo si no existe.
-            model_cmd = ['demucs', '--help', '-n', 'htdemucs_ft']
+            model_cmd = ['python', '-m', 'demucs', '--help', '-n', 'htdemucs_ft']
             result = subprocess.run(
                 model_cmd,
                 capture_output=True,
