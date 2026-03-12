@@ -6,7 +6,6 @@ import time
 import json
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap, QIcon
-import pygame
 from PIL import Image
 import io
 from mutagen.mp3 import MP3
@@ -160,7 +159,6 @@ class LazyAudioManager:
         self._loading_semaphore = threading.Semaphore(3)  # Máximo 3 cargas concurrentes
 
     def load_audio_lazy(self, path: Path) -> Optional[list]:
-        """Carga audio de forma perezosa con validación robusta"""
         cache_key = f"audio_{path}"
 
         def loader():
@@ -171,87 +169,23 @@ class LazyAudioManager:
                     separated_path = path / "separated"
 
                     if not separated_path.exists():
-                        ##print(f"⚠️ Carpeta separated no existe: {separated_path}")
                         return None
 
                     # Verificar que todos los archivos existan antes de cargar
-                    track_files = {
-                        "drums": separated_path / "drums.mp3",
-                        "vocals": separated_path / "vocals.mp3",
-                        "bass": separated_path / "bass.mp3",
-                        "other": separated_path / "other.mp3"
-                    }
+                    track_files = [
+                        separated_path / f"{track}.mp3"
+                        for track in ("drums", "vocals", "bass", "other")
+                    ]
 
-                    # Validación previa
-                    missing_files = []
-                    for track_name, track_path in track_files.items():
-                        if not track_path.exists():
-                            missing_files.append(f"{track_name}.mp3")
-
-                    if missing_files:
-                        ##print(f"❌ Archivos faltantes: {', '.join(missing_files)}")
+                    if not all(f.exists() for f in track_files):
                         return None
 
-                    # Cargar todos los archivos
-                    for track_name, track_path in track_files.items():
-                        try:
-                            sound = pygame.mixer.Sound(str(track_path))
-                            sounds.append(sound)
-                            ##print(f"✅ Cargado: {track_name}")
-                        except pygame.error as e:
-                            ##print(f"❌ Error cargando {track_name}: {e}")
-                            return None
+                    return track_files
 
-                    if len(sounds) == 4:
-                        ##print(f"🎵 Audio completamente cargado: {path.name}")
-                        return sounds
-                    else:
-                        ##print(f"❌ Solo {len(sounds)}/4 pistas cargadas")
-                        return None
-
-                except Exception as e:
-                    ##print(f"❌ Error general cargando audio de {path}: {e}")
+                except Exception:
                     return None
 
         return self.cache.get(cache_key, loader)
-
-    # def preload_next_songs(self, playlist: list, current_index: int, count: int = 2):
-    #     """Precarga las siguientes canciones de forma inteligente"""
-    #
-    #     def preload_worker():
-    #         preloaded = 0
-    #         for i in range(1, count + 1):
-    #             try:
-    #                 next_index = (current_index + i) % len(playlist)
-    #                 if next_index >= len(playlist):
-    #                     continue
-    #
-    #                 song_path = Path(playlist[next_index]["path"])
-    #                 cache_key = f"audio_{song_path}"
-    #
-    #                 # Solo precargar si no está ya en cache
-    #                 if cache_key not in self.cache._cache:
-    #                     song_info = playlist[next_index]
-    #
-    #                     result = self.load_audio_lazy(song_path)
-    #                     if result:
-    #                         preloaded += 1
-    #                         ##print(f"✅ Precargado exitoso: {song_info['song']}")
-    #                     # else:
-    #                          ##print(f"❌ Falló precarga: {song_info['song']}")
-    #
-    #             except Exception as e:
-    #                 print(f"❌ Error precargando canción {i}: {e}")
-    #
-    #         ##print(f"🎯 Precarga completada: {preloaded}/{count} canciones cargadas")
-    #
-    #     # Cancelar preload anterior si existe y está corriendo
-    #     if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
-    #         #print("⏹️ Cancelando precarga anterior...")
-    #         return
-    #
-    #     self.preload_thread = threading.Thread(target=preload_worker, daemon=True)
-    #     self.preload_thread.start()
 
     def cleanup_old_audio(self, current_path: Path, keep_count: int = 3):
         """Limpia audio manteniendo los elementos más relevantes"""
