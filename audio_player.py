@@ -10,7 +10,7 @@ from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                              QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
                              QPushButton, QSlider, QStatusBar, QMessageBox,
-                             QProgressBar, QFrame, QListWidgetItem, QWidget,QFileDialog)
+                             QFrame, QListWidgetItem, QWidget,QFileDialog)
 import requests
 from urllib.parse import quote
 import unicodedata
@@ -28,6 +28,7 @@ from dialogs import AboutDialog, QueueDialog, SplitDialog,DownloadDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
 import sounddevice as sd
 import soundfile as sf
+import numpy as np
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -160,15 +161,6 @@ class AudioPlayer(QMainWindow):
         self._check_gpu()
         self._check_pytorch_cuda()
 
-    # def _initialize_pygame_mixer(self):
-    #     pass
-        # try:
-        #     if not pygame.mixer.get_init():
-        #         pygame.mixer.init()
-        #         pygame.mixer.set_num_channels(4)
-        # except pygame.error:
-        #     self.pygame_available = False
-
     # ──────────────────────────────────────────────────────────────────────────
     # ── UI ────────────────────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────────
@@ -237,8 +229,6 @@ class AudioPlayer(QMainWindow):
         self.lyrics_container = QWidget()
         self.lyrics_container.setLayout(lyrics_layout)
 
-
-
         self.tabs.addTab(self.cover_label, "Portada")
         self.tabs.addTab(self.lyrics_container, "Letras")
 
@@ -250,7 +240,6 @@ class AudioPlayer(QMainWindow):
         self.progress_song.setRange(0, 0)
         self.progress_song.setValue(0)
         self.progress_song.setObjectName("progressbar")
-        # Etiqueta de tiempo flotante (opcional pero recomendable)
         self.progress_label = QLabel("00:00 / 00:00", self)
         self.progress_label.setObjectName("progresslabel")
         self.progress_label.setStyleSheet("background: transparent; border: none;")
@@ -323,7 +312,6 @@ class AudioPlayer(QMainWindow):
         self.stop_btn.clicked.connect(self.stop_playback)
         self.progress_song.sliderReleased.connect(self._on_progress_released)
         self.progress_song.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
 
     def _connect_playlist_events(self):
         self.playlist_widget.itemActivated.connect(self.play_selected)
@@ -536,147 +524,67 @@ class AudioPlayer(QMainWindow):
         if not self._track_data:
             return
 
-        sr = self._track_data[0][1]
         self._seek_position = start_frame
+        sr = self._track_data[0][1]
+        channels = self._track_data[0][0].shape[1]
 
-        for i, (data, _) in enumerate(self._track_data):
-            cancel_flag = threading.Event()
-            self._stream_cancel_flags.append(cancel_flag)
+        cancel_flag = threading.Event()
+        self._stream_cancel_flags = [cancel_flag]
 
-            stream = sd.OutputStream(
-                samplerate=sr,
-                channels=data.shape[1],
+        stream = sd.OutputStream(
+            samplerate=sr,
+            channels=channels,
+            dtype='float32'
+        )
+        stream.start()
+        self._sd_streams = [stream]
+
+        t = threading.Thread(
+            target=self._stream_writer,
+            args=(stream, start_frame, cancel_flag),
+            daemon=True
+        )
+        t.start()
+
+    def _stream_writer(self, stream, start_frame, cancel_flag):
+        chunk_size = 1024
+        pos = start_frame
+
+        while pos < len(self._track_data[0][0]):
+            if cancel_flag.is_set():
+                break
+
+            self._stream_pause_flag.wait()
+            if cancel_flag.is_set():
+                break
+
+            end = min(pos + chunk_size, len(self._track_data[0][0]))
+            chunk = np.zeros(
+                (end - pos, self._track_data[0][0].shape[1]),
                 dtype='float32'
             )
-            stream.start()
-            self._sd_streams.append(stream)
+            for i, (track_data, _) in enumerate(self._track_data):
+                track = TRACK_NAMES[i]
+                vol = 0.0 if self.mute_states[track] else (
+                        self.individual_volumes[track] * (self.volume / 100.0)
+                )
+                chunk += track_data[pos:end] * vol
 
-            t = threading.Thread(
-                target=self._stream_writer,
-                args=(stream, data[start_frame:].copy(), i, cancel_flag),
-                daemon=True
-            )
-            t.start()
+            peak = np.max(np.abs(chunk))
+            if peak > 1.0:
+                chunk /= peak
 
-        self.current_channels = self._sd_streams
-
-    def _stream_writer(self, stream, data, track_idx, cancel_flag):
-        chunk_size = 1024
-        pos = 0
-        track = TRACK_NAMES[track_idx]
-        while pos < len(data):
-            if cancel_flag.is_set():
-                break
-
-            # Esperar si está pausado (bloquea hasta que se llame set())
-            self._stream_pause_flag.wait()
-
-            # Revisar de nuevo después de esperar — puede haberse cancelado
-            if cancel_flag.is_set():
-                break
-
-            chunk = data[pos:pos + chunk_size].copy()
-            vol = 0.0 if self.mute_states[track] else (
-                    self.individual_volumes[track] * (self.volume / 100.0)
-            )
-            chunk *= vol
             try:
                 stream.write(chunk)
             except Exception:
-                break  # stream cerrado, salir limpiamente sin loggear error
+                break
 
-            pos += chunk_size
-            if track_idx == 0:
-                self._seek_position += len(chunk)
+            pos = end
+            self._seek_position = pos
 
-    # def seek_to(self, target_ms: int):
-    #     if self._seeking:
-    #         return
-    #     self._seeking = True
-    #     try:
-    #         max_ms = self.progress_song.maximum()
-    #         target_ms = max(0, min(target_ms, self.progress_song.maximum() - 1000))
-    #
-    #         if target_ms >= max_ms - 1000:
-    #             self._seeking = False
-    #             self.play_next()
-    #             return
-    #
-    #         if not self.current_channels or self.current_index < 0:
-    #             return
-    #
-    #
-    #         song = self.playlist[self.current_index]
-    #         path = Path(song["path"])
-    #         separated_path = path / "separated"
-    #         was_playing = self.playback_state == "Activa"
-    #
-    #         pygame.mixer.stop()
-    #         pygame.mixer.quit()
-    #         pygame.mixer.init()
-    #         pygame.mixer.set_num_channels(8)  # más canales para tener margen
-    #         self.current_channels = []
-    #
-    #         try:
-    #             # ── FASE 1: preparar todos los sounds SIN reproducir aún ──
-    #             sounds_ready = []
-    #             for track in TRACK_NAMES:
-    #                 track_file = separated_path / f"{track}.mp3"
-    #                 if not track_file.exists():
-    #                     return
-    #
-    #                 audio = AudioSegment.from_file(str(track_file))
-    #                 trimmed = audio[target_ms:]
-    #                 buf = io.BytesIO()
-    #                 trimmed.export(buf, format="wav")
-    #                 buf.seek(0)
-    #                 sounds_ready.append(pygame.mixer.Sound(buf))
-    #
-    #             # ── FASE 2: arrancar todos pausados en ráfaga ──
-    #             new_channels = []
-    #             for sound in sounds_ready:
-    #                 ch = sound.play()
-    #                 if ch is None:  # pygame devuelve None si no hay canales libres
-    #                     for already in new_channels:
-    #                         already.stop()
-    #                     new_channels.clear()
-    #                     self._seeking = False
-    #                     self.play_next()  # comportamiento esperado al llegar al final
-    #                     return
-    #                 ch.pause()  # pausado inmediatamente, antes de tocar volumen
-    #                 new_channels.append(ch)
-    #
-    #             # ── FASE 3: volúmenes ──
-    #             for i, track in enumerate(TRACK_NAMES):
-    #                 vol = 0.0 if self.mute_states[track] else (
-    #                         self.individual_volumes[track] * (self.volume / 100.0)
-    #                 )
-    #                 new_channels[i].set_volume(vol)
-    #
-    #             # ── FASE 4: unpause todos juntos si estaba reproduciendo ──
-    #             if was_playing:
-    #                 for ch in new_channels:
-    #                     ch.unpause()
-    #
-    #             self.current_channels = new_channels
-    #             self.progress_song.setValue(target_ms)
-    #             self._last_progress_seconds = target_ms // 1000
-    #             self.update_lyrics_display()
-    #
-    #
-    #         except Exception as e:
-    #             try:
-    #                 pygame.mixer.stop()
-    #                 pygame.mixer.quit()
-    #                 pygame.mixer.init()
-    #                 pygame.mixer.set_num_channels(8)
-    #             except Exception:
-    #                 pass
-    #             self.current_channels = []
-    #             styled_message_box(self, "Error de Seek", f"No se pudo saltar: {e}",
-    #                                QMessageBox.Icon.Warning)
-    #     finally:
-    #         self._seeking = False
+        # Fin natural de canción
+        if not cancel_flag.is_set():
+            QTimer.singleShot(0, self.play_next)
 
     def seek_to(self, target_ms: int):
         if self._seeking or not self._track_data:
@@ -713,57 +621,6 @@ class AudioPlayer(QMainWindow):
         self.seek_to(self.progress_song.value())
         self.update_lyrics_display()
 
-
-    # def _setup_audio(self) -> bool:
-    #     if not (0 <= self.current_index < len(self.playlist)):
-    #         return False
-    #
-    #     song = self.playlist[self.current_index]
-    #     path = Path(song["path"])
-    #
-    #     try:
-    #         sounds = self.lazy_audio.load_audio_lazy(path)
-    #         if not sounds:
-    #             styled_message_box(
-    #                 self, "Error de Audio",
-    #                 f"No se encontraron las pistas separadas para:\n"
-    #                 f"{song['artist']} - {song['song']}\n\n"
-    #                 "Asegúrese de que exista la carpeta 'separated' con los archivos:\n"
-    #                 "• drums.mp3\n• vocals.mp3\n• bass.mp3\n• other.mp3",
-    #                 QMessageBox.Icon.Warning
-    #             )
-    #             return False
-    #
-    #         self.current_channels = []
-    #         for sound in sounds:
-    #             channel = sound.play()
-    #             if channel is None:  # no hay canales libres en pygame
-    #                 for ch in self.current_channels:
-    #                     ch.stop()
-    #                 self.current_channels = []
-    #                 return False
-    #             channel.pause()
-    #             self.current_channels.append(channel)
-    #
-    #         for i, track in enumerate(TRACK_NAMES):
-    #             if i < len(self.current_channels):
-    #                 vol = 0.0 if self.mute_states[track] else (
-    #                     self.individual_volumes[track] * (self.volume / 100.0)
-    #                 )
-    #                 self.current_channels[i].set_volume(vol)
-    #
-    #         length_s = sounds[0].get_length()
-    #         length_ms = int(length_s * 1000)
-    #         total_m, total_s = divmod(int(length_s), 60)
-    #         self.progress_song.setRange(0, length_ms)
-    #         self.progress_song.setValue(0)
-    #         self.progress_label.setText(f"00:00 / {total_m:02d}:{total_s:02d}")  # ← único cambio
-    #         return True
-    #
-    #     except Exception as e:
-    #         styled_message_box(self, "Error", f"Error cargando audio: {str(e)}",
-    #                            QMessageBox.Icon.Critical)
-    #         return False
 
     def _setup_audio(self) -> bool:
         if not (0 <= self.current_index < len(self.playlist)):
@@ -893,35 +750,6 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────────
     # ── Actualización de display ──────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────────
-    # def update_display(self):
-    #     if self.playback_state != "Activa" or not self.current_channels or self._seeking:
-    #         return
-    #     try:
-    #         if not pygame.mixer.get_busy():
-    #             self.play_next()
-    #             return
-    #
-    #         current_ms = self.progress_song.value() + 1000
-    #         if current_ms > self.progress_song.maximum():
-    #             self.play_next()
-    #             return
-    #
-    #         self.progress_song.setValue(current_ms)
-    #         current_s = current_ms // 1000
-    #         if self._last_progress_seconds == current_s:
-    #             return
-    #         self._last_progress_seconds = current_s
-    #
-    #         total_s = self.progress_song.maximum() // 1000
-    #         cur_m, cur_s = divmod(current_s, 60)
-    #         tot_m, tot_s = divmod(total_s, 60)
-    #         self.progress_label.setText(f"{cur_m:02d}:{cur_s:02d} / {tot_m:02d}:{tot_s:02d}")
-    #     except pygame.error as e:
-    #         print(f"Error en mixer durante actualización: {e}")
-    #         self.stop_playback()
-    #     except Exception as e:
-    #         print(f"Error inesperado en update_display: {e}")
-    #         self.stop_playback()
 
     def update_display(self):
         if self.playback_state != "Activa" or not self._track_data or self._seeking:
