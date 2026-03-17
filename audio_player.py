@@ -1041,7 +1041,7 @@ class AudioPlayer(QMainWindow):
     def _process_lines(self, lines: list, offset: float) -> list:
         result = []
         for i, line in enumerate(lines):
-            if i == 0 or not line.strip().startswith("["):
+            if not line.strip().startswith("["):
                 result.append(line)
                 continue
             try:
