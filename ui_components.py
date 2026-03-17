@@ -1,5 +1,4 @@
 import math
-
 from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRect,pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QIcon
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QDial
@@ -17,7 +16,8 @@ class TitleBar(QWidget):
 
         # Título
         self.title = QLabel("Play It")
-        self.title.setStyleSheet("color: white; font-weight: bold;")
+        self.title.setStyleSheet("color: white; font-weight: bold;background: transparent; border: none;")
+
 
         # Botones de control
         self.min_btn = QPushButton()
@@ -239,7 +239,20 @@ class StyledButtons(QWidget):
 
     def setEnabled(self, on: bool):
         self.yes_btn.setEnabled(on)
-        self.no_btn.setEnabled(on)
+        # self.no_btn.setEnabled(on)
         bg_image(self.yes_btn, self._yes_normal if on else self._yes_disabled)
-        bg_image(self.no_btn, self._no_normal if on else self._no_disabled)
+        # bg_image(self.no_btn, self._no_normal if on else self._no_disabled)
 
+
+class StyledButton(QPushButton):
+    """Botón único con imagen normal / disabled."""
+    def __init__(self, parent=None, normal_png: str = "", disabled_png: str = ""):
+        super().__init__(parent)
+        self.setFixedSize(70, 70)
+        self._normal   = normal_png
+        self._disabled = disabled_png if disabled_png else normal_png
+        bg_image(self, self._normal)
+
+    def setEnabled(self, on: bool):
+        super().setEnabled(on)
+        bg_image(self, self._normal if on else self._disabled)
