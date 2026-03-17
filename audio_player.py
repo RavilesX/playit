@@ -1444,7 +1444,7 @@ class AudioPlayer(QMainWindow):
             return styled_message_box(self, "Python ya instalado",
                                       "Python ya está instalado.",
                                       QMessageBox.Icon.Information)
-        if not self._confirm_install("Python 3.11.0 mediante winget"):
+        if not self._confirm_install("Python mediante winget"):
             return
         self._start_worker_thread(
             PythonInstallWorker(), 'install_thread', 'install_worker',

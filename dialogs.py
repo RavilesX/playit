@@ -53,7 +53,7 @@ class AboutDialog(BaseDialog):
         # Layout
         self.layout.addWidget(text_edit)
         self.layout.addWidget(
-            QLabel("Se aceptan donaciones, por un mundo con software libre"),
+            QLabel("Se aceptan donaciones"),
             alignment=Qt.AlignmentFlag.AlignCenter
         )
         self.layout.addWidget(paypal_btn, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -102,46 +102,8 @@ class AboutDialog(BaseDialog):
         </style>
         <center><img src="{version_path}"></center>
         <p>Reproductor de Audio que permite separación de pistas usando Demucs.</p>
-        <b>CARACTERÍSTICAS:</b>
-        <p>A) Separación en 4 pistas:</p>
-        <li>:: Batería</li>
-        <li>:: Voz</li>
-        <li>:: Bajo</li>
-        <li>:: Otros instrumentos</li>
-        <li> - Función de separar pistas en queue -</li>
-        <li> - Proceso No bloqueante de la interfaz -</li>
-        <p>B) Control de volumen General</p>
-        <p>C) Control de volumen Individual para cada track</p>
-        <li>:: Clic sobre el instrumento para silenciar</li>
-        <li>:: Slider para bajar o subir el volumen</li>
-        <p>D) Botones para control de reproducción</p>
-        <li>:: Reproducir anterior</li>
-        <li>:: Play/Pausa</li>
-        <li>:: Reproducir Siguiente</li>
-        <li>:: Detener reproducción</li>
-        <p>E) Barra indicadora de progreso</p>
-        <p>F) Mostrar Portada/Cover de Album</p>
-        <p>G) Mostrar Letras/Lyrics</p>
-        <p>H) Playlist</p>
-        <li>* Puede mostrarse/ocultarse</li>
-        <li>* Desmontable, (puede colocarse a la derecha o izquierda)</li>
-        <p>I) Barra de Estado con información útil</p>
-        <p>J) Selección de Carpeta para cargar la Playlist</p>
-        <p>K) Dividir audio</p>
-        <li>:: Selección de archivo Mp3</li>
-        <li>:: Botón para extraer desde el nombre de archivo el nombre de artista/canción</li>
-        <li>:: Opción para usar GPU en caso de tener instalado GPU Nvidia y el software CUDA</li>
-        <li>:: Una vez completada la division, se agrega a la carpeta 'music_library' y no se tiene que dividir de nuevo</li>
-        <p>L) Eliminar pistas de la playlist</p>
-        <p>M) Buscar en playlist</p>
-        <p>N) Modificar Lyrics</p>
-        <li>:: Adelantar la visualización 0.5 segundos</li>
-        <li>:: Retrasar la visualización 0.5 segundos</li>
-        <li>:: Se Puede modificar el tamaño de la fuente</li>        
-        <p>O) Limpiar la caché cargada</p>
         <sub>ESTE SOFTWARE SE PROPORCIONA 'TAL CUAL', SIN GARANTÍAS DE NINGÚN TIPO, YA SEAN EXPRESAS O IMPLÍCITAS, INCLUYENDO, PERO NO LIMITADO A, GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO, LOS AUTORES O COLABORADORES SERÁN RESPONSABLES DE DAÑOS DIRECTOS, INDIRECTOS, INCIDENTALES, ESPECIALES, EJEMPLARES O CONSECUENTES (INCLUYENDO, PERO NO LIMITADO A, LA ADQUISICIÓN DE BIENES O SERVICIOS SUSTITUTOS; LA PÉRDIDA DE USO, DATOS O BENEFICIOS; O LA INTERRUPCIÓN DEL NEGOCIO) DE CUALQUIER MANERA CAUSADOS Y BAJO CUALQUIER TEORÍA DE RESPONSABILIDAD, YA SEA POR CONTRATO, RESPONSABILIDAD ESTRICTA O AGRAVIO (INCLUYENDO NEGLIGENCIA O DE OTRA MANERA) QUE SURJA DE CUALQUIER FORMA DEL USO DE ESTE SOFTWARE, INCLUSO SI SE HA AVISADO DE LA POSIBILIDAD DE TALES DAÑOS.</sub>
-        <p>Desarrollado por: RavilesX</p><p>Email: ravilesx@gmail.com</p>
-        <p>Software Libre</p>        
+        <p>Desarrollado por: RavilesX</p><p>Email: ravilesx@gmail.com</p>      
         """
 
 
