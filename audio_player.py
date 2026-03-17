@@ -913,7 +913,7 @@ class AudioPlayer(QMainWindow):
             )
         if not path:
             return
-        self.clear_playlist()
+        # self.clear_playlist()
         self.status_label.setText("Cargando playlist...")
         try:
             self.lazy_playlist.load_playlist_lazy(Path(path))
@@ -1671,10 +1671,15 @@ class AudioPlayer(QMainWindow):
         if not self.demucs_available:
             self.split_action.setToolTip("Demucs no está instalado o no es accesible")
         file_menu.addAction(self.split_action)
+        file_menu.addSeparator()
 
-        remove_action = QAction("Remover", self)
+        remove_action = QAction("Remover de PlayList", self)
         remove_action.triggered.connect(self.remove_selected)
         file_menu.addAction(remove_action)
+
+        clear_playlist_action = QAction("Limpiar Playlist", self)
+        clear_playlist_action.triggered.connect(self.clear_playlist)
+        file_menu.addAction(clear_playlist_action)
         file_menu.addSeparator()
 
         exit_action = QAction("&Salir", self)
@@ -1724,7 +1729,7 @@ class AudioPlayer(QMainWindow):
              not self.ffmpeg_available),
             ("install_demucs_action", "Instalar Demucs",       self.install_demucs,
              self.python_available and self.vc_available and not self.demucs_available),
-            ("install_cuda_action",   "Instalar CUDA (Si se tiene GPU Nvidia)", self.install_cuda,
+            ("install_cuda_action",   "Instalar CUDA (GPU Nvidia necesario)", self.install_cuda,
              self.python_available and self.gpu_available and not self.pytorch_cuda_available),
         ]
         for attr, label, slot, enabled in dep_specs:
