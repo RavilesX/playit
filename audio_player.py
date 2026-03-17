@@ -934,7 +934,7 @@ class AudioPlayer(QMainWindow):
         icon = QIcon(resource_path('images/main_window/audio_icon.png'))
         for json_file in path.rglob("*.json"):
             try:
-                with open(json_file, "r") as f:
+                with open(json_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 dir_path = json_file.parent
                 for artist, songs in data.items():
