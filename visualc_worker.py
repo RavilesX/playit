@@ -1,22 +1,15 @@
-import subprocess
-from PyQt6.QtCore import QObject, pyqtSignal
+from base_worker import BaseInstallWorker
+from platform_utils import IS_WINDOWS, get_visualcpp_install_cmd
 
-class VisualCWorker(QObject):
-    finished = pyqtSignal()
-    error = pyqtSignal(str)
 
-    def run(self):
-        """Ejecuta la instalación silenciosa de Visual C++ Redistributable mediante winget."""
-        try:
-            cmd = [
-                'winget', 'install', 'Microsoft.VCRedist.2015+.x64',
-                '--accept-source-agreements', '--accept-package-agreements'
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                    creationflags=subprocess.CREATE_NO_WINDOW)
-            if result.returncode != 0:
-                self.error.emit(f"Error instalando Visual C++:\n{result.stderr}")
-            else:
-                self.finished.emit()
-        except Exception as e:
-            self.error.emit(f"Excepción durante la instalación: {str(e)}")
+class VisualCWorker(BaseInstallWorker):
+    def get_commands(self):
+        if not IS_WINDOWS:
+            return []  # En Linux no se necesita → finished se emite directo
+        return [
+            {
+                'cmd': get_visualcpp_install_cmd(),
+                'error_msg': 'Error instalando Visual C++ Redistributable',
+                'timeout': 300,
+            },
+        ]

@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QDial
 from resources import resource_path,bg_image
 
 
-
 class TitleBar(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -17,7 +16,6 @@ class TitleBar(QWidget):
         # Título
         self.title = QLabel("Play It")
         self.title.setStyleSheet("color: white; font-weight: bold;background: transparent; border: none;")
-
 
         # Botones de control
         self.min_btn = QPushButton()
@@ -245,7 +243,6 @@ class StyledButtons(QWidget):
 
 
 class StyledButton(QPushButton):
-    """Botón único con imagen normal / disabled."""
     def __init__(self, parent=None, normal_png: str = "", disabled_png: str = ""):
         super().__init__(parent)
         self.setFixedSize(70, 70)

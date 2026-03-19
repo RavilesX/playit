@@ -219,9 +219,7 @@ class SplitDialog(BaseDialog):
         self.file_path.setPlaceholderText("Presiona 'Enter'...")
 
         file_btn = self._create_file_button()
-
         extract_btn = self._create_extract_button()
-
         btn_layout = self._create_action_buttons()
 
         # Layout
@@ -365,11 +363,9 @@ class DownloadDialog(BaseDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent, "Descargar MP3 de YouTube", (400, 200))
-        # No llamar a _setup_ui aquí, ya se llama desde la base
         self._setup_validation()
 
     def _setup_ui(self):
-        # Primero, crear la estructura base (title_bar y layout)
         super()._setup_ui()
 
         # Ahora agregar nuestros widgets
@@ -394,7 +390,6 @@ class DownloadDialog(BaseDialog):
         self.buttons.yes_btn.clicked.connect(self._accept)
         self.buttons.no_btn.clicked.connect(self.reject)
 
-        # Añadir al layout existente (que ya contiene el title_bar)
         self.layout.addWidget(label)
         self.layout.addWidget(self.url_edit)
         self.layout.addWidget(self.buttons, alignment=Qt.AlignmentFlag.AlignCenter)

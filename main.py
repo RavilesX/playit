@@ -1,3 +1,5 @@
+import os
+os.environ["TORCH_LOAD_WEIGHTS_ONLY"] = "0"
 import sys
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer, Qt
@@ -12,14 +14,18 @@ def create_player():
     player.show()
     splash.finish(player)
 
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    # Splash rápido
     from PyQt6.QtWidgets import QSplashScreen
     splash = QSplashScreen(QPixmap(resource_path("images/main_window/splash.png")))
-    splash.showMessage("Cargando…", Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter, Qt.GlobalColor.white)
+    splash.showMessage(
+        "Cargando…",
+        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter,
+        Qt.GlobalColor.white,
+    )
     splash.show()
 
-    QTimer.singleShot(100, create_player)  # ventana aparece casi instantly
+    QTimer.singleShot(100, create_player)
     sys.exit(app.exec())
