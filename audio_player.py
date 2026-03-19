@@ -143,6 +143,7 @@ class AudioPlayer(QMainWindow):
         self._seek_position = 0
         self._stream_lock = threading.Lock()
         self._stream_cancel_flags: list = []
+        self._writer_thread = None
         self._stream_pause_flag = threading.Event()
         self._stream_pause_flag.set()
 
@@ -518,10 +519,21 @@ class AudioPlayer(QMainWindow):
                     self._stream_pause_flag.set()
 
     def _stop_streams(self):
+        # 1. Señalar al escritor que pare
         for flag in self._stream_cancel_flags:
             flag.set()
+        # Asegurar que no esté pausado (si lo está, el writer está
+        # bloqueado en .wait() y nunca verá el cancel flag)
+        self._stream_pause_flag.set()
+
+        # 2. Esperar a que el hilo escritor termine ANTES de cerrar el stream
+        if hasattr(self, '_writer_thread') and self._writer_thread is not None:
+            self._writer_thread.join(timeout=2.0)
+            self._writer_thread = None
+
         self._stream_cancel_flags = []
 
+        # 3. Ahora sí, cerrar el stream (ya nadie está escribiendo)
         for stream in self._sd_streams:
             try:
                 stream.stop()
@@ -546,21 +558,14 @@ class AudioPlayer(QMainWindow):
         stream.start()
         self._sd_streams = [stream]
 
-        t = threading.Thread(
+        self._writer_thread = threading.Thread(
             target=self._stream_writer,
             args=(stream, start_frame, cancel_flag),
             daemon=True,
         )
-        t.start()
+        self._writer_thread.start()
 
     def _stream_writer(self, stream, start_frame, cancel_flag):
-        """
-        Escribe audio mezclado al stream.
-
-        Analogía: Es como un DJ en tiempo real que mezcla 4 canales
-        (drums, vocals, bass, other), ajustando el volumen de cada
-        uno y enviando la mezcla final a los altavoces.
-        """
         chunk_size = 1024
         pos = start_frame
 
