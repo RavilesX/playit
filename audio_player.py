@@ -18,8 +18,6 @@ import unicodedata
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
-
-# Módulos propios
 from platform_utils import (
     IS_WINDOWS, IS_LINUX,
     run_silent, check_command_exists, get_python_cmd,
@@ -53,8 +51,6 @@ VERIFICATION_INTERVAL_MS = 30_000
 
 
 class AudioPlayer(QMainWindow):
-    """Ventana principal — el director de orquesta."""
-
     cover_loaded = pyqtSignal(QPixmap)
     lyrics_loaded = pyqtSignal(list)
     lyrics_error = pyqtSignal(str)
@@ -143,6 +139,7 @@ class AudioPlayer(QMainWindow):
         self._seek_position = 0
         self._stream_lock = threading.Lock()
         self._stream_cancel_flags: list = []
+        self._writer_thread = None
         self._stream_pause_flag = threading.Event()
         self._stream_pause_flag.set()
 
@@ -161,12 +158,6 @@ class AudioPlayer(QMainWindow):
         self._cached_stats: dict = {"total_cached_items": 0}
 
     def _setup_audio_system(self):
-        """
-        Verifica dependencias del sistema.
-
-        Analogía: Antes de abrir el restaurante, verificamos que
-        tengamos gas, agua, electricidad y los utensilios.
-        """
         self.demucs_model = None
         self.load_demucs_model()
         self._check_python_installation()
@@ -485,12 +476,6 @@ class AudioPlayer(QMainWindow):
         self.update_lyrics_menu_state()
 
     def stop_playback(self):
-        """
-        Detiene la reproducción.
-
-        MEJORA: Eliminado el time.sleep(0.1) que bloqueaba el hilo principal.
-        El stream_lock ya se encarga de la sincronización.
-        """
         self._control_channels('stop')
         self._update_playback_ui('Detenido')
         self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
@@ -520,6 +505,12 @@ class AudioPlayer(QMainWindow):
     def _stop_streams(self):
         for flag in self._stream_cancel_flags:
             flag.set()
+        self._stream_pause_flag.set()
+
+        if hasattr(self, '_writer_thread') and self._writer_thread is not None:
+            self._writer_thread.join(timeout=2.0)
+            self._writer_thread = None
+
         self._stream_cancel_flags = []
 
         for stream in self._sd_streams:
@@ -546,21 +537,14 @@ class AudioPlayer(QMainWindow):
         stream.start()
         self._sd_streams = [stream]
 
-        t = threading.Thread(
+        self._writer_thread = threading.Thread(
             target=self._stream_writer,
             args=(stream, start_frame, cancel_flag),
             daemon=True,
         )
-        t.start()
+        self._writer_thread.start()
 
     def _stream_writer(self, stream, start_frame, cancel_flag):
-        """
-        Escribe audio mezclado al stream.
-
-        Analogía: Es como un DJ en tiempo real que mezcla 4 canales
-        (drums, vocals, bass, other), ajustando el volumen de cada
-        uno y enviando la mezcla final a los altavoces.
-        """
         chunk_size = 1024
         pos = start_frame
 
@@ -1321,12 +1305,6 @@ class AudioPlayer(QMainWindow):
     # ── Dependencias (multiplataforma) ───────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
     def load_demucs_model(self):
-        """
-        Verifica si Demucs está disponible.
-
-        Analogía: Verificamos si el chef (Demucs) está en la cocina
-        antes de aceptar pedidos de separación de pistas.
-        """
         try:
             python = get_python_cmd()
             result = run_silent([python, '-m', 'demucs', '--help'], timeout=15)
@@ -1370,13 +1348,6 @@ class AudioPlayer(QMainWindow):
 
     def _start_worker_thread(self, worker, thread_attr: str, worker_attr: str,
                              on_finished, on_error, status_msg: str):
-        """
-        Lanza un worker en un QThread y conecta sus señales.
-
-        Analogía: Es como contratar un técnico especializado — le damos
-        la tarea, le decimos a quién avisarle cuando termine (on_finished)
-        o si algo sale mal (on_error), y lo mandamos a trabajar.
-        """
         thread = QThread()
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1717,7 +1688,6 @@ class AudioPlayer(QMainWindow):
              self.python_available and self.gpu_available and not self.pytorch_cuda_available),
         ]
 
-        # Visual C++ solo aparece en Windows
         if IS_WINDOWS:
             dep_specs.insert(1, (
                 "install_vc_action", "Instalar Visual C++", self.install_vc,
