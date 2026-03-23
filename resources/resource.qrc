@@ -1,5 +1,0 @@
-<RCC>
-  <qresource prefix="checks">
-    <file>checkbox_checked.png</file>
-  </qresource>
-</RCC>
