@@ -106,6 +106,8 @@ class AudioPlayer(QMainWindow):
         self.current_index = -1
         self.playback_state = "Detenido"
         self.current_channels: list = []
+        self._repeat = False
+
 
         # Cola Demucs
         self.demucs_queue: list[dict] = []
@@ -315,6 +317,7 @@ class AudioPlayer(QMainWindow):
         self.prev_btn.clicked.connect(self.play_previous)
         self.next_btn.clicked.connect(self.play_next)
         self.stop_btn.clicked.connect(self.stop_playback)
+        self.repeat_btn.clicked.connect(self.toggle_repeat)
         self.progress_song.sliderReleased.connect(self._on_progress_released)
         self.progress_song.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -475,6 +478,11 @@ class AudioPlayer(QMainWindow):
             self._update_playback_ui('Activa')
         self.update_lyrics_menu_state()
 
+    def toggle_repeat(self):
+        self._repeat = self.repeat_btn.isChecked()
+        icon = "repeat_on" if self._repeat else "repeat"
+        bg_image(self.repeat_btn, f"images/main_window/{icon}.png")
+
     def stop_playback(self):
         self._control_channels('stop')
         self._update_playback_ui('Detenido')
@@ -582,7 +590,10 @@ class AudioPlayer(QMainWindow):
 
         # Fin natural de canción
         if not cancel_flag.is_set():
-            QTimer.singleShot(0, self.play_next)
+            if self._repeat:
+                QTimer.singleShot(0, self.play_current)
+            else:
+                QTimer.singleShot(0, self.play_next)
 
     def seek_to(self, target_ms: int):
         if self._seeking or not self._track_data:
@@ -792,18 +803,22 @@ class AudioPlayer(QMainWindow):
     # ── Botones e init de controles ──────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
     def init_leds(self) -> QHBoxLayout:
-        def _make_btn(name, size, icon):
+        def _make_btn(name, size, icon, enabled):
             btn = QPushButton()
             btn.setObjectName(name)
             btn.setFixedSize(*size)
-            btn.setEnabled(False)
+            btn.setEnabled(enabled)
             bg_image(btn, f"images/main_window/{icon}.png")
             return btn
 
-        self.prev_btn = _make_btn('prev_btn', (40, 40), 'prev')
-        self.play_btn = _make_btn('play_btn', (80, 80), 'play')
-        self.next_btn = _make_btn('next_btn', (40, 40), 'next')
-        self.stop_btn = _make_btn('stop_btn', (40, 40), 'stop')
+        self.prev_btn = _make_btn('prev_btn', (40, 40), 'prev',False)
+        self.play_btn = _make_btn('play_btn', (80, 80), 'play',False)
+        self.next_btn = _make_btn('next_btn', (40, 40), 'next',False)
+        self.stop_btn = _make_btn('stop_btn', (40, 40), 'stop',False)
+        self.repeat_btn = _make_btn('repeat_btn', (40, 40), 'repeat',True)
+        self.repeat_btn.setCheckable(True)
+        self.repeat_btn.setChecked(False)
+
 
         self.volume_dial = CustomDial()
         self.volume_dial.setRange(0, 100)
@@ -814,7 +829,7 @@ class AudioPlayer(QMainWindow):
 
         layout = QHBoxLayout()
         for w in (self.prev_btn, self.play_btn, self.next_btn,
-                  self.stop_btn, self.volume_dial):
+                  self.repeat_btn, self.stop_btn, self.volume_dial):
             layout.addWidget(w)
         return layout
 
@@ -842,6 +857,8 @@ class AudioPlayer(QMainWindow):
         self.mute_buttons = list(self._track_buttons.values())
         self.enable_disable_buttons(False)
         return outer
+
+
 
     def setup_button(self, button: QPushButton, object_name: str, icon_name: str):
         button.setObjectName(object_name)

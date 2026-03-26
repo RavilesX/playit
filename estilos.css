@@ -526,6 +526,27 @@ QPushButton#next_btn:hover{
     padding:7px;
 }
 
+QPushButton#repeat_btn{
+    background-color: rgba(255,255,255,0.1);
+    border-radius:20px;
+    padding:7px;
+}
+QPushButton#repeat_btn:pressed{
+    background: qlineargradient(
+        spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
+    stop:0 rgba(122,130,255,255),
+    stop:1 rgba(132,76,171,255));
+    padding:7px;
+    border:5px solid black;
+}
+QPushButton#repeat_btn:hover{
+    background: qlineargradient(
+        spread:pad, x1:1, y1:0, x2:0, y2:0.556818,
+    stop:0 rgba(122,130,255,255),
+    stop:1 rgba(132,76,171,255));
+    padding:7px;
+}
+
 QPushButton#stop_btn{
     background-color: transparent;
     border-radius:20px;
@@ -548,6 +569,8 @@ QPushButton#stop_btn:hover{
     stop:1 rgba(132,76,171,255));
     padding:7px;
 }
+
+
 
 
 
