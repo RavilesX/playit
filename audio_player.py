@@ -107,7 +107,7 @@ class AudioPlayer(QMainWindow):
         self.playback_state = "Detenido"
         self.current_channels: list = []
         self._repeat = False
-
+        self._current_mlst_path = None
 
         # Cola Demucs
         self.demucs_queue: list[dict] = []
@@ -959,6 +959,117 @@ class AudioPlayer(QMainWindow):
             del self.playlist[row]
         self.update_status()
 
+    def save_playlist_mlst(self):
+        if not self.playlist:
+            styled_message_box(
+                self, "Playlist vacía",
+                "No hay canciones en la playlist para guardar.",
+                QMessageBox.Icon.Information,
+            )
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar Playlist",
+            str(Path.home() / "Music"),
+            "Music List (*.mlst)",
+        )
+        if not file_path:
+            return
+
+        if not file_path.endswith('.mlst'):
+            file_path += '.mlst'
+
+        data = {
+            "name": Path(file_path).stem,
+            "created": datetime.now().strftime('%Y-%m-%d'),
+            "songs": [
+                {
+                    "artist": song["artist"],
+                    "song": song["song"],
+                    "path": str(song["path"]),
+                }
+                for song in self.playlist
+            ],
+        }
+
+        try:
+            Path(file_path).write_text(
+                json.dumps(data, indent=4, ensure_ascii=False),
+                encoding='utf-8',
+            )
+            self._current_mlst_path = file_path
+            styled_message_box(
+                self, "Playlist guardada",
+                f"Se guardaron {len(self.playlist)} canciones en:\n{Path(file_path).name}",
+            )
+        except Exception as e:
+            styled_message_box(
+                self, "Error", f"No se pudo guardar: {e}",
+                QMessageBox.Icon.Critical,
+            )
+
+    def load_playlist_mlst(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Cargar Playlist",
+            str(Path.home() / "Music"),
+            "Music List (*.mlst)",
+        )
+        if not file_path:
+            return
+
+        try:
+            data = json.loads(Path(file_path).read_text(encoding='utf-8'))
+            songs = data.get("songs", [])
+            if not songs:
+                styled_message_box(
+                    self, "Playlist vacía",
+                    "El archivo no contiene canciones.",
+                    QMessageBox.Icon.Warning,
+                )
+                return
+
+            icon = QIcon(resource_path('images/main_window/audio_icon.png'))
+            added = 0
+            for song in songs:
+                artist = song.get("artist", "")
+                title = song.get("song", "")
+                path = song.get("path", "")
+
+                if not all([artist, title, path]):
+                    continue
+
+                if any(t['artist'] == artist and t['song'] == title
+                       for t in self.playlist):
+                    continue
+
+                song_data = {
+                    "artist": artist,
+                    "song": title,
+                    "path": Path(path),
+                }
+                self.playlist.append(song_data)
+                item = QListWidgetItem(f"{artist} - {title}")
+                item.setIcon(icon)
+                self.playlist_widget.addItem(item)
+                self._check_and_fetch_lyrics_async(path, artist, title)
+                added += 1
+
+            if added and not self.prev_btn.isEnabled():
+                self._set_playback_buttons_enabled(True)
+
+            self._current_mlst_path = file_path
+            self.status_label.setText(
+                f"Playlist cargada: {data.get('name', '')} ({added} nuevas canciones)"
+            )
+            self.update_status()
+
+        except Exception as e:
+            styled_message_box(
+                self, "Error", f"No se pudo cargar: {e}",
+                QMessageBox.Icon.Critical,
+            )
+
+
     # ──────────────────────────────────────────────────────────────────────
     # ── Letras ───────────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
@@ -1637,6 +1748,17 @@ class AudioPlayer(QMainWindow):
         load_action.setShortcut(QKeySequence("Ctrl+O"))
         load_action.triggered.connect(self.load_folder)
         file_menu.addAction(load_action)
+
+        # Playlists
+        playlist_menu = file_menu.addMenu("Playlists")
+        load_mlst_action = QAction("Cargar playlist...", self)
+        load_mlst_action.triggered.connect(self.load_playlist_mlst)
+        playlist_menu.addAction(load_mlst_action)
+        save_mlst_action = QAction("Guardar playlist como...", self)
+        save_mlst_action.triggered.connect(self.save_playlist_mlst)
+        playlist_menu.addAction(save_mlst_action)
+
+        file_menu.addSeparator()
 
         self.split_action = QAction("Dividir...", self)
         self.split_action.setShortcut(QKeySequence("Ctrl+D"))
