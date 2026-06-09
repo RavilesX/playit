@@ -1,0 +1,15 @@
+{
+    "audio_cache_size": 25,
+    "image_cache_size": 150,
+    "lyrics_cache_size": 75,
+    "preload_next_songs": 3,
+    "preload_adjacent_lyrics": true,
+    "preload_covers": true,
+    "cleanup_interval_ms": 300000,
+    "aggressive_cleanup_threshold": 150,
+    "max_memory_usage_mb": 768,
+    "memory_check_interval_ms": 60000,
+    "enable_threading": true,
+    "max_concurrent_loads": 5,
+    "load_timeout_seconds": 30
+}
