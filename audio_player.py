@@ -1,4 +1,3 @@
-import re
 import threading
 import queue
 from pathlib import Path
@@ -6,7 +5,7 @@ import json
 from datetime import datetime
 import time
 from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QThread
-from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon
+from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon, QImage
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
     QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
@@ -50,13 +49,19 @@ LYRICS_FONT_DEFAULT = 62
 STATUS_CACHE_TTL = 5.0
 VERIFICATION_MAX_ATTEMPTS = 60
 VERIFICATION_INTERVAL_MS = 30_000
+# Texto que se escribe en lyrics.lrc cuando la API no encontró letras; si el
+# archivo lo contiene, se reintenta la búsqueda en la próxima carga
+LYRICS_NOT_FOUND_TEXT = "Letras no encontradas"
 
 
 class AudioPlayer(QMainWindow):
-    cover_loaded = pyqtSignal(QPixmap)
+    # QImage (no QPixmap): la portada se carga en hilos secundarios y Qt solo
+    # permite crear QPixmap en el hilo de la GUI
+    cover_loaded = pyqtSignal(QImage)
     lyrics_loaded = pyqtSignal(list)
     lyrics_error = pyqtSignal(str)
     lyrics_not_found = pyqtSignal()
+    dependencies_checked = pyqtSignal()
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Inicialización ───────────────────────────────────────────────────
@@ -93,7 +98,7 @@ class AudioPlayer(QMainWindow):
 
     def _load_stylesheet(self):
         try:
-            with open('estilos.css', 'r') as f:
+            with open(resource_path('estilos.css'), 'r') as f:
                 self.setStyleSheet(f.read())
         except FileNotFoundError:
             styled_message_box(
@@ -126,7 +131,6 @@ class AudioPlayer(QMainWindow):
         self.demucs_queue: list[dict] = []
         self.demucs_active = False
         self.demucs_progress = 0
-        self.processing = False
         self.processing_multiple = False
         self.demucs_thread = None
         self.demucs_worker = None
@@ -160,7 +164,6 @@ class AudioPlayer(QMainWindow):
 
         # Letras
         self.lyrics: list = []
-        self.lyrics_lock = threading.Lock()
         self.lyrics_font_size = LYRICS_FONT_DEFAULT
         self._last_current_html = None
         self._last_progress_seconds = -1
@@ -173,8 +176,15 @@ class AudioPlayer(QMainWindow):
         self._cached_stats: dict = {"total_cached_items": 0}
 
     def _setup_audio_system(self):
-        self.demucs_model = None
-        self.load_demucs_model()
+        # Cada chequeo lanza un subproceso (1-2s en total, hasta 15s si demucs
+        # tarda); en segundo plano para no retrasar la aparición de la ventana
+        self.dependencies_checked.connect(self._update_dependency_menus)
+        threading.Thread(
+            target=self._check_dependencies_worker, daemon=True
+        ).start()
+
+    def _check_dependencies_worker(self):
+        self._check_demucs_installation()
         self._check_python_installation()
         self._check_ffmpeg_installation()
         if IS_WINDOWS:
@@ -182,6 +192,15 @@ class AudioPlayer(QMainWindow):
         self._check_ytdlp_installation()
         self._check_gpu()
         self._check_pytorch_cuda()
+        self.dependencies_checked.emit()
+
+    def _update_dependency_menus(self):
+        self._update_python_menu_action()
+        self._update_vc_menu_action()
+        self._update_ffmpeg_menu_action()
+        self._update_demucs_menu_actions()
+        self._update_cuda_menu_action()
+        self._update_ytdlp_menu_actions()
 
     # ──────────────────────────────────────────────────────────────────────
     # ── UI ───────────────────────────────────────────────────────────────
@@ -395,6 +414,7 @@ class AudioPlayer(QMainWindow):
         # streams vivos de PortAudio durante el cierre causan segfault
         self._control_channels('stop')
         self.lazy_playlist.stop_loading()
+        self._cleanup_demucs_job()
         if self.playlist_dock.isVisible():
             self.playlist_dock.close()
         super().closeEvent(event)
@@ -434,13 +454,15 @@ class AudioPlayer(QMainWindow):
         self.status_label.setText(f"Playlist cargada: {len(self.playlist)} canciones")
         self.update_status()
 
-    def _handle_cover_loaded(self, pixmap: QPixmap):
-        self.cover_label.setPixmap(pixmap)
+    def _handle_cover_loaded(self, image: QImage):
+        self.cover_label.setPixmap(QPixmap.fromImage(image))
 
     def _handle_lyrics_loaded(self, lyrics_data: list):
         self.lyrics = lyrics_data or []
         self.update_lyrics_menu_state()
 
+        if not (0 <= self.current_index < len(self.playlist)):
+            return
         song = self.playlist[self.current_index]
         self.lyrics_header.setHtml(
             f'<H1 style="color: #3AABEF;"><center>{song["artist"]}</center></H1>'
@@ -773,7 +795,8 @@ class AudioPlayer(QMainWindow):
             total_frames = len(self._track_data[0][0])
 
             if self._seek_position >= total_frames:
-                self.play_next()
+                # _stream_writer ya programa el avance al terminar la canción;
+                # avanzar también aquí causaba doble play_next ocasional
                 return
 
             current_ms = int((self._seek_position / sr) * 1000)
@@ -952,29 +975,25 @@ class AudioPlayer(QMainWindow):
         self.stop_btn.setEnabled(False)
 
     def scan_folder(self, path: Path):
+        """Escaneo síncrono de la biblioteca; agrega vía _on_songs_loaded
+        (que ya maneja duplicados, icono, letras y botones)."""
+        songs_found = []
         for json_file in path.rglob("*.json"):
             try:
-                with open(json_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                data = json.loads(json_file.read_text(encoding="utf-8"))
                 dir_path = json_file.parent
                 for artist, songs in data.items():
                     for song in songs:
-                        if (artist, song) in self._playlist_keys:
-                            continue
-                        self._playlist_keys.add((artist, song))
-                        self.playlist.append({"artist": artist, "song": song, "path": dir_path})
-                        item = QListWidgetItem(f"{artist} - {song}")
-                        item.setIcon(self._audio_icon)
-                        self.playlist_widget.addItem(item)
-                        if not self.prev_btn.isEnabled():
-                            self._set_playback_buttons_enabled(True)
-                        self._check_and_fetch_lyrics_async(dir_path, artist, song)
+                        songs_found.append(
+                            {"artist": artist, "song": song, "path": dir_path}
+                        )
             except Exception as e:
                 styled_message_box(
                     self, "Error",
                     f"Error cargando {json_file}: {str(e)}",
                     QMessageBox.Icon.Critical,
                 )
+        self._on_songs_loaded(songs_found)
         self.update_status()
 
     def remove_selected(self):
@@ -1102,32 +1121,6 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     # ── Letras ───────────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
-    def load_lyrics(self, file_path):
-        self.lyrics = []
-        current_time = None
-        current_text = []
-
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                match = re.match(r'\[(\d+):(\d+\.\d+)\]', line)
-                if match:
-                    if current_time is not None:
-                        self.lyrics.append((current_time, '\n'.join(current_text)))
-                    mins, secs = int(match.group(1)), float(match.group(2))
-                    current_time = mins * 60 + secs
-                    current_text = [line[match.end():]]
-                elif current_time is not None and line:
-                    current_text.append(line)
-
-        if current_time is not None:
-            self.lyrics.append((current_time, '\n'.join(current_text)))
-
-        self.update_lyrics_menu_state()
-        if not hasattr(self, 'lyrics_timer'):
-            self.lyrics_timer = QTimer(self)
-            self.lyrics_timer.timeout.connect(self.update_lyrics_display)
-        self.lyrics_timer.start(100)
-
     def update_lyrics_display(self):
         if not self.lyrics or self.playback_state != "Activa":
             return
@@ -1162,13 +1155,17 @@ class AudioPlayer(QMainWindow):
 
     def adjust_lyrics_timing(self, offset: float):
         try:
-            lrc_path = self.playlist[self.current_index]["path"] / "lyrics.lrc"
+            path = Path(self.playlist[self.current_index]["path"])
+            lrc_path = path / "lyrics.lrc"
             with open(lrc_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
             modified = self._process_lines(lines, offset)
             with open(lrc_path, "w", encoding="utf-8") as f:
                 f.writelines(modified)
-            self.load_lyrics(lrc_path)
+            # Invalidar el parse cacheado: sin esto, al volver a la canción
+            # se mostraría la versión vieja de las letras
+            self.lazy_lyrics.cache.remove(f"lyrics_{path}")
+            self._handle_lyrics_loaded(self.lazy_lyrics.load_lyrics_lazy(path))
         except Exception as e:
             styled_message_box(
                 self, "Error", f"No se pudo ajustar: {str(e)}",
@@ -1190,12 +1187,18 @@ class AudioPlayer(QMainWindow):
         return result
 
     def _adjust_time(self, time_str: str, offset: float) -> str:
+        # Aritmética entera en centisegundos: evita errores de redondeo
+        # de float (p.ej. 01:59.80 + 0.5 daba 02:00.29)
         mins, rest = time_str.split(':', 1)
-        secs, ms = rest.split('.', 1)
-        total = max(0.0, int(mins) * 60 + int(secs) + int(ms) / 100 + offset)
-        m, s = divmod(int(total), 60)
-        centis = int((total - int(total)) * 100)
-        return f"{m:02d}:{s:02d}.{centis:02d}"
+        secs, centis = rest.split('.', 1)
+        total_cs = max(
+            0,
+            int(mins) * 6000 + int(secs) * 100 + int(centis)
+            + round(offset * 100),
+        )
+        m, rem = divmod(total_cs, 6000)
+        s, c = divmod(rem, 100)
+        return f"{m:02d}:{s:02d}.{c:02d}"
 
     def increase_lyrics_font(self):
         self.lyrics_font_size = min(self.lyrics_font_size + 2, LYRICS_FONT_MAX)
@@ -1233,11 +1236,13 @@ class AudioPlayer(QMainWindow):
                 return
             try:
                 lrc_path = Path(dir_path) / "lyrics.lrc"
-                default_text = "Letras no encontradas, revisa datos de artista/canción"
                 needs_update = not lrc_path.exists()
                 if not needs_update:
                     try:
-                        needs_update = default_text in lrc_path.read_text(encoding="utf-8")
+                        needs_update = (
+                            LYRICS_NOT_FOUND_TEXT
+                            in lrc_path.read_text(encoding="utf-8")
+                        )
                     except Exception:
                         needs_update = True
                 if needs_update:
@@ -1271,7 +1276,10 @@ class AudioPlayer(QMainWindow):
 
     def _write_lyrics_file(self, output_dir: Path, artist: str, song: str, lyrics):
         if not lyrics:
-            content = '[00:00.00]<center style="color: #ff2626;">Letras no encontradas</center>\n'
+            content = (
+                f'[00:00.00]<center style="color: #ff2626;">'
+                f'{LYRICS_NOT_FOUND_TEXT}</center>\n'
+            )
         else:
             lines = []
             for line in lyrics.split('\n'):
@@ -1374,7 +1382,6 @@ class AudioPlayer(QMainWindow):
             self._cleanup_demucs_job()
             self.demucs_active = True
             self.demucs_progress = 0
-            self.processing = True
             self.update_status()
 
             self.demucs_worker = DemucsWorker(job['artist'], job['song'], job['file_path'])
@@ -1415,7 +1422,6 @@ class AudioPlayer(QMainWindow):
 
     def _finish_demucs_job(self):
         self.demucs_active = False
-        self.processing = False
         self.update_status()
         if self.demucs_thread and self.demucs_thread.isRunning():
             self.demucs_thread.quit()
@@ -1476,7 +1482,7 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     # ── Dependencias (multiplataforma) ───────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
-    def load_demucs_model(self):
+    def _check_demucs_installation(self):
         try:
             python = get_python_cmd()
             result = run_silent([python, '-m', 'demucs', '--help'], timeout=15)
@@ -1533,6 +1539,30 @@ class AudioPlayer(QMainWindow):
         self.status_label.setText(status_msg)
         thread.start()
 
+    def _on_install_success(self, name: str, available_attr: str, message: str,
+                            menu_updates: tuple = (),
+                            progress_attr: str | None = None, after=None):
+        """Manejo común al terminar cualquier instalación de dependencia."""
+        setattr(self, available_attr, True)
+        if progress_attr:
+            setattr(self, progress_attr, False)
+        self.status_label.setText(f"{name} instalado correctamente.")
+        if after:
+            after()
+        for update in menu_updates:
+            update()
+        styled_message_box(
+            self, "Instalación completada", message, QMessageBox.Icon.Information
+        )
+
+    def _on_install_error(self, name: str, msg: str,
+                          progress_attr: str | None = None):
+        """Manejo común de errores de instalación de dependencias."""
+        if progress_attr:
+            setattr(self, progress_attr, False)
+        self.status_label.setText(f"Error instalando {name}.")
+        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
+
     def install_python(self):
         if self.python_available:
             return styled_message_box(
@@ -1544,25 +1574,16 @@ class AudioPlayer(QMainWindow):
             return
         self._start_worker_thread(
             PythonInstallWorker(), 'install_thread', 'install_worker',
-            self._on_python_install_finished, self._on_python_install_error,
+            lambda: self._on_install_success(
+                "Python", 'python_available',
+                "Python se instaló correctamente.\n"
+                "Es posible que necesite reiniciar la aplicación.",
+                menu_updates=(self._update_python_menu_action,
+                              self._update_cuda_menu_action),
+            ),
+            lambda msg: self._on_install_error("Python", msg),
             "Instalando Python...",
         )
-
-    def _on_python_install_finished(self):
-        self.python_available = True
-        self.status_label.setText("Python instalado correctamente.")
-        self._update_python_menu_action()
-        self._update_cuda_menu_action()
-        styled_message_box(
-            self, "Instalación completada",
-            "Python se instaló correctamente.\n"
-            "Es posible que necesite reiniciar la aplicación.",
-            QMessageBox.Icon.Information,
-        )
-
-    def _on_python_install_error(self, msg: str):
-        self.status_label.setText("Error instalando Python.")
-        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
 
     def install_vc(self):
         if self.vc_available:
@@ -1575,25 +1596,16 @@ class AudioPlayer(QMainWindow):
             return
         self._start_worker_thread(
             VisualCWorker(), 'vc_thread', 'vc_worker',
-            self._on_vc_install_finished, self._on_vc_install_error,
+            lambda: self._on_install_success(
+                "Visual C++", 'vc_available',
+                "Visual C++ Redistributable se instaló correctamente.",
+                menu_updates=(self._update_vc_menu_action,
+                              self._update_demucs_menu_actions,
+                              self._update_cuda_menu_action),
+            ),
+            lambda msg: self._on_install_error("Visual C++", msg),
             "Instalando Visual C++...",
         )
-
-    def _on_vc_install_finished(self):
-        self.vc_available = True
-        self.status_label.setText("Visual C++ instalado correctamente.")
-        self._update_vc_menu_action()
-        self._update_demucs_menu_actions()
-        self._update_cuda_menu_action()
-        styled_message_box(
-            self, "Instalación completada",
-            "Visual C++ Redistributable se instaló correctamente.",
-            QMessageBox.Icon.Information,
-        )
-
-    def _on_vc_install_error(self, msg: str):
-        self.status_label.setText("Error instalando Visual C++.")
-        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
 
     def install_ffmpeg(self):
         if self.ffmpeg_available:
@@ -1606,23 +1618,14 @@ class AudioPlayer(QMainWindow):
             return
         self._start_worker_thread(
             FFmpegWorker(), 'ffmpeg_thread', 'ffmpeg_worker',
-            self._on_ffmpeg_install_finished, self._on_ffmpeg_install_error,
+            lambda: self._on_install_success(
+                "FFmpeg", 'ffmpeg_available',
+                "FFmpeg se instaló correctamente.",
+                menu_updates=(self._update_ffmpeg_menu_action,),
+            ),
+            lambda msg: self._on_install_error("FFmpeg", msg),
             "Instalando FFmpeg...",
         )
-
-    def _on_ffmpeg_install_finished(self):
-        self.ffmpeg_available = True
-        self.status_label.setText("FFmpeg instalado correctamente.")
-        self._update_ffmpeg_menu_action()
-        styled_message_box(
-            self, "Instalación completada",
-            "FFmpeg se instaló correctamente.",
-            QMessageBox.Icon.Information,
-        )
-
-    def _on_ffmpeg_install_error(self, msg: str):
-        self.status_label.setText("Error instalando FFmpeg.")
-        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
 
     def install_demucs(self):
         if self.demucs_available:
@@ -1649,26 +1652,18 @@ class AudioPlayer(QMainWindow):
         self.demucs_install_in_progress = True
         self._start_worker_thread(
             DemucsInstallWorker(), 'demucs_install_thread', 'demucs_install_worker',
-            self._on_demucs_install_finished, self._on_demucs_install_error,
+            lambda: self._on_install_success(
+                "Demucs", 'demucs_available',
+                "Demucs se instaló y el modelo htdemucs_ft está listo.",
+                menu_updates=(self._update_demucs_menu_actions,),
+                progress_attr='demucs_install_in_progress',
+                after=self._check_demucs_installation,
+            ),
+            lambda msg: self._on_install_error(
+                "Demucs", msg, progress_attr='demucs_install_in_progress'
+            ),
             "Instalando Demucs...",
         )
-
-    def _on_demucs_install_finished(self):
-        self.demucs_available = True
-        self.demucs_install_in_progress = False
-        self.status_label.setText("Demucs instalado correctamente.")
-        self.load_demucs_model()
-        self._update_demucs_menu_actions()
-        styled_message_box(
-            self, "Instalación completada",
-            "Demucs se instaló y el modelo htdemucs_ft está listo.",
-            QMessageBox.Icon.Information,
-        )
-
-    def _on_demucs_install_error(self, msg: str):
-        self.demucs_install_in_progress = False
-        self.status_label.setText("Error instalando Demucs.")
-        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
 
     def install_cuda(self):
         if self.pytorch_cuda_available:
@@ -1698,25 +1693,17 @@ class AudioPlayer(QMainWindow):
         self.cuda_install_in_progress = True
         self._start_worker_thread(
             CudaInstallWorker(), 'cuda_thread', 'cuda_worker',
-            self._on_cuda_install_finished, self._on_cuda_install_error,
+            lambda: self._on_install_success(
+                "CUDA", 'pytorch_cuda_available',
+                "PyTorch con CUDA se instaló correctamente.",
+                menu_updates=(self._update_cuda_menu_action,),
+                progress_attr='cuda_install_in_progress',
+            ),
+            lambda msg: self._on_install_error(
+                "CUDA", msg, progress_attr='cuda_install_in_progress'
+            ),
             "Instalando CUDA (PyTorch)...",
         )
-
-    def _on_cuda_install_finished(self):
-        self.pytorch_cuda_available = True
-        self.cuda_install_in_progress = False
-        self.status_label.setText("CUDA instalado correctamente.")
-        self._update_cuda_menu_action()
-        styled_message_box(
-            self, "Instalación completada",
-            "PyTorch con CUDA se instaló correctamente.",
-            QMessageBox.Icon.Information,
-        )
-
-    def _on_cuda_install_error(self, msg: str):
-        self.cuda_install_in_progress = False
-        self.status_label.setText("Error instalando CUDA.")
-        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
 
     def install_ytdlp(self):
         if self.ytdlp_available:
@@ -1728,24 +1715,15 @@ class AudioPlayer(QMainWindow):
             return
         self._start_worker_thread(
             YTDLPWorker(), 'ytdlp_thread', 'ytdlp_worker',
-            self._on_ytdlp_install_finished, self._on_ytdlp_install_error,
+            lambda: self._on_install_success(
+                "yt-dlp", 'ytdlp_available',
+                "yt-dlp se instaló correctamente.\n"
+                "Ahora puede usar 'Descargar MP3...'.",
+                menu_updates=(self._update_ytdlp_menu_actions,),
+            ),
+            lambda msg: self._on_install_error("yt-dlp", msg),
             "Instalando yt-dlp...",
         )
-
-    def _on_ytdlp_install_finished(self):
-        self.ytdlp_available = True
-        self.status_label.setText("yt-dlp instalado correctamente.")
-        self._update_ytdlp_menu_actions()
-        styled_message_box(
-            self, "Instalación completada",
-            "yt-dlp se instaló correctamente.\n"
-            "Ahora puede usar 'Descargar MP3...'.",
-            QMessageBox.Icon.Information,
-        )
-
-    def _on_ytdlp_install_error(self, msg: str):
-        self.status_label.setText("Error instalando yt-dlp.")
-        styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Descarga MP3 ─────────────────────────────────────────────────────
@@ -2070,9 +2048,5 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     # ── Utilidades ───────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
-    def _create_json(self, path: Path, artist: str, song: str, config: dict):
-        data = {artist: {song: {k: str(v) for k, v in config.items()}}}
-        (path / "data.json").write_text(json.dumps(data, indent=4))
-
     def close_application(self):
         QApplication.instance().quit()
