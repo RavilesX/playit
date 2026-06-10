@@ -5,7 +5,7 @@ from pathlib import Path
 from mutagen.mp3 import MP3
 from PIL import Image
 from PyQt6.QtCore import QObject, pyqtSignal
-from platform_utils import run_silent, get_python_cmd, get_hidden_subprocess_kwargs
+from platform_utils import run_silent, get_python_cmd
 
 
 class DemucsWorker(QObject):

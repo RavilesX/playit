@@ -1,6 +1,6 @@
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPoint,QDir
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox, QComboBox,QProgressBar
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox
 from resources import resource_path, bg_image,styled_message_box
 from ui_components import DialogTitleBar, StyledButtons
 import os
@@ -69,12 +69,12 @@ class AboutDialog(BaseDialog):
             QTextEdit {
                 color: #fc5490;
                 background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:0, 
+                    spread:pad, x1:0, y1:0, x2:1, y2:0,
                     stop:0 rgba(0,0,0,0.7), stop:1 rgba(0,0,0,0.1)
                 );
                 border: 0px;
                 padding-top: 2px;
-                font-size: 16px;                                
+                font-size: 16px;
             }
         """)
         return text_edit
@@ -103,7 +103,7 @@ class AboutDialog(BaseDialog):
         <center><img src="{version_path}"></center>
         <p>Reproductor de Audio que permite separación de pistas usando Demucs.</p>
         <sub>ESTE SOFTWARE SE PROPORCIONA 'TAL CUAL', SIN GARANTÍAS DE NINGÚN TIPO, YA SEAN EXPRESAS O IMPLÍCITAS, INCLUYENDO, PERO NO LIMITADO A, GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO, LOS AUTORES O COLABORADORES SERÁN RESPONSABLES DE DAÑOS DIRECTOS, INDIRECTOS, INCIDENTALES, ESPECIALES, EJEMPLARES O CONSECUENTES (INCLUYENDO, PERO NO LIMITADO A, LA ADQUISICIÓN DE BIENES O SERVICIOS SUSTITUTOS; LA PÉRDIDA DE USO, DATOS O BENEFICIOS; O LA INTERRUPCIÓN DEL NEGOCIO) DE CUALQUIER MANERA CAUSADOS Y BAJO CUALQUIER TEORÍA DE RESPONSABILIDAD, YA SEA POR CONTRATO, RESPONSABILIDAD ESTRICTA O AGRAVIO (INCLUYENDO NEGLIGENCIA O DE OTRA MANERA) QUE SURJA DE CUALQUIER FORMA DEL USO DE ESTE SOFTWARE, INCLUSO SI SE HA AVISADO DE LA POSIBILIDAD DE TALES DAÑOS.</sub>
-        <p>Desarrollado por: RavilesX</p><p>Email: ravilesx@gmail.com</p>      
+        <p>Desarrollado por: RavilesX</p><p>Email: ravilesx@gmail.com</p>
         """
 
 
@@ -184,12 +184,12 @@ class QueueDialog(BaseDialog):
             #queue_text {
                 color: #7E54AF;
                 background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:0, 
+                    spread:pad, x1:0, y1:0, x2:1, y2:0,
                     stop:0 rgba(0,0,0,0.5), stop:1 rgba(0,0,0,0.1)
                 );
                 border: 0px;
                 padding-top: 2px;
-                font-size: 16px;                                
+                font-size: 16px;
             }
         """)
 

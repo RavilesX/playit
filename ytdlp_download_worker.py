@@ -28,7 +28,7 @@ class YTDLPDownloadWorker(QObject):
                 return message
 
         lines = stderr.strip().split('\n')
-        relevant = [l for l in lines if 'ERROR' in l or 'WARNING' in l]
+        relevant = [ln for ln in lines if 'ERROR' in ln or 'WARNING' in ln]
         if relevant:
             return "Error al descargar:\n" + "\n".join(relevant[-3:])
         return f"Error en yt-dlp:\n{stderr[:300]}..."

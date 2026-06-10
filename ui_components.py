@@ -198,7 +198,7 @@ class DialogTitleBar(TitleBar):
                                 border: 0px;
                                 padding: 0px 0px;
                                 border-radius:12px
-                            }                    
+                            }
                             #close_btn:hover { background: #E81123; }
                         """
         self.setStyleSheet(btn_style)
@@ -241,19 +241,4 @@ class StyledButtons(QWidget):
 
     def setEnabled(self, on: bool):
         self.yes_btn.setEnabled(on)
-        # self.no_btn.setEnabled(on)
         bg_image(self.yes_btn, self._yes_normal if on else self._yes_disabled)
-        # bg_image(self.no_btn, self._no_normal if on else self._no_disabled)
-
-
-class StyledButton(QPushButton):
-    def __init__(self, parent=None, normal_png: str = "", disabled_png: str = ""):
-        super().__init__(parent)
-        self.setFixedSize(70, 70)
-        self._normal   = normal_png
-        self._disabled = disabled_png if disabled_png else normal_png
-        bg_image(self, self._normal)
-
-    def setEnabled(self, on: bool):
-        super().setEnabled(on)
-        bg_image(self, self._normal if on else self._disabled)

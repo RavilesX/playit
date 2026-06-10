@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('images', 'images'), ('estilos.css', '.'), ('lazy_loading_config.json', '.')],
+    datas=[('images', 'images'), ('estilos.css', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
