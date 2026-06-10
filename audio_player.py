@@ -391,6 +391,10 @@ class AudioPlayer(QMainWindow):
             super().keyPressEvent(event)
 
     def closeEvent(self, event):
+        # Detener streams de audio y carga en curso antes del teardown:
+        # streams vivos de PortAudio durante el cierre causan segfault
+        self._control_channels('stop')
+        self.lazy_playlist.stop_loading()
         if self.playlist_dock.isVisible():
             self.playlist_dock.close()
         super().closeEvent(event)
