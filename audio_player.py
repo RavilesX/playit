@@ -171,6 +171,18 @@ class AudioPlayer(QMainWindow):
         # Diálogos
         self.split_dialog = None
 
+        # Atributos creados dinámicamente (setattr) en track_buttons() e
+        # init_menu(); declarados aquí para el type checker
+        self.drums_btn: QPushButton
+        self.vocals_btn: QPushButton
+        self.bass_btn: QPushButton
+        self.other_btn: QPushButton
+        self.install_python_action: QAction
+        self.install_vc_action: QAction
+        self.install_ffmpeg_action: QAction
+        self.install_demucs_action: QAction
+        self.install_cuda_action: QAction
+
         # Caché de status
         self._last_stats_update = 0.0
         self._cached_stats: dict = {"total_cached_items": 0}
@@ -420,8 +432,11 @@ class AudioPlayer(QMainWindow):
         super().closeEvent(event)
 
     def center(self):
+        screen = self.screen()
+        if screen is None:
+            return
         frame = self.frameGeometry()
-        frame.moveCenter(self.screen().availableGeometry().center())
+        frame.moveCenter(screen.availableGeometry().center())
         self.move(frame.topLeft())
 
     # ──────────────────────────────────────────────────────────────────────
@@ -740,18 +755,21 @@ class AudioPlayer(QMainWindow):
 
     def highlight_current_song(self):
         self.clear_song_highlight()
-        if 0 <= self.current_index < self.playlist_widget.count():
-            item = self.playlist_widget.item(self.current_index)
-            font = item.font()
-            font.setItalic(True)
-            item.setFont(font)
-            item.setForeground(QColor("black"))
-            item.setBackground(QColor("#eea1cd"))
-            self.playlist_widget.setCurrentItem(item)
+        item = self.playlist_widget.item(self.current_index)
+        if item is None:
+            return
+        font = item.font()
+        font.setItalic(True)
+        item.setFont(font)
+        item.setForeground(QColor("black"))
+        item.setBackground(QColor("#eea1cd"))
+        self.playlist_widget.setCurrentItem(item)
 
     def clear_song_highlight(self):
         for i in range(self.playlist_widget.count()):
             item = self.playlist_widget.item(i)
+            if item is None:
+                continue
             font = item.font()
             font.setItalic(False)
             item.setFont(font)
@@ -772,6 +790,8 @@ class AudioPlayer(QMainWindow):
     def toggle_mute(self):
         """Maneja el clic de cualquier botón de mute de pista."""
         sender = self.sender()
+        if not isinstance(sender, QPushButton):
+            return
         btn_to_track = {
             self.drums_btn: "drums", self.vocals_btn: "vocals",
             self.bass_btn: "bass", self.other_btn: "other",
@@ -911,9 +931,7 @@ class AudioPlayer(QMainWindow):
     def setup_button(self, button: QPushButton, object_name: str, icon_name: str):
         button.setObjectName(object_name)
         button.setIconSize(QSize(120, 120))
-        button._icon_path = f'images/main_window/icons01/{icon_name}.png'
-        button._icon_disabled = f'images/main_window/icons01/no_{icon_name}.png'
-        self._lazy_load_icon(button, False)
+        self._lazy_load_icon(button, icon_name, muted=False)
         button.setCheckable(True)
         button.clicked.connect(self.toggle_mute)
 
@@ -925,9 +943,11 @@ class AudioPlayer(QMainWindow):
             lambda v, t=track_name: self.set_individual_volume(t, v)
         )
 
-    def _lazy_load_icon(self, btn: QPushButton, muted: bool):
-        path = btn._icon_disabled if muted else btn._icon_path
-        icon = self.lazy_images.load_icon_cached(resource_path(path), (120, 120))
+    def _lazy_load_icon(self, btn: QPushButton, icon_name: str, muted: bool):
+        name = f'no_{icon_name}' if muted else icon_name
+        icon = self.lazy_images.load_icon_cached(
+            resource_path(f'images/main_window/icons01/{name}.png'), (120, 120)
+        )
         btn.setIcon(icon)
 
     def enable_disable_buttons(self, state: bool):
@@ -947,7 +967,7 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     # ── Playlist ─────────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
-    def load_folder(self, path: str = None):
+    def load_folder(self, path: str | None = None):
         if not path:
             from os.path import expanduser
             path = QFileDialog.getExistingDirectory(
@@ -1760,10 +1780,14 @@ class AudioPlayer(QMainWindow):
     # ── Menú ─────────────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
     def init_menu(self):
+        # Los asserts descartan los "| None" de los stubs de PyQt6: en un
+        # QMainWindow estos menús siempre se crean
         menu = self.menuBar()
+        assert menu is not None
         file_menu = menu.addMenu("Archivo")
         options_menu = menu.addMenu("Opciones")
         help_menu = menu.addMenu("Ayuda")
+        assert file_menu and options_menu and help_menu
 
         # Archivo
         load_action = QAction("Seleccionar Carpeta", self)
@@ -1773,6 +1797,7 @@ class AudioPlayer(QMainWindow):
 
         # Playlists
         playlist_menu = file_menu.addMenu("Playlists")
+        assert playlist_menu is not None
         load_mlst_action = QAction("Cargar playlist...", self)
         load_mlst_action.triggered.connect(self.load_playlist_mlst)
         playlist_menu.addAction(load_mlst_action)
@@ -1818,6 +1843,7 @@ class AudioPlayer(QMainWindow):
         options_menu.addAction(self.search_action)
 
         lyrics_menu = options_menu.addMenu("Modificar Lyrics")
+        assert lyrics_menu is not None
         self.advance_action = QAction(">> Mostrar Después 0.5s", self)
         self.advance_action.setShortcut("Ctrl+Shift+Right")
         self.advance_action.triggered.connect(lambda: self.adjust_lyrics_timing(0.5))
@@ -1843,6 +1869,7 @@ class AudioPlayer(QMainWindow):
 
         # Dependencias
         deps_menu = options_menu.addMenu("Dependencias")
+        assert deps_menu is not None
         dep_specs = [
             ("install_python_action", "Instalar Python", self.install_python,
              not self.python_available),
@@ -2049,4 +2076,6 @@ class AudioPlayer(QMainWindow):
     # ── Utilidades ───────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
     def close_application(self):
-        QApplication.instance().quit()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()

@@ -11,7 +11,7 @@ from pathlib import Path
 class BaseDialog(QDialog):
     def __init__(self, parent=None, title: str = "", size: tuple[int, int] = (400, 300)):
         super().__init__(parent)
-        self.parent = parent
+        self.parent_window = parent
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setWindowTitle(title)
         self.setFixedSize(*size)
@@ -20,19 +20,19 @@ class BaseDialog(QDialog):
 
     def _setup_ui(self):
         self._create_title_bar()
-        self.layout = QVBoxLayout()
-        self.layout.addWidget(self.title_bar)
-        self.setLayout(self.layout)
+        self.main_layout = QVBoxLayout()
+        self.main_layout.addWidget(self.title_bar)
+        self.setLayout(self.main_layout)
 
     def _create_title_bar(self):
         self.title_bar = DialogTitleBar(self)
         self.title_bar.title.setText(self.windowTitle())
 
     def _center(self):
-        if not self.parent:
+        if not self.parent_window:
             return
 
-        parent_geo = self.parent.geometry()
+        parent_geo = self.parent_window.geometry()
         x = (parent_geo.width() - self.width()) // 2
         y = (parent_geo.height() - self.height()) // 2
         self.move(QPoint(x, y))
@@ -51,12 +51,12 @@ class AboutDialog(BaseDialog):
         paypal_btn = self._create_paypal_button()
 
         # Layout
-        self.layout.addWidget(text_edit)
-        self.layout.addWidget(
+        self.main_layout.addWidget(text_edit)
+        self.main_layout.addWidget(
             QLabel("Se aceptan donaciones"),
             alignment=Qt.AlignmentFlag.AlignCenter
         )
-        self.layout.addWidget(paypal_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.main_layout.addWidget(paypal_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def _create_text_display(self) -> QTextEdit:
         version_path = resource_path('images/main_window/version.png')
@@ -124,8 +124,8 @@ class SearchDialog(BaseDialog):
         btn_layout = self._create_button_layout()
 
         # Layout
-        self.layout.addWidget(self.search_text)
-        self.layout.addLayout(btn_layout)
+        self.main_layout.addWidget(self.search_text)
+        self.main_layout.addLayout(btn_layout)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -193,7 +193,7 @@ class QueueDialog(BaseDialog):
             }
         """)
 
-        self.layout.addWidget(queue_edit)
+        self.main_layout.addWidget(queue_edit)
 
     def _generate_queue_html(self, queue: list) -> str:
         html = """
@@ -231,14 +231,14 @@ class SplitDialog(BaseDialog):
         btn_layout = self._create_action_buttons()
 
         # Layout
-        self.layout.addWidget(file_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.layout.addWidget(self.file_path)
-        self.layout.addWidget(extract_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.layout.addWidget(QLabel("Artista*"))
-        self.layout.addWidget(self.artist)
-        self.layout.addWidget(QLabel("Canción*"))
-        self.layout.addWidget(self.song)
-        self.layout.addLayout(btn_layout)
+        self.main_layout.addWidget(file_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.main_layout.addWidget(self.file_path)
+        self.main_layout.addWidget(extract_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.main_layout.addWidget(QLabel("Artista*"))
+        self.main_layout.addWidget(self.artist)
+        self.main_layout.addWidget(QLabel("Canción*"))
+        self.main_layout.addWidget(self.song)
+        self.main_layout.addLayout(btn_layout)
 
         self._setup_validation()
 
@@ -398,9 +398,9 @@ class DownloadDialog(BaseDialog):
         self.buttons.yes_btn.clicked.connect(self._accept)
         self.buttons.no_btn.clicked.connect(self.reject)
 
-        self.layout.addWidget(label)
-        self.layout.addWidget(self.url_edit)
-        self.layout.addWidget(self.buttons, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.main_layout.addWidget(label)
+        self.main_layout.addWidget(self.url_edit)
+        self.main_layout.addWidget(self.buttons, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def _setup_validation(self):
         self.url_edit.textChanged.connect(self._validate_url)

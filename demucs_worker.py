@@ -63,6 +63,8 @@ class DemucsWorker(QObject):
     def _extract_cover(self):
         try:
             audio = MP3(self.src_path)
+            if not audio.tags:
+                return
             for tag in audio.tags.values():
                 if tag.FrameID == 'APIC':
                     im = Image.open(io.BytesIO(tag.data))

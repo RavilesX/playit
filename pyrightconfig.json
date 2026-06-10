@@ -1,0 +1,7 @@
+{
+    "typeCheckingMode": "standard",
+    "venvPath": ".",
+    "venv": "venv",
+    "exclude": ["venv", "build", "dist", "music_library"],
+    "reportIncompatibleMethodOverride": "none"
+}

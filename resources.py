@@ -7,7 +7,8 @@ from typing import Union
 
 def resource_path(relative_path: str) -> str:
     try:
-        base_path = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path.cwd()
+        meipass = getattr(sys, '_MEIPASS', None)  # definido por PyInstaller
+        base_path = Path(meipass) if meipass else Path.cwd()
         path = base_path / relative_path
 
         if not path.exists():
@@ -60,7 +61,7 @@ def styled_message_box(
 def bg_image(
     widget: Union[QWidget, QAbstractButton, QLabel],
     image_path: str,
-    use_background: bool = None,
+    use_background: Union[bool, None] = None,
     **css_properties,
 ) -> bool:
     try:
@@ -78,7 +79,8 @@ def bg_image(
         parts = [f"{prop}: url({qt_path});"]
         parts.extend(f"{k}: {v};" for k, v in css_properties.items())
 
-        class_name = widget.metaObject().className()
+        meta = widget.metaObject()
+        class_name = meta.className() if meta else type(widget).__name__
         widget.setStyleSheet(f"{class_name} {{ {' '.join(parts)} }}")
 
         if isinstance(widget, QLabel):

@@ -8,10 +8,10 @@ from resources import resource_path,bg_image
 class TitleBar(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
-        self.parent = parent
+        self.parent_window = parent
         self.setFixedHeight(35)
-        self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(5, 0, 5, 0)
+        self.bar_layout = QHBoxLayout(self)
+        self.bar_layout.setContentsMargins(5, 0, 5, 0)
 
         # Título
         self.title = QLabel("Play It")
@@ -46,39 +46,39 @@ class TitleBar(QWidget):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         # Conexiones
-        self.min_btn.clicked.connect(self.parent.showMinimized)
+        self.min_btn.clicked.connect(self.parent_window.showMinimized)
         self.max_btn.clicked.connect(self.toggle_maximize)
-        self.close_btn.clicked.connect(self.parent.close)
+        self.close_btn.clicked.connect(self.parent_window.close)
 
         # Añadir elementos al layout
-        self.layout.addWidget(self.title)
-        self.layout.addStretch()
-        self.layout.addWidget(self.min_btn)
-        self.layout.addWidget(self.max_btn)
-        self.layout.addWidget(self.close_btn)
+        self.bar_layout.addWidget(self.title)
+        self.bar_layout.addStretch()
+        self.bar_layout.addWidget(self.min_btn)
+        self.bar_layout.addWidget(self.max_btn)
+        self.bar_layout.addWidget(self.close_btn)
 
         # Variables para arrastrar ventana
         self.draggable = True
         self.drag_position = QPoint()
 
     def toggle_maximize(self):
-        if self.parent.isMaximized():
-            self.parent.showNormal()
+        if self.parent_window.isMaximized():
+            self.parent_window.showNormal()
             self.max_btn.setIcon(QIcon(resource_path('images/main_window/max.png')))
             self.max_btn.setIconSize(QSize(16, 16))
         else:
-            self.parent.showMaximized()
+            self.parent_window.showMaximized()
             self.max_btn.setIcon(QIcon(resource_path('images/main_window/rest.png')))
             self.max_btn.setIconSize(QSize(16, 16))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.draggable:
-            self.drag_position = event.globalPosition().toPoint() - self.parent.frameGeometry().topLeft()
+            self.drag_position = event.globalPosition().toPoint() - self.parent_window.frameGeometry().topLeft()
             event.accept()
 
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton and self.draggable:
-            self.parent.move(event.globalPosition().toPoint() - self.drag_position)
+            self.parent_window.move(event.globalPosition().toPoint() - self.drag_position)
             event.accept()
 
 
@@ -131,7 +131,7 @@ class CustomDial(QDial):
 class SizeGrip(QWidget):
     def __init__(self, parent, position):
         super().__init__(parent)
-        self.parent = parent
+        self.parent_window = parent
         self.position = position
         self.setFixedSize(8, 8)
         self.setCursor(self.get_cursor())
@@ -151,8 +151,8 @@ class SizeGrip(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.mouse_pos = event.globalPosition().toPoint()
-            self.window_pos = self.parent.pos()
-            self.window_size = self.parent.size()
+            self.window_pos = self.parent_window.pos()
+            self.window_size = self.parent_window.size()
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -177,7 +177,7 @@ class SizeGrip(QWidget):
             elif self.position == "bottom_right":
                 new_rect.adjust(0, 0, delta.x(), delta.y())
 
-            self.parent.setGeometry(new_rect.normalized())
+            self.parent_window.setGeometry(new_rect.normalized())
             event.accept()
 
 

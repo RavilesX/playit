@@ -249,7 +249,7 @@ class LazyImageManager:
 
         return self.cache.get(cache_key, loader)
 
-    def load_icon_cached(self, path: str, size: tuple = None) -> QIcon:
+    def load_icon_cached(self, path: str, size: Optional[tuple] = None) -> QIcon:
         """Carga iconos con cache. Solo debe llamarse desde el hilo de la GUI."""
         cache_key = f"icon_{path}_{size}"
 
@@ -529,7 +529,7 @@ class LazyPlaylistLoader(QObject):
 
     def is_loading(self) -> bool:
         """Verifica si está cargando actualmente"""
-        return self.loading_thread and self.loading_thread.is_alive()
+        return self.loading_thread is not None and self.loading_thread.is_alive()
 
     def get_loading_stats(self) -> dict:
         """Obtiene estadísticas de la carga"""

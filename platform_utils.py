@@ -14,7 +14,9 @@ IS_MAC = sys.platform == 'darwin'
 # ── Subprocess helpers ────────────────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────
 def get_hidden_subprocess_kwargs() -> dict:
-    if IS_WINDOWS:
+    # sys.platform (no IS_WINDOWS): permite al type checker reconocer
+    # los atributos de subprocess que solo existen en Windows
+    if sys.platform == 'win32':
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         si.wShowWindow = subprocess.SW_HIDE
