@@ -41,6 +41,10 @@ class TitleBar(QWidget):
         self.setStyleSheet(estilacho)
         self.close_btn.setObjectName("close_btn")
 
+        # Sin foco por teclado: evita que Enter active minimizar/maximizar/cerrar
+        for btn in (self.min_btn, self.max_btn, self.close_btn):
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
         # Conexiones
         self.min_btn.clicked.connect(self.parent.showMinimized)
         self.max_btn.clicked.connect(self.toggle_maximize)

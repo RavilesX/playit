@@ -155,17 +155,6 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
 }
 
 
-p{
-    color: red;
-    font-size: 18px;
-    animation: typing 2s steps(20) infinite alternate-reverse;
-}
-
-@keyframes typing{
-    from{
-        width: 0ch;
-    }
-}
 
 QLabel{
     color: white;
@@ -585,14 +574,6 @@ QCheckBox {
 QDial {
     background-color: #ffffff;
     border-radius: 15px;
-}
-
-QLabel {
-    transition: background-color 50ms ease;
-}
-
-QLabel[accessibleName="led"] {
-    box-shadow: 0 2px 4px blue;
 }
 
 QLineEdit[mandatory="true"] {

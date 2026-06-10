@@ -551,8 +551,11 @@ class LazyPlaylistLoader(QObject):
     """Cargador de playlist con lazy loading"""
 
     playlist_updated = pyqtSignal(dict)  # Emite cuando se carga una canción
+    playlist_batch_updated = pyqtSignal(list)  # Emite lotes de canciones
     loading_finished = pyqtSignal()
     loading_progress = pyqtSignal(int, int)  # actual, total
+
+    BATCH_SIZE = 50
 
     def __init__(self):
         super().__init__()
@@ -584,6 +587,8 @@ class LazyPlaylistLoader(QObject):
                     #print("⚠️ No se encontraron archivos JSON en la carpeta")
                     self.loading_finished.emit()
                     return
+
+                batch = []
 
                 for json_file in json_files:
                     if self._should_stop:
@@ -632,11 +637,12 @@ class LazyPlaylistLoader(QObject):
                                 }
 
                                 #print(f"🎵 Canción encontrada: {artist} - {song}")
-                                self.playlist_updated.emit(song_info)
+                                batch.append(song_info)
                                 songs_found += 1
 
-                                # Pequeña pausa para no saturar la UI
-                                time.sleep(0.001)
+                                if len(batch) >= self.BATCH_SIZE:
+                                    self.playlist_batch_updated.emit(batch)
+                                    batch = []
 
                     except json.JSONDecodeError as e:
                         #print(f"❌ Error JSON en {json_file}: {e}")
@@ -644,6 +650,9 @@ class LazyPlaylistLoader(QObject):
                     except Exception as e:
                         #print(f"❌ Error procesando {json_file}: {e}")
                         continue
+
+                if batch:
+                    self.playlist_batch_updated.emit(batch)
 
                 #print(f"✅ Carga completada. Canciones encontradas: {songs_found}")
 

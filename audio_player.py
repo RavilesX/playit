@@ -1,5 +1,6 @@
 import re
 import threading
+import queue
 from pathlib import Path
 import json
 from datetime import datetime
@@ -11,6 +12,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
     QPushButton, QSlider, QStatusBar, QMessageBox,
     QFrame, QListWidgetItem, QWidget, QFileDialog,
+    QAbstractItemView,
 )
 import requests
 from urllib.parse import quote
@@ -33,7 +35,7 @@ from ytdlp_download_worker import YTDLPDownloadWorker
 from demucs_install_worker import DemucsInstallWorker
 from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
-from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog
+from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -103,11 +105,22 @@ class AudioPlayer(QMainWindow):
     def _initialize_state_variables(self):
         # Playlist
         self.playlist: list[dict] = []
+        self._playlist_keys: set[tuple[str, str]] = set()
         self.current_index = -1
         self.playback_state = "Detenido"
         self.current_channels: list = []
         self._repeat = False
         self._current_mlst_path = None
+
+        # Búsqueda en playlist
+        self._search_query = ""
+        self._search_matches: list[int] = []
+        self._search_pos = -1
+
+        # Cola de letras: un solo worker en segundo plano para no saturar
+        # red/CPU al cargar playlists grandes
+        self._lyrics_queue: queue.Queue = queue.Queue()
+        self._lyrics_worker_thread = None
 
         # Cola Demucs
         self.demucs_queue: list[dict] = []
@@ -264,6 +277,8 @@ class AudioPlayer(QMainWindow):
         self.playlist_widget = QListWidget()
         self.playlist_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.playlist_widget.setFixedWidth(500)
+        self.playlist_widget.setUniformItemSizes(True)
+        self._audio_icon = QIcon(resource_path('images/main_window/audio_icon.png'))
         self.playlist_dock.setWidget(self.playlist_widget)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.playlist_dock)
 
@@ -328,7 +343,7 @@ class AudioPlayer(QMainWindow):
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
 
     def _connect_lazy_loading_signals(self):
-        self.lazy_playlist.playlist_updated.connect(self._on_song_loaded)
+        self.lazy_playlist.playlist_batch_updated.connect(self._on_songs_loaded)
         self.lazy_playlist.loading_finished.connect(self._on_playlist_loaded)
         self.cover_loaded.connect(self._handle_cover_loaded)
         self.lyrics_loaded.connect(self._handle_lyrics_loaded)
@@ -388,22 +403,28 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     # ── Lazy loading callbacks ───────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
-    def _on_song_loaded(self, song_data: dict):
-        if any(t['artist'] == song_data['artist'] and t['song'] == song_data['song']
-               for t in self.playlist):
-            return
+    def _on_songs_loaded(self, batch: list):
+        self.playlist_widget.setUpdatesEnabled(False)
+        try:
+            for song_data in batch:
+                key = (song_data['artist'], song_data['song'])
+                if key in self._playlist_keys:
+                    continue
 
-        self.playlist.append(song_data)
-        item = QListWidgetItem(f"{song_data['artist']} - {song_data['song']}")
-        item.setIcon(QIcon(resource_path('images/main_window/audio_icon.png')))
-        self.playlist_widget.addItem(item)
+                self._playlist_keys.add(key)
+                self.playlist.append(song_data)
+                item = QListWidgetItem(f"{song_data['artist']} - {song_data['song']}")
+                item.setIcon(self._audio_icon)
+                self.playlist_widget.addItem(item)
 
-        if len(self.playlist) == 1:
+                self._check_and_fetch_lyrics_async(
+                    song_data['path'], song_data['artist'], song_data['song']
+                )
+        finally:
+            self.playlist_widget.setUpdatesEnabled(True)
+
+        if self.playlist and not self.prev_btn.isEnabled():
             self._set_playback_buttons_enabled(True)
-
-        self._check_and_fetch_lyrics_async(
-            song_data['path'], song_data['artist'], song_data['song']
-        )
 
     def _on_playlist_loaded(self):
         self.status_label.setText(f"Playlist cargada: {len(self.playlist)} canciones")
@@ -920,13 +941,13 @@ class AudioPlayer(QMainWindow):
     def clear_playlist(self):
         self.stop_playback()
         self.playlist.clear()
+        self._playlist_keys.clear()
         self.playlist_widget.clear()
         self.current_index = -1
         self._set_playback_buttons_enabled(False)
         self.stop_btn.setEnabled(False)
 
     def scan_folder(self, path: Path):
-        icon = QIcon(resource_path('images/main_window/audio_icon.png'))
         for json_file in path.rglob("*.json"):
             try:
                 with open(json_file, "r", encoding="utf-8") as f:
@@ -934,12 +955,12 @@ class AudioPlayer(QMainWindow):
                 dir_path = json_file.parent
                 for artist, songs in data.items():
                     for song in songs:
-                        if any(t['artist'] == artist and t['song'] == song
-                               for t in self.playlist):
+                        if (artist, song) in self._playlist_keys:
                             continue
+                        self._playlist_keys.add((artist, song))
                         self.playlist.append({"artist": artist, "song": song, "path": dir_path})
                         item = QListWidgetItem(f"{artist} - {song}")
-                        item.setIcon(icon)
+                        item.setIcon(self._audio_icon)
                         self.playlist_widget.addItem(item)
                         if not self.prev_btn.isEnabled():
                             self._set_playback_buttons_enabled(True)
@@ -956,7 +977,8 @@ class AudioPlayer(QMainWindow):
         for item in self.playlist_widget.selectedItems():
             row = self.playlist_widget.row(item)
             self.playlist_widget.takeItem(row)
-            del self.playlist[row]
+            song = self.playlist.pop(row)
+            self._playlist_keys.discard((song['artist'], song['song']))
         self.update_status()
 
     def save_playlist_mlst(self):
@@ -1028,31 +1050,34 @@ class AudioPlayer(QMainWindow):
                 )
                 return
 
-            icon = QIcon(resource_path('images/main_window/audio_icon.png'))
             added = 0
-            for song in songs:
-                artist = song.get("artist", "")
-                title = song.get("song", "")
-                path = song.get("path", "")
+            self.playlist_widget.setUpdatesEnabled(False)
+            try:
+                for song in songs:
+                    artist = song.get("artist", "")
+                    title = song.get("song", "")
+                    path = song.get("path", "")
 
-                if not all([artist, title, path]):
-                    continue
+                    if not all([artist, title, path]):
+                        continue
 
-                if any(t['artist'] == artist and t['song'] == title
-                       for t in self.playlist):
-                    continue
+                    if (artist, title) in self._playlist_keys:
+                        continue
 
-                song_data = {
-                    "artist": artist,
-                    "song": title,
-                    "path": Path(path),
-                }
-                self.playlist.append(song_data)
-                item = QListWidgetItem(f"{artist} - {title}")
-                item.setIcon(icon)
-                self.playlist_widget.addItem(item)
-                self._check_and_fetch_lyrics_async(path, artist, title)
-                added += 1
+                    song_data = {
+                        "artist": artist,
+                        "song": title,
+                        "path": Path(path),
+                    }
+                    self._playlist_keys.add((artist, title))
+                    self.playlist.append(song_data)
+                    item = QListWidgetItem(f"{artist} - {title}")
+                    item.setIcon(self._audio_icon)
+                    self.playlist_widget.addItem(item)
+                    self._check_and_fetch_lyrics_async(path, artist, title)
+                    added += 1
+            finally:
+                self.playlist_widget.setUpdatesEnabled(True)
 
             if added and not self.prev_btn.isEnabled():
                 self._set_playback_buttons_enabled(True)
@@ -1189,19 +1214,34 @@ class AudioPlayer(QMainWindow):
     # ── Letras async ─────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
     def _check_and_fetch_lyrics_async(self, dir_path, artist, song):
-        def worker():
-            lrc_path = Path(dir_path) / "lyrics.lrc"
-            default_text = "Letras no encontradas, revisa datos de artista/canción"
-            needs_update = not lrc_path.exists()
-            if not needs_update:
-                try:
-                    needs_update = default_text in lrc_path.read_text(encoding="utf-8")
-                except Exception:
-                    needs_update = True
-            if needs_update:
-                self._fetch_lyrics_from_api(artist, song, Path(dir_path))
+        self._lyrics_queue.put((dir_path, artist, song))
+        if self._lyrics_worker_thread is None or not self._lyrics_worker_thread.is_alive():
+            self._lyrics_worker_thread = threading.Thread(
+                target=self._lyrics_queue_worker, daemon=True
+            )
+            self._lyrics_worker_thread.start()
 
-        threading.Thread(target=worker, daemon=True).start()
+    def _lyrics_queue_worker(self):
+        while True:
+            try:
+                dir_path, artist, song = self._lyrics_queue.get(timeout=5)
+            except queue.Empty:
+                return
+            try:
+                lrc_path = Path(dir_path) / "lyrics.lrc"
+                default_text = "Letras no encontradas, revisa datos de artista/canción"
+                needs_update = not lrc_path.exists()
+                if not needs_update:
+                    try:
+                        needs_update = default_text in lrc_path.read_text(encoding="utf-8")
+                    except Exception:
+                        needs_update = True
+                if needs_update:
+                    self._fetch_lyrics_from_api(artist, song, Path(dir_path))
+            except Exception:
+                pass
+            finally:
+                self._lyrics_queue.task_done()
 
     def _normalize_text(self, text: str) -> str:
         normalized = unicodedata.normalize('NFKD', text.lower())
@@ -1790,6 +1830,11 @@ class AudioPlayer(QMainWindow):
         self.show_playlist_action.triggered.connect(self._toggle_playlist_visibility)
         options_menu.addAction(self.show_playlist_action)
 
+        self.search_action = QAction("Buscar canción...", self)
+        self.search_action.setShortcut("Ctrl+F")
+        self.search_action.triggered.connect(self.show_search_dialog)
+        options_menu.addAction(self.search_action)
+
         lyrics_menu = options_menu.addMenu("Modificar Lyrics")
         self.advance_action = QAction(">> Mostrar Después 0.5s", self)
         self.advance_action.setShortcut("Ctrl+Shift+Right")
@@ -1978,6 +2023,45 @@ class AudioPlayer(QMainWindow):
         dialog = QueueDialog(self, parent=self)
         bg_image(dialog, 'images/split_dialog/split.png')
         dialog.exec()
+
+    def show_search_dialog(self):
+        self._search_query = ""
+        self._search_matches = []
+        self._search_pos = -1
+        dialog = SearchDialog(self)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        dialog.search_requested.connect(self._search_playlist)
+        dialog.exec()
+        # Foco a la playlist al cerrar: Enter reproduce la canción seleccionada
+        if self._search_matches:
+            self.playlist_widget.setFocus()
+
+    def _search_playlist(self, text: str):
+        query = self._normalize_text(text)
+        if query != self._search_query:
+            self._search_query = query
+            self._search_matches = [
+                i for i, t in enumerate(self.playlist)
+                if query in self._normalize_text(f"{t['artist']} - {t['song']}")
+            ]
+            self._search_pos = -1
+
+        if not self._search_matches:
+            self.status_label.setText(f"Sin coincidencias para: {text}")
+            return
+
+        self._search_pos = (self._search_pos + 1) % len(self._search_matches)
+        row = self._search_matches[self._search_pos]
+        self.playlist_widget.setCurrentRow(row)
+        self.playlist_widget.scrollToItem(
+            self.playlist_widget.item(row),
+            QAbstractItemView.ScrollHint.PositionAtCenter,
+        )
+        song = self.playlist[row]
+        self.status_label.setText(
+            f"Coincidencia {self._search_pos + 1}/{len(self._search_matches)}: "
+            f"{song['artist']} - {song['song']}"
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Utilidades ───────────────────────────────────────────────────────

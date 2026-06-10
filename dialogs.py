@@ -117,32 +117,42 @@ class SearchDialog(BaseDialog):
     def _setup_search_ui(self):
         self.search_text = QLineEdit()
         self.search_text.setPlaceholderText("Introduce texto a buscar...")
+        # Enter siempre dispara la búsqueda, sin depender del botón default
+        self.search_text.returnPressed.connect(self._accept_search)
 
         # Buttons
-        self.btn_layout = self._create_button_layout()
+        btn_layout = self._create_button_layout()
 
         # Layout
         self.layout.addWidget(self.search_text)
-        self.layout.addLayout(self.btn_layout)
+        self.layout.addLayout(btn_layout)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.search_text.setFocus()
+        self.search_text.selectAll()
 
     def _create_button_layout(self) -> QHBoxLayout:
-        self.layout = QHBoxLayout()
+        btn_layout = QHBoxLayout()
 
         self.accept_btn = self._create_action_button(
             "aceptar_btn", "images/split_dialog/aceptar_btn.png",
             self._accept_search
         )
-        self.accept_btn.setDefault(True)
-        self.accept_btn.setAutoDefault(True)
+        # Sin default/autoDefault: evita que Enter dispare doble
+        # (returnPressed + click del botón default) o caiga en cancelar
+        self.accept_btn.setDefault(False)
+        self.accept_btn.setAutoDefault(False)
 
         self.cancel_btn = self._create_action_button(
             "cancelar_btn", "images/split_dialog/cancelar_btn.png",
             self.reject
         )
+        self.cancel_btn.setAutoDefault(False)
 
-        self.layout.addWidget(self.accept_btn)
-        self.layout.addWidget(self.cancel_btn)
-        return self.layout
+        btn_layout.addWidget(self.accept_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        return btn_layout
 
     def _create_action_button(self, obj_name: str, image_path: str, callback) -> QPushButton:
         btn = QPushButton()
@@ -153,12 +163,10 @@ class SearchDialog(BaseDialog):
         return btn
 
     def _accept_search(self):
+        # No cierra el diálogo: cada Enter avanza a la siguiente coincidencia
         text = self.search_text.text().strip()
         if text:
             self.search_requested.emit(text)
-            self.accept()
-        else:
-            self.reject()
 
 class QueueDialog(BaseDialog):
     def __init__(self, audio_player, parent=None):
