@@ -1,10 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_dynamic_libs
 
+# El hook automático de PyQt6 no recolecta los plugins de Qt cuando se
+# compila bajo Wine/Docker (necesita inicializar Qt para consultarlos y
+# falla en silencio); sin plugins/platforms/qwindows.dll el exe muere al
+# arrancar con "no Qt platform plugin could be initialized".
+# Recolección manual por filesystem, que funciona en cualquier entorno.
+_QT_PLUGIN_DIRS = ('platforms', 'styles', 'imageformats', 'iconengines')
+qt_plugins = [
+    (src, dest) for src, dest in collect_dynamic_libs('PyQt6')
+    if any(d in dest.replace('\\', '/').split('/') for d in _QT_PLUGIN_DIRS)
+]
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=qt_plugins,
     datas=[('images', 'images'), ('estilos.css', '.')],
     hiddenimports=[],
     hookspath=[],
@@ -35,4 +46,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='images/main_window/main_icon.ico',
 )

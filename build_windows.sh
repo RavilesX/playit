@@ -19,6 +19,9 @@
 # - Si se agrega una dependencia Python al proyecto, agregarla también
 #   a la lista de pip install de abajo.
 # - El warning "could not resolve 'icuuc.dll'" es benigno (PyQt6 no la usa).
+# - PlayIt.spec recolecta manualmente los plugins de Qt (qwindows.dll, etc.):
+#   el hook automático de PyInstaller no los encuentra bajo Wine y sin ellos
+#   el exe falla con "no Qt platform plugin could be initialized".
 # - Probar el exe en Windows real antes de distribuir: Wine compila bien
 #   pero no sustituye una prueba de ejecución.
 # - El binario de Linux se genera aparte, sin Docker: pyinstaller PlayIt.spec
