@@ -1277,22 +1277,34 @@ class AudioPlayer(QMainWindow):
         return ''.join(c for c in normalized if not unicodedata.combining(c))
 
     def _fetch_lyrics_from_api(self, artist: str, song: str, output_dir: Path):
+        synced = (self._search_lrclib(artist, song)
+                  or self._search_syncedlyrics(artist, song))
+        self._write_lyrics_file(output_dir, artist, song, synced)
+
+    def _search_lrclib(self, artist: str, song: str) -> str:
+        """Búsqueda primaria en LRCLIB con coincidencia exacta normalizada."""
         url = f"https://lrclib.net/api/search?q={quote(f'{artist} {song}')}"
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             norm_artist = self._normalize_text(artist)
             norm_song = self._normalize_text(song)
-            synced = ""
             for result in response.json():
                 if (self._normalize_text(result.get("artistName", "")) == norm_artist
                         and self._normalize_text(result.get("trackName", "")) == norm_song
                         and result.get("syncedLyrics")):
-                    synced = result["syncedLyrics"]
-                    break
-            self._write_lyrics_file(output_dir, artist, song, synced)
+                    return result["syncedLyrics"]
         except Exception:
-            self._write_lyrics_file(output_dir, artist, song, None)
+            pass
+        return ""
+
+    def _search_syncedlyrics(self, artist: str, song: str) -> str:
+        """Fallback multi-proveedor (NetEase, Musixmatch, etc.) con matching fuzzy."""
+        try:
+            import syncedlyrics
+            return syncedlyrics.search(f"{song} {artist}", synced_only=True) or ""
+        except Exception:
+            return ""
 
     def _write_lyrics_file(self, output_dir: Path, artist: str, song: str, lyrics):
         if not lyrics:

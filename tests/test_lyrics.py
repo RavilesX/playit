@@ -1,5 +1,7 @@
 """Tests de letras: parsing LRC, ajuste de timing, placeholder de reintento."""
 
+import pytest
+
 from audio_player import LYRICS_NOT_FOUND_TEXT
 
 LRC_EJEMPLO = """[00:01.00]<center>Primera línea</center>
@@ -46,6 +48,49 @@ class TestAjusteTiming:
         result = player._process_lines(lines, 1.0)
         assert result[0] == "sin timestamp\n"
         assert result[1].startswith("[00:06.00]")
+
+
+class TestFallbackHibrido:
+    """LRCLIB estricto primero; syncedlyrics (fuzzy) solo si LRCLIB no encuentra."""
+
+    def test_lrclib_encuentra_no_usa_fallback(self, player, tmp_path, monkeypatch):
+        monkeypatch.setattr(player, "_search_lrclib", lambda a, s: "[00:01.00]hola")
+        monkeypatch.setattr(
+            player, "_search_syncedlyrics",
+            lambda a, s: pytest.fail("No debe llamarse al fallback"),
+        )
+        player._fetch_lyrics_from_api("A", "B", tmp_path)
+        content = (tmp_path / "lyrics.lrc").read_text(encoding="utf-8")
+        assert "<center>hola</center>" in content
+
+    def test_fallback_se_usa_cuando_lrclib_falla(self, player, tmp_path, monkeypatch):
+        monkeypatch.setattr(player, "_search_lrclib", lambda a, s: "")
+        monkeypatch.setattr(
+            player, "_search_syncedlyrics", lambda a, s: "[00:02.00]mundo"
+        )
+        player._fetch_lyrics_from_api("A", "B", tmp_path)
+        content = (tmp_path / "lyrics.lrc").read_text(encoding="utf-8")
+        assert "<center>mundo</center>" in content
+        assert LYRICS_NOT_FOUND_TEXT not in content
+
+    def test_placeholder_si_ambos_fallan(self, player, tmp_path, monkeypatch):
+        monkeypatch.setattr(player, "_search_lrclib", lambda a, s: "")
+        monkeypatch.setattr(player, "_search_syncedlyrics", lambda a, s: "")
+        player._fetch_lyrics_from_api("A", "B", tmp_path)
+        content = (tmp_path / "lyrics.lrc").read_text(encoding="utf-8")
+        assert LYRICS_NOT_FOUND_TEXT in content
+
+    def test_search_syncedlyrics_tolera_paquete_ausente(self, player, monkeypatch):
+        import builtins
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "syncedlyrics":
+                raise ImportError(name)
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        assert player._search_syncedlyrics("A", "B") == ""
 
 
 class TestPlaceholderReintento:

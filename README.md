@@ -31,7 +31,7 @@ source venv/bin/activate
 
 3.- Instala las dependencias Python
 
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
 
 sudo apt install libxcb-cursor0
 
