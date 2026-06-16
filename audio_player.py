@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 from datetime import datetime
 import time
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QThread, QPoint
 from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon, QImage
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
@@ -36,6 +36,7 @@ from resources import styled_message_box, bg_image, resource_path
 from ui_components import TitleBar, CustomDial, SizeGrip
 from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
+from audio_visualizer import AudioAnalyzer, VisualizerWidget
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -228,8 +229,38 @@ class AudioPlayer(QMainWindow):
         self._create_track_controls()
         self._create_playlist_dock()
         self._setup_main_layout()
+        self._create_visualizer()
         self.init_menu()
         self.init_status_bar()
+
+    def _create_visualizer(self):
+        # Analizador en NumPy (corre en el hilo de audio); el widget pinta detrás de
+        # los controles. La señal cruza al hilo GUI de forma segura (QueuedConnection).
+        self.analyzer = AudioAnalyzer(parent=self)
+        self.visualizer = VisualizerWidget(self.main_frame)
+        self.analyzer.bars_ready.connect(self.visualizer.set_bars)
+        self.visualizer.lower()
+        QTimer.singleShot(0, self._position_visualizer)
+
+    def _toggle_visualizer(self, enabled: bool):
+        # Desactiva el DSP (no se alimenta el analizador) y oculta el widget.
+        if hasattr(self, 'analyzer'):
+            self.analyzer.enabled = enabled
+        if hasattr(self, 'visualizer'):
+            self.visualizer.clear()
+            self.visualizer.setVisible(enabled)
+
+    def _position_visualizer(self):
+        # Ocupa desde el borde superior de la barra de progreso hasta el fondo del
+        # frame: las barras suben desde abajo con altura máxima en la barra de progreso.
+        if not hasattr(self, 'visualizer'):
+            return
+        top = self.progress_song.mapTo(self.main_frame, QPoint(0, 0)).y()
+        frame_h = self.main_frame.height()
+        frame_w = self.main_frame.width()
+        height = max(0, frame_h - top - 2)
+        self.visualizer.setGeometry(2, top, frame_w - 4, height)
+        self.visualizer.lower()
 
     def _create_main_frame(self):
         self.main_frame = QFrame()
@@ -400,6 +431,7 @@ class AudioPlayer(QMainWindow):
         if hasattr(self, 'background_label'):
             self.background_label.resize(self.size())
             self._apply_background_pixmap()
+        self._position_visualizer()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -600,6 +632,10 @@ class AudioPlayer(QMainWindow):
         sr = self._track_data[0][1]
         channels = self._track_data[0][0].shape[1]
 
+        if hasattr(self, 'analyzer'):
+            self.analyzer.configure(sr)
+            self.analyzer.reset()
+
         cancel_flag = threading.Event()
         self._stream_cancel_flags = [cancel_flag]
 
@@ -641,6 +677,9 @@ class AudioPlayer(QMainWindow):
             peak = np.max(np.abs(chunk))
             if peak > 1.0:
                 chunk /= peak
+
+            if hasattr(self, 'analyzer'):
+                self.analyzer.process(chunk)
 
             try:
                 stream.write(chunk)
@@ -736,6 +775,8 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     def _update_playback_ui(self, state: str):
         self.playback_state = state
+        if state != "Activa" and hasattr(self, 'visualizer'):
+            self.visualizer.clear()
         stopped = state == "Detenido"
         self.stop_btn.setEnabled(not stopped)
         self.progress_song.setEnabled(not stopped)
@@ -1848,6 +1889,12 @@ class AudioPlayer(QMainWindow):
         self.show_playlist_action.setChecked(True)
         self.show_playlist_action.triggered.connect(self._toggle_playlist_visibility)
         options_menu.addAction(self.show_playlist_action)
+
+        self.show_visualizer_action = QAction("Visualizador de audio", self)
+        self.show_visualizer_action.setCheckable(True)
+        self.show_visualizer_action.setChecked(True)
+        self.show_visualizer_action.triggered.connect(self._toggle_visualizer)
+        options_menu.addAction(self.show_visualizer_action)
 
         self.search_action = QAction("Buscar canción...", self)
         self.search_action.setShortcut("Ctrl+F")
