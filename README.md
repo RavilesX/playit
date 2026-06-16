@@ -121,3 +121,18 @@ PlayIt es un reproductor de audio avanzado con separación de fuentes integrada 
 ├── images/                 # Recursos gráficos
 └── README.md               # Este archivo
 ```
+
+## Licencia
+
+Copyright (C) 2025-2026  Ricardo Aviles Sanders
+
+PlayIt es software libre bajo la **Licencia Pública General de GNU, versión 3 (GPLv3)**.
+Puedes redistribuirlo y/o modificarlo bajo los términos de dicha licencia. El texto
+completo está en el archivo [LICENSE](LICENSE).
+
+Esta licencia es obligatoria porque PlayIt usa **PyQt6**, distribuida bajo GPLv3 (o
+licencia comercial de Riverbank). Otras dependencias son compatibles: Demucs (MIT),
+yt-dlp (Unlicense), NumPy/SoundFile/Pillow/Mutagen (BSD/MIT). FFmpeg se invoca como
+binario externo (LGPL/GPL).
+
+Este programa se distribuye SIN NINGUNA GARANTÍA. Ver la GPLv3 para más detalles.
