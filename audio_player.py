@@ -20,7 +20,7 @@ from pathlib import Path
 import json
 from datetime import datetime
 import time
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QThread, QPoint
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QThread, QPoint, QEvent
 from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon, QImage
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
@@ -256,7 +256,17 @@ class AudioPlayer(QMainWindow):
         self.visualizer = VisualizerWidget(self.main_frame)
         self.analyzer.bars_ready.connect(self.visualizer.set_bars)
         self.visualizer.lower()
+        # El frame central se redimensiona al mostrar/ocultar el dock de la
+        # playlist sin disparar el resizeEvent de la ventana; el filtro reubica
+        # el visualizador en cada resize del frame para que ocupe todo el ancho.
+        self.main_frame.installEventFilter(self)
         QTimer.singleShot(0, self._position_visualizer)
+
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, 'main_frame', None) and \
+                event.type() == QEvent.Type.Resize:
+            self._position_visualizer()
+        return super().eventFilter(obj, event)
 
     def _toggle_visualizer(self, enabled: bool):
         # Desactiva el DSP (no se alimenta el analizador) y oculta el widget.
@@ -1081,6 +1091,44 @@ class AudioPlayer(QMainWindow):
             self._playlist_keys.discard((song['artist'], song['song']))
         self.update_status()
 
+    def sort_playlist(self, key: str = "artist", reverse: bool = False):
+        """Ordena la playlist por artista o título, preserva la canción en
+        reproducción y rehace los ítems del widget en el nuevo orden."""
+        if not self.playlist:
+            return
+
+        # Recordar la canción en reproducción para restaurar su índice
+        current_song = None
+        if 0 <= self.current_index < len(self.playlist):
+            current_song = self.playlist[self.current_index]
+
+        if key == "song":
+            sort_key = lambda s: (s['song'].lower(), s['artist'].lower())
+        else:
+            sort_key = lambda s: (s['artist'].lower(), s['song'].lower())
+        self.playlist.sort(key=sort_key, reverse=reverse)
+
+        # Rehacer los ítems del widget en el nuevo orden
+        self.playlist_widget.setUpdatesEnabled(False)
+        try:
+            self.playlist_widget.clear()
+            for song_data in self.playlist:
+                item = QListWidgetItem(f"{song_data['artist']} - {song_data['song']}")
+                item.setIcon(self._audio_icon)
+                self.playlist_widget.addItem(item)
+        finally:
+            self.playlist_widget.setUpdatesEnabled(True)
+
+        # Restaurar índice e iluminado de la canción en reproducción
+        if current_song is not None:
+            self.current_index = next(
+                i for i, s in enumerate(self.playlist) if s is current_song
+            )
+            if self.playback_state in ("Activa", "Pausada"):
+                self.highlight_current_song()
+
+        self.update_status()
+
     def save_playlist_mlst(self):
         if not self.playlist:
             styled_message_box(
@@ -1892,6 +1940,26 @@ class AudioPlayer(QMainWindow):
         clear_playlist_action = QAction("Limpiar Playlist", self)
         clear_playlist_action.triggered.connect(self.clear_playlist)
         file_menu.addAction(clear_playlist_action)
+
+        sort_menu = file_menu.addMenu("Ordenar Playlist")
+        assert sort_menu is not None
+        sort_artist_action = QAction("Por artista (A-Z)", self)
+        sort_artist_action.triggered.connect(lambda: self.sort_playlist("artist"))
+        sort_menu.addAction(sort_artist_action)
+        sort_artist_desc_action = QAction("Por artista (Z-A)", self)
+        sort_artist_desc_action.triggered.connect(
+            lambda: self.sort_playlist("artist", reverse=True)
+        )
+        sort_menu.addAction(sort_artist_desc_action)
+        sort_song_action = QAction("Por título (A-Z)", self)
+        sort_song_action.triggered.connect(lambda: self.sort_playlist("song"))
+        sort_menu.addAction(sort_song_action)
+        sort_song_desc_action = QAction("Por título (Z-A)", self)
+        sort_song_desc_action.triggered.connect(
+            lambda: self.sort_playlist("song", reverse=True)
+        )
+        sort_menu.addAction(sort_song_desc_action)
+
         file_menu.addSeparator()
 
         exit_action = QAction("&Salir", self)
