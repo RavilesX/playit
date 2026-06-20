@@ -53,6 +53,7 @@ from ui_components import TitleBar, CustomDial, SizeGrip
 from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
 from audio_visualizer import AudioAnalyzer, VisualizerWidget
+from lyrics_sync_editor import LyricsSyncDialog
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -1268,6 +1269,10 @@ class AudioPlayer(QMainWindow):
         )
         self.advance_action.setEnabled(enabled)
         self.delay_action.setEnabled(enabled)
+        if hasattr(self, 'sync_editor_action'):
+            # El editor trabaja sobre los archivos en disco: no depende del
+            # estado de reproducción, solo de que existan vocals + .lrc.
+            self.sync_editor_action.setEnabled(self._has_sync_assets())
 
     def _lyrics_has_error(self) -> bool:
         if not self.lyrics or not isinstance(self.lyrics, list):
@@ -1277,6 +1282,43 @@ class AudioPlayer(QMainWindow):
             any(kw in html.lower() for kw in error_keywords)
             for _, html in self.lyrics
         )
+
+    def _has_sync_assets(self) -> bool:
+        """True si la canción actual tiene vocals.mp3 + lyrics.lrc.
+
+        Los stems viven en <path>/separated/; el .lrc en la raíz <path>.
+        """
+        if not (0 <= self.current_index < len(self.playlist)):
+            return False
+        path = Path(self.playlist[self.current_index]["path"])
+        vocals = path / "separated" / "vocals.mp3"
+        return vocals.exists() and (path / "lyrics.lrc").exists()
+
+    def open_lyrics_sync_editor(self):
+        """Abre el editor de sincronización por onda (ventana aparte).
+
+        Pausa el audio principal antes de abrir; el diálogo es modal, así
+        que la ventana principal queda bloqueada mientras se edita.
+        """
+        if not self._has_sync_assets():
+            return
+        path = Path(self.playlist[self.current_index]["path"])
+
+        # Pausar reproducción principal para no solapar audio.
+        if self.playback_state == "Activa":
+            self._control_channels('pause')
+            self._update_playback_ui('Pausada')
+
+        dialog = LyricsSyncDialog(
+            self, path / "separated" / "vocals.mp3", path / "lyrics.lrc",
+        )
+        dialog.exec()
+
+        if dialog.saved:
+            # Invalidar cache y recargar letras editadas.
+            self.lazy_lyrics.cache.remove(f"lyrics_{path}")
+            self._handle_lyrics_loaded(self.lazy_lyrics.load_lyrics_lazy(path))
+        self.update_lyrics_menu_state()
 
     def adjust_lyrics_timing(self, offset: float):
         try:
@@ -2005,6 +2047,12 @@ class AudioPlayer(QMainWindow):
         lyrics_menu.addSeparator()
         lyrics_menu.addAction(self.increase_font_action)
         lyrics_menu.addAction(self.decrease_font_action)
+        lyrics_menu.addSeparator()
+        self.sync_editor_action = QAction("Editor de sincronización (onda)…", self)
+        self.sync_editor_action.setShortcut("Ctrl+Shift+E")
+        self.sync_editor_action.triggered.connect(self.open_lyrics_sync_editor)
+        self.sync_editor_action.setEnabled(False)
+        lyrics_menu.addAction(self.sync_editor_action)
 
         cleanup_action = QAction("Limpiar Cache", self)
         cleanup_action.triggered.connect(self.cleanup_resources_manual)
