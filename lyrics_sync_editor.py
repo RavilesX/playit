@@ -535,6 +535,23 @@ class LyricsSyncDialog(BaseDialog):
             background: #2a2a3d; color: #e6e6f0;
             border: 1px solid #7d73e8; border-radius: 4px; padding: 2px;
         }
+        QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+            background: #2a2a3d; border: none; width: 16px;
+        }
+        QDoubleSpinBox::up-arrow {
+            width: 0; height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-bottom: 6px solid #C04AD6;
+        }
+        QDoubleSpinBox::down-arrow {
+            width: 0; height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 6px solid #C04AD6;
+        }
+        QDoubleSpinBox::up-arrow:hover { border-bottom-color: #d96ce8; }
+        QDoubleSpinBox::down-arrow:hover { border-top-color: #d96ce8; }
         QCheckBox { color: #cfcfe0; background: transparent; }
     """
 
@@ -604,8 +621,8 @@ class LyricsSyncDialog(BaseDialog):
         actions.addStretch(1)
         self.save_btn = QPushButton("Guardar")
         self.cancel_btn = QPushButton("Cancelar")
-        actions.addWidget(self.save_btn)
         actions.addWidget(self.cancel_btn)
+        actions.addWidget(self.save_btn)        
         self.main_layout.addLayout(actions)
 
         # Sin foco de teclado: así la barra espaciadora nunca activa un botón
