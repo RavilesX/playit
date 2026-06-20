@@ -1250,7 +1250,14 @@ class AudioPlayer(QMainWindow):
     def update_lyrics_display(self):
         if not self.lyrics or self.playback_state != "Activa":
             return
-        current_time = self.progress_song.value() / 1000.0
+        # Posición real de reproducción (frames escritos), no el slider:
+        # el slider solo se refresca cada 1 s (self.timer), lo que provocaba
+        # hasta ~1 s de retraso respecto al editor de sincronización.
+        if self._track_data:
+            sr = self._track_data[0][1]
+            current_time = self._seek_position / sr
+        else:
+            current_time = self.progress_song.value() / 1000.0
         current_html = next_html = ""
         for i, (t, html) in enumerate(self.lyrics):
             if current_time >= t:
