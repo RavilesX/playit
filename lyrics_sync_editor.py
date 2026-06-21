@@ -39,15 +39,17 @@ import numpy as np
 import sounddevice as sd
 import soundfile as sf
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QTextOption
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollBar,
     QVBoxLayout,
@@ -289,6 +291,7 @@ class WaveformWidget(QWidget):
     edit_text_requested = pyqtSignal(int)    # doble-click sobre un bloque
     seek_requested = pyqtSignal(float)       # click pide reposicionar cursor
     view_changed = pyqtSignal()              # cambió start_pos (sincroniza scrollbar)
+    selection_changed = pyqtSignal()         # cambió el conjunto de seleccionados
 
     # Colores (estilo de la captura de Subtitle Edit)
     _C_BG = QColor(18, 22, 22)
@@ -307,7 +310,9 @@ class WaveformWidget(QWidget):
         self.px_per_sec = float(DEFAULT_PX_PER_SEC)
         self.start_pos = 0.0
         self.playback_pos = 0.0
-        self.selected = -1
+        self.selected = -1               # primario (último clicado), -1 = nada
+        self.selection: set[int] = set()  # conjunto multi-selección
+        self._anchor = -1                # ancla para rango con Shift
 
         self._drag_index: int | None = None
         self._drag_orig = 0.0
@@ -400,7 +405,7 @@ class WaveformWidget(QWidget):
             if x1 < 0 or x0 > self.width():
                 continue
             # Relleno del bloque
-            fill = self._C_BLOCK_SEL if i == self.selected else self._C_BLOCK
+            fill = self._C_BLOCK_SEL if i in self.selection else self._C_BLOCK
             p.fillRect(int(x0), 0, max(1, int(x1 - x0)), h, fill)
             # Borde de inicio (lo que se arrastra)
             p.setPen(QPen(self._C_EDGE, 2))
@@ -440,17 +445,18 @@ class WaveformWidget(QWidget):
     # ── Interacción del mouse ──────────────────────────────────────────
     def mousePressEvent(self, event):
         x = event.position().x()
+        mods = event.modifiers()
         edge = self._edge_at(x)
         if edge is not None:
             self._drag_index = edge
             self._drag_orig = self.lines[edge].start
             self._drag_start_x = x
-            self._select(edge)
+            self._apply_click_selection(edge, mods)
             return
 
         block = self._block_at(x)
         if block is not None:
-            self._select(block)
+            self._apply_click_selection(block, mods)
         # Click en cualquier punto reposiciona el cursor de reproducción.
         self.seek_requested.emit(self.x_to_sec(x))
 
@@ -482,7 +488,7 @@ class WaveformWidget(QWidget):
     def mouseDoubleClickEvent(self, event):
         block = self._block_at(event.position().x())
         if block is not None:
-            self._select(block)
+            self.select_single(block)
             self.edit_text_requested.emit(block)
 
     def wheelEvent(self, event):
@@ -491,9 +497,44 @@ class WaveformWidget(QWidget):
             step = (delta / 120.0) * WHEEL_SCROLL_SECONDS
             self.set_start_pos(self.start_pos - step)
 
-    def _select(self, index: int) -> None:
+    # ── Selección ──────────────────────────────────────────────────────
+    def _apply_click_selection(self, index: int, mods) -> None:
+        """Aplica selección según modificadores: Ctrl alterna, Shift rango."""
+        ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        if shift and self._anchor >= 0:
+            lo, hi = sorted((self._anchor, index))
+            self.selection = set(range(lo, hi + 1))
+            self.selected = index
+        elif ctrl:
+            if index in self.selection:
+                self.selection.discard(index)
+            else:
+                self.selection.add(index)
+            self.selected = index if index in self.selection else -1
+            self._anchor = index
+        else:
+            self.selection = {index}
+            self.selected = index
+            self._anchor = index
+        self.line_selected.emit(self.selected)
+        self.selection_changed.emit()
+        self.update()
+
+    def select_single(self, index: int) -> None:
+        """Selección única programática (agregar línea, buscar, etc.)."""
+        self.selection = {index}
         self.selected = index
+        self._anchor = index
         self.line_selected.emit(index)
+        self.selection_changed.emit()
+        self.update()
+
+    def clear_selection(self) -> None:
+        self.selection = set()
+        self.selected = -1
+        self._anchor = -1
+        self.selection_changed.emit()
         self.update()
 
 
@@ -605,6 +646,10 @@ class LyricsSyncDialog(BaseDialog):
         bar.addWidget(self.add_btn)
         self.del_btn = QPushButton("－ Línea")
         bar.addWidget(self.del_btn)
+        # Unir: solo activo con 2+ líneas contiguas seleccionadas.
+        self.merge_btn = QPushButton("⨝ Unir")
+        self.merge_btn.setEnabled(False)
+        bar.addWidget(self.merge_btn)
 
         # Offset global: desplaza TODAS las líneas el valor elegido.
         bar.addSpacing(12)
@@ -652,7 +697,7 @@ class LyricsSyncDialog(BaseDialog):
         # Acciones guardar / cancelar
         actions = QHBoxLayout()
         actions.setContentsMargins(6, 4, 6, 6)
-        self.hint = QLabel("Espacio: play/pausa · Supr: borrar línea · arrastra el borde de inicio · doble-click edita texto")
+        self.hint = QLabel("Espacio: play/pausa · Supr: borrar · Ctrl/Shift: multi-selección · arrastra el borde · doble-click edita")
         self.hint.setStyleSheet("color:#9aa; background: transparent; border: none;")
         actions.addWidget(self.hint)
         actions.addStretch(1)
@@ -664,7 +709,7 @@ class LyricsSyncDialog(BaseDialog):
 
         # Sin foco de teclado: así la barra espaciadora nunca activa un botón
         # por accidente y siempre llega al keyPressEvent del diálogo.
-        for btn in (self.play_btn, self.add_btn, self.del_btn,
+        for btn in (self.play_btn, self.add_btn, self.del_btn, self.merge_btn,
                     self.back_btn, self.fwd_btn, self.from_cursor_chk,
                     self.save_btn, self.cancel_btn):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -675,6 +720,8 @@ class LyricsSyncDialog(BaseDialog):
         self.play_btn.clicked.connect(self._toggle_play)
         self.add_btn.clicked.connect(self._add_line)
         self.del_btn.clicked.connect(self._delete_line)
+        self.merge_btn.clicked.connect(self._merge_lines)
+        self.waveform.selection_changed.connect(self._update_merge_state)
         self.back_btn.clicked.connect(lambda: self._shift_all(-self.offset_spin.value()))
         self.fwd_btn.clicked.connect(lambda: self._shift_all(self.offset_spin.value()))
         self.save_btn.clicked.connect(self._save)
@@ -740,18 +787,41 @@ class LyricsSyncDialog(BaseDialog):
         self.lines.append(new_line)
         self.lines.sort(key=lambda l: l.start)
         index = next(i for i, l in enumerate(self.lines) if l is new_line)
-        self.waveform.selected = index
-        self.waveform.line_selected.emit(index)
-        self.waveform.update()
+        self.waveform.select_single(index)
 
     def _delete_line(self):
-        """Elimina la línea seleccionada."""
-        i = self.waveform.selected
-        if not (0 <= i < len(self.lines)):
+        """Elimina todas las líneas seleccionadas."""
+        sel = sorted(i for i in self.waveform.selection if 0 <= i < len(self.lines))
+        if not sel:
             return
-        del self.lines[i]
-        self.waveform.selected = -1
-        self.waveform.update()
+        for i in reversed(sel):
+            del self.lines[i]
+        self.waveform.clear_selection()
+
+    def _can_merge(self) -> bool:
+        """True si hay 2+ líneas seleccionadas y son contiguas."""
+        sel = sorted(self.waveform.selection)
+        return len(sel) >= 2 and sel == list(range(sel[0], sel[-1] + 1))
+
+    def _merge_lines(self):
+        """Une líneas contiguas seleccionadas en una sola.
+
+        Conserva el timestamp de la primera; concatena los textos (sin tags,
+        unidos por espacio) y vuelve a envolver con las etiquetas del .lrc.
+        """
+        if not self._can_merge():
+            return
+        sel = sorted(self.waveform.selection)
+        start = self.lines[sel[0]].start
+        textos = [strip_tags(self.lines[i].text).strip() for i in sel]
+        merged = ' '.join(t for t in textos if t)
+        self.lines[sel[0]] = LyricLine(start, wrap_lyric(merged))
+        for i in reversed(sel[1:]):
+            del self.lines[i]
+        self.waveform.select_single(sel[0])
+
+    def _update_merge_state(self):
+        self.merge_btn.setEnabled(self._can_merge())
 
     def _shift_all(self, delta: float):
         """Adelanta (+) o retrasa (−) líneas el offset elegido.
@@ -797,8 +867,7 @@ class LyricsSyncDialog(BaseDialog):
     def _goto_line(self, index: int):
         """Selecciona la línea, mueve el cursor y centra la vista en ella."""
         line = self.lines[index]
-        self.waveform.selected = index
-        self.waveform.line_selected.emit(index)
+        self.waveform.select_single(index)
         self.waveform.playback_pos = line.start
         self.waveform.set_start_pos(line.start - self.waveform.visible_seconds / 2)
         self.waveform.update()
@@ -825,11 +894,50 @@ class LyricsSyncDialog(BaseDialog):
             self.play_btn.setText("▶")
         # Mostrar texto limpio (sin tags); reenvolver con tags al confirmar.
         clean = strip_tags(self.lines[index].text)
-        text, ok = QInputDialog.getMultiLineText(
-            self, "Editar texto", f"Línea #{index + 1}", clean,
-        )
-        if ok:
-            self.lines[index].text = wrap_lyric(text)
+
+        # Diálogo multilínea propio para poder forzar el autowrap: el texto
+        # largo se ajusta al ancho de la caja en vez de salirse en una sola
+        # línea horizontal.
+        dlg = QInputDialog(self)
+        dlg.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, True)
+        dlg.setWindowTitle("Editar texto")
+        dlg.setLabelText(f"Línea #{index + 1}")
+        dlg.setTextValue(clean)
+        editor = dlg.findChild(QPlainTextEdit)
+        if editor is not None:
+            editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+            editor.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+            editor.setMinimumWidth(360)
+
+        # Botón "Separar línea": parte el texto en el cursor. Lo de antes
+        # queda en la línea actual; lo de después forma una línea nueva con
+        # timestamp en la posición del cursor de reproducción.
+        split = {"do": False, "after": ""}
+        bbox = dlg.findChild(QDialogButtonBox)
+        if bbox is not None and editor is not None:
+            split_btn = bbox.addButton(
+                "Separar línea", QDialogButtonBox.ButtonRole.ActionRole,
+            )
+
+            def _do_split():
+                pos = editor.textCursor().position()
+                full = editor.toPlainText()
+                # Trim de espacios sobrantes en ambos lados del corte.
+                split["after"] = full[pos:].strip()
+                editor.setPlainText(full[:pos].strip())
+                split["do"] = True
+                dlg.accept()
+
+            if split_btn is not None:
+                split_btn.clicked.connect(_do_split)
+
+        if dlg.exec():
+            self.lines[index].text = wrap_lyric(dlg.textValue())
+            if split["do"]:
+                self.lines.append(
+                    LyricLine(self.waveform.playback_pos, wrap_lyric(split["after"]))
+                )
+                self.lines.sort(key=lambda l: l.start)
             self.waveform.update()
 
     # ── Detección de cambios ───────────────────────────────────────────

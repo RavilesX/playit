@@ -283,33 +283,151 @@ class TestDialogLineas:
         assert len(dialog.lines) == antes
 
     def test_delete_line_borra_seleccionada(self, dialog):
-        dialog.waveform.selected = 1
+        dialog.waveform.selection = {1}
         dialog._delete_line()
         assert [round(l.start, 2) for l in dialog.lines] == [1.0, 9.0]
 
     def test_delete_line_sin_seleccion_no_hace_nada(self, dialog):
-        dialog.waveform.selected = -1
+        dialog.waveform.clear_selection()
         antes = len(dialog.lines)
         dialog._delete_line()
         assert len(dialog.lines) == antes
+
+    def test_delete_multiple_borra_todas(self, dialog):
+        dialog.waveform.selection = {0, 2}
+        dialog._delete_line()
+        assert [round(l.start, 2) for l in dialog.lines] == [5.0]
+        assert dialog.waveform.selection == set()
+
+
+class TestWaveformSeleccion:
+    def _wf(self, app):
+        audio = _synthetic_audio(duration=12.0, sr=8000)
+        lines = [LyricLine(float(i + 1), wrap_lyric(t))
+                 for i, t in enumerate(["a", "b", "c", "d"])]
+        return WaveformWidget(audio, lines)
+
+    def test_click_simple_selecciona_uno(self, app):
+        wf = self._wf(app)
+        wf._apply_click_selection(2, Qt.KeyboardModifier.NoModifier)
+        assert wf.selection == {2}
+        assert wf.selected == 2
+
+    def test_ctrl_agrega_y_alterna(self, app):
+        wf = self._wf(app)
+        wf._apply_click_selection(1, Qt.KeyboardModifier.NoModifier)
+        wf._apply_click_selection(3, Qt.KeyboardModifier.ControlModifier)
+        assert wf.selection == {1, 3}
+        # Segundo Ctrl-click sobre el mismo lo quita.
+        wf._apply_click_selection(3, Qt.KeyboardModifier.ControlModifier)
+        assert wf.selection == {1}
+
+    def test_shift_selecciona_rango(self, app):
+        wf = self._wf(app)
+        wf._apply_click_selection(1, Qt.KeyboardModifier.NoModifier)
+        wf._apply_click_selection(3, Qt.KeyboardModifier.ShiftModifier)
+        assert wf.selection == {1, 2, 3}
+
+
+class TestDialogUnir:
+    def test_can_merge_falso_con_uno(self, dialog):
+        dialog.waveform.selection = {1}
+        assert dialog._can_merge() is False
+
+    def test_can_merge_falso_no_contiguo(self, dialog):
+        dialog.waveform.selection = {0, 2}
+        assert dialog._can_merge() is False
+
+    def test_can_merge_true_contiguo(self, dialog):
+        dialog.waveform.selection = {0, 1, 2}
+        assert dialog._can_merge() is True
+
+    def test_merge_une_textos_y_conserva_primer_timestamp(self, dialog):
+        # Líneas: 1.0/uno, 5.0/dos, 9.0/tres.
+        dialog.waveform.selection = {0, 1}
+        dialog._merge_lines()
+        assert [round(l.start, 2) for l in dialog.lines] == [1.0, 9.0]
+        assert strip_tags(dialog.lines[0].text) == "uno dos"
+
+    def test_merge_no_contiguo_no_hace_nada(self, dialog):
+        dialog.waveform.selection = {0, 2}
+        antes = len(dialog.lines)
+        dialog._merge_lines()
+        assert len(dialog.lines) == antes
+
+    def test_boton_unir_estado_segun_seleccion(self, dialog):
+        dialog.waveform.select_single(0)
+        assert dialog.merge_btn.isEnabled() is False
+        dialog.waveform.selection = {0, 1}
+        dialog._update_merge_state()
+        assert dialog.merge_btn.isEnabled() is True
 
 
 class TestDialogEditarTexto:
     def test_edit_muestra_limpio_y_guarda_envuelto(self, dialog, monkeypatch):
         capturado = {}
 
-        def fake(parent, title, label, text, *a, **k):
-            capturado["default"] = text
-            return ("editado", True)
-
+        # El editor se construye por instancia (para forzar el autowrap),
+        # así que parcheamos los métodos del QInputDialog en vez del estático.
         monkeypatch.setattr(
-            lse.QInputDialog, "getMultiLineText", staticmethod(fake),
+            lse.QInputDialog, "setTextValue",
+            lambda self, t: capturado.__setitem__("default", t),
         )
+        monkeypatch.setattr(lse.QInputDialog, "exec", lambda self: 1)
+        monkeypatch.setattr(lse.QInputDialog, "textValue", lambda self: "editado")
+
         dialog._edit_text(0)
         # El default mostrado al usuario va sin tags...
         assert capturado["default"] == "uno"
         # ...pero lo guardado las re-incluye.
         assert dialog.lines[0].text == "<center>editado</center>"
+
+    def test_edit_fuerza_autowrap(self, dialog, monkeypatch):
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        capturado = {}
+
+        def captura_exec(self):
+            editor = self.findChild(QPlainTextEdit)
+            capturado["wrap"] = editor.lineWrapMode() if editor else None
+            return 0  # cancelar: no modifica nada
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", captura_exec)
+        dialog._edit_text(0)
+        assert capturado["wrap"] == QPlainTextEdit.LineWrapMode.WidgetWidth
+
+    def test_separar_linea_divide_en_el_cursor(self, dialog, monkeypatch):
+        from PyQt6.QtWidgets import QDialogButtonBox, QPlainTextEdit
+
+        # Línea 0: "uno" en 1.0s. Cursor de reproducción en 2.5s.
+        dialog.lines[0].text = wrap_lyric("hola mundo")
+        dialog.waveform.playback_pos = 2.5
+        n_antes = len(dialog.lines)
+
+        def fake_exec(self):
+            editor = self.findChild(QPlainTextEdit)
+            # Coloca el cursor tras "hola " (posición 5) y dispara Separar.
+            cur = editor.textCursor()
+            cur.setPosition(5)
+            editor.setTextCursor(cur)
+            bbox = self.findChild(QDialogButtonBox)
+            split_btn = next(
+                b for b in bbox.buttons() if b.text() == "Separar línea"
+            )
+            split_btn.click()
+            return 1
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", fake_exec)
+        dialog._edit_text(0)
+
+        # Se agregó una línea.
+        assert len(dialog.lines) == n_antes + 1
+        # Línea actual conserva lo de antes del cursor (con trim).
+        actual = next(l for l in dialog.lines if l.start == 1.0)
+        assert strip_tags(actual.text) == "hola"
+        # Nueva línea: texto tras el cursor, timestamp en el cursor de play.
+        nueva = next(l for l in dialog.lines if l.start == 2.5)
+        assert strip_tags(nueva.text) == "mundo"
 
 
 def _patch_confirm(monkeypatch, respuesta):
