@@ -21,6 +21,7 @@ from lyrics_sync_editor import (
     LyricsSyncDialog,
     VocalsAudio,
     WaveformWidget,
+    fold_text,
     load_vocals,
     parse_lrc,
     seconds_to_lrc_ts,
@@ -360,3 +361,85 @@ class TestDialogConfirmarCancelar:
         assert dialog._has_changes() is False
         dialog.lines[0].start += 0.5
         assert dialog._has_changes() is True
+
+
+class TestFoldText:
+    def test_quita_tildes_y_baja_caja(self):
+        assert fold_text("Canción") == "cancion"
+        assert fold_text("ADIÓS") == "adios"
+
+    def test_equivalencia_con_y_sin_tilde(self):
+        assert fold_text("canción") == fold_text("cancion")
+
+    def test_varias_marcas(self):
+        assert fold_text("Mañanaúér") == "mananauer"
+
+
+class TestDialogBuscador:
+    def _set_lines(self, dialog, textos):
+        dialog.lines = [
+            LyricLine(float(i + 1), wrap_lyric(t)) for i, t in enumerate(textos)
+        ]
+        dialog.waveform.lines = dialog.lines
+        dialog._search_index = -1
+
+    def test_enter_salta_a_primera_coincidencia(self, dialog):
+        self._set_lines(dialog, ["hola sol", "hola luna", "adios"])
+        dialog.search_box.setText("luna")
+        dialog._search_next()
+        assert dialog._search_index == 1
+        assert dialog.waveform.selected == 1
+
+    def test_enter_recorre_en_bucle(self, dialog):
+        self._set_lines(dialog, ["hola sol", "hola luna", "adios"])
+        dialog.search_box.setText("hola")
+        dialog._search_next()
+        assert dialog._search_index == 0
+        dialog._search_next()
+        assert dialog._search_index == 1
+        # Tras la última coincidencia vuelve a la primera.
+        dialog._search_next()
+        assert dialog._search_index == 0
+
+    def test_sin_coincidencia_pinta_rojo(self, dialog):
+        self._set_lines(dialog, ["hola", "mundo"])
+        dialog.search_box.setText("zzz")
+        dialog._search_next()
+        assert dialog.search_box.styleSheet() == dialog._SEARCH_RED
+        assert dialog._search_index == -1
+
+    def test_coincidencia_restaura_estilo_normal(self, dialog):
+        self._set_lines(dialog, ["hola"])
+        dialog.search_box.setText("zzz")
+        dialog._search_next()
+        assert dialog.search_box.styleSheet() == dialog._SEARCH_RED
+        dialog.search_box.setText("hola")
+        dialog._search_next()
+        assert dialog.search_box.styleSheet() == dialog._SEARCH_NORMAL
+
+    def test_acento_busca_termino_sin_tilde_encuentra_con_tilde(self, dialog):
+        self._set_lines(dialog, ["Mi canción favorita", "otra cosa"])
+        dialog.search_box.setText("cancion")
+        dialog._search_next()
+        assert dialog._search_index == 0
+
+    def test_acento_busca_termino_con_tilde_encuentra_sin_tilde(self, dialog):
+        self._set_lines(dialog, ["otra cosa", "una cancion simple"])
+        dialog.search_box.setText("canción")
+        dialog._search_next()
+        assert dialog._search_index == 1
+
+    def test_cambiar_texto_reinicia_indice(self, dialog):
+        self._set_lines(dialog, ["hola sol", "hola luna"])
+        dialog.search_box.setText("hola")
+        dialog._search_next()
+        assert dialog._search_index == 0
+        # textChanged dispara el reinicio del ciclo.
+        dialog.search_box.setText("hola luna")
+        assert dialog._search_index == -1
+
+    def test_termino_vacio_no_marca_rojo(self, dialog):
+        self._set_lines(dialog, ["hola"])
+        dialog.search_box.setText("   ")
+        dialog._search_next()
+        assert dialog.search_box.styleSheet() == dialog._SEARCH_NORMAL

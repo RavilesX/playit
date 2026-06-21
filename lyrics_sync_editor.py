@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import re
 import threading
+import unicodedata
 from dataclasses import dataclass
 
 import numpy as np
@@ -45,6 +46,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollBar,
@@ -169,6 +171,17 @@ def wrap_lyric(text: str) -> str:
     return f'<center>{text}</center>'
 
 
+def fold_text(text: str) -> str:
+    """Normaliza para búsqueda: minúsculas y sin tildes.
+
+    Descompone en NFD y descarta las marcas combinantes, así "canción"
+    y "cancion" se vuelven equivalentes.
+    """
+    decomposed = unicodedata.normalize('NFD', text)
+    no_marks = ''.join(c for c in decomposed if unicodedata.category(c) != 'Mn')
+    return no_marks.lower()
+
+
 def seconds_to_lrc_ts(seconds: float) -> str:
     """Convierte segundos a [mm:ss.cc] usando centisegundos enteros.
 
@@ -227,6 +240,9 @@ class MiniVocalsPlayer:
         self._thread.start()
 
     def _writer(self) -> None:
+        stream = self._stream
+        if stream is None:
+            return
         chunk = 1024
         samples = self.audio.samples
         total = len(samples)
@@ -236,7 +252,7 @@ class MiniVocalsPlayer:
             end = min(self._pos_frame + chunk, total)
             block = samples[self._pos_frame:end].reshape(-1, 1)
             try:
-                self._stream.write(block)
+                stream.write(block)
             except Exception:
                 break
             self._pos_frame = end
@@ -491,6 +507,7 @@ class LyricsSyncDialog(BaseDialog):
         self._vocals_path = vocals_path
         self._lrc_path = lrc_path
         self.saved = False
+        self._search_index = -1  # último registro encontrado por el buscador
 
         super().__init__(parent, "Editor de sincronización", (1100, 560))
 
@@ -555,6 +572,15 @@ class LyricsSyncDialog(BaseDialog):
         QCheckBox { color: #cfcfe0; background: transparent; }
     """
 
+    _SEARCH_NORMAL = (
+        "QLineEdit { background: #2a2a3d; color: #e6e6f0;"
+        " border: 1px solid #7d73e8; border-radius: 4px; padding: 3px; }"
+    )
+    _SEARCH_RED = (
+        "QLineEdit { background: #5a1f25; color: #ffffff;"
+        " border: 1px solid #e0455a; border-radius: 4px; padding: 3px; }"
+    )
+
     # ── Construcción de UI ─────────────────────────────────────────────
     def _build_content(self):
         self.setStyleSheet(self._STYLE)
@@ -565,8 +591,8 @@ class LyricsSyncDialog(BaseDialog):
         # Nivel 1: scroll horizontal, pegado a la onda.
         scroll_row = QHBoxLayout()
         scroll_row.setContentsMargins(6, 2, 6, 2)
-        self.scroll = QScrollBar(Qt.Orientation.Horizontal)
-        scroll_row.addWidget(self.scroll)
+        self.scrollbar = QScrollBar(Qt.Orientation.Horizontal)
+        scroll_row.addWidget(self.scrollbar)
         self.main_layout.addLayout(scroll_row)
 
         # Nivel 2: botones de opciones (separado del scroll).
@@ -610,6 +636,17 @@ class LyricsSyncDialog(BaseDialog):
         """)
         bar.addWidget(self.from_cursor_chk)
         bar.addStretch(1)
+
+        # Buscador de texto: Enter salta al siguiente registro coincidente,
+        # en bucle. Sin coincidencias → fondo rojo.
+        bar.addWidget(QLabel("Buscar:"))
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("texto…")
+        self.search_box.setFixedWidth(160)
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.setStyleSheet(self._SEARCH_NORMAL)
+        bar.addWidget(self.search_box)
+
         self.main_layout.addLayout(bar)
 
         # Acciones guardar / cancelar
@@ -642,7 +679,9 @@ class LyricsSyncDialog(BaseDialog):
         self.fwd_btn.clicked.connect(lambda: self._shift_all(self.offset_spin.value()))
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
-        self.scroll.valueChanged.connect(self._on_scroll)
+        self.search_box.returnPressed.connect(self._search_next)
+        self.search_box.textChanged.connect(self._on_search_text_changed)
+        self.scrollbar.valueChanged.connect(self._on_scroll)
         self.waveform.view_changed.connect(self._sync_scroll_from_view)
         self.waveform.seek_requested.connect(self._on_seek)
         self.waveform.edit_text_requested.connect(self._edit_text)
@@ -652,17 +691,17 @@ class LyricsSyncDialog(BaseDialog):
         # Trabaja en centisegundos para precisión entera.
         total = int(self.audio.duration * 100)
         page = int(self.waveform.visible_seconds * 100)
-        self.scroll.setRange(0, max(0, total - page))
-        self.scroll.setPageStep(max(1, page))
-        self.scroll.setSingleStep(50)
+        self.scrollbar.setRange(0, max(0, total - page))
+        self.scrollbar.setPageStep(max(1, page))
+        self.scrollbar.setSingleStep(50)
 
     def _on_scroll(self, value: int):
         self.waveform.set_start_pos(value / 100.0, emit=False)
 
     def _sync_scroll_from_view(self):
-        self.scroll.blockSignals(True)
-        self.scroll.setValue(int(self.waveform.start_pos * 100))
-        self.scroll.blockSignals(False)
+        self.scrollbar.blockSignals(True)
+        self.scrollbar.setValue(int(self.waveform.start_pos * 100))
+        self.scrollbar.blockSignals(False)
 
     # ── Reproducción ───────────────────────────────────────────────────
     def _toggle_play(self):
@@ -726,6 +765,42 @@ class LyricsSyncDialog(BaseDialog):
         for line in self.lines:
             if line.start >= threshold:
                 line.start = max(0.0, min(dur, line.start + delta))
+        self.waveform.update()
+
+    # ── Buscador ───────────────────────────────────────────────────────
+    def _on_search_text_changed(self, _text: str):
+        # Texto nuevo: reinicia el ciclo y limpia el estado rojo.
+        self._search_index = -1
+        self.search_box.setStyleSheet(self._SEARCH_NORMAL)
+
+    def _search_next(self):
+        """Salta al siguiente registro que contenga el texto, en bucle.
+
+        Sin coincidencias → caja roja.
+        """
+        term = fold_text(self.search_box.text().strip())
+        n = len(self.lines)
+        if not term or n == 0:
+            self.search_box.setStyleSheet(
+                self._SEARCH_RED if term else self._SEARCH_NORMAL
+            )
+            return
+        for offset in range(1, n + 1):
+            i = (self._search_index + offset) % n
+            if term in fold_text(strip_tags(self.lines[i].text)):
+                self._search_index = i
+                self.search_box.setStyleSheet(self._SEARCH_NORMAL)
+                self._goto_line(i)
+                return
+        self.search_box.setStyleSheet(self._SEARCH_RED)
+
+    def _goto_line(self, index: int):
+        """Selecciona la línea, mueve el cursor y centra la vista en ella."""
+        line = self.lines[index]
+        self.waveform.selected = index
+        self.waveform.line_selected.emit(index)
+        self.waveform.playback_pos = line.start
+        self.waveform.set_start_pos(line.start - self.waveform.visible_seconds / 2)
         self.waveform.update()
 
     # ── Teclado ────────────────────────────────────────────────────────
