@@ -16,6 +16,7 @@
 
 import threading
 import queue
+import re
 from pathlib import Path
 import json
 from datetime import datetime
@@ -27,7 +28,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
     QPushButton, QSlider, QStatusBar, QMessageBox,
     QFrame, QListWidgetItem, QWidget, QFileDialog,
-    QAbstractItemView,
+    QAbstractItemView, QCheckBox,
 )
 import requests
 from urllib.parse import quote
@@ -48,7 +49,7 @@ from ffmpeg_worker import FFmpegWorker
 from cuda_worker import CudaInstallWorker
 from ytdlp_download_worker import YTDLPDownloadWorker
 from demucs_install_worker import DemucsInstallWorker
-from resources import styled_message_box, bg_image, resource_path
+from resources import styled_message_box, bg_image, resource_path, style_url
 from ui_components import TitleBar, CustomDial, SizeGrip
 from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
@@ -170,6 +171,9 @@ class AudioPlayer(QMainWindow):
         self.volume = DEFAULT_VOLUME
         self.individual_volumes = {t: 1.0 for t in TRACK_NAMES}
         self.mute_states = {t: False for t in TRACK_NAMES}
+        # Auto-unmute de voz en líneas en blanco de las letras (con fundido)
+        self.auto_unmute_enabled = False
+        self._auto_unmute_gain = 0.0  # ganancia actual de la voz (0..1)
         self._seeking = False
         self._sd_streams: list = []
         self._track_data: list = []
@@ -655,6 +659,7 @@ class AudioPlayer(QMainWindow):
         if not self._track_data:
             return
 
+        self._auto_unmute_gain = 0.0
         self._seek_position = start_frame
         sr = self._track_data[0][1]
         channels = self._track_data[0][0].shape[1]
@@ -694,11 +699,19 @@ class AudioPlayer(QMainWindow):
                 dtype='float32',
             )
 
+            sr = self._track_data[0][1]
+            vocal_ramp = self._auto_unmute_ramp(pos, end - pos, sr)
+
             for i, (track_data, _) in enumerate(self._track_data):
                 track = TRACK_NAMES[i]
-                vol = 0.0 if self.mute_states[track] else (
-                    self.individual_volumes[track] * (self.volume / 100.0)
-                )
+                if self.mute_states[track]:
+                    # Voz muteada: el auto-unmute puede reintroducirla con un
+                    # fundido durante las líneas en blanco de la letra.
+                    if track == "vocals" and vocal_ramp is not None:
+                        base = self.individual_volumes[track] * (self.volume / 100.0)
+                        chunk += track_data[pos:end] * base * vocal_ramp[:, None]
+                    continue
+                vol = self.individual_volumes[track] * (self.volume / 100.0)
                 chunk += track_data[pos:end] * vol
 
             peak = np.max(np.abs(chunk))
@@ -873,6 +886,66 @@ class AudioPlayer(QMainWindow):
         sender.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
 
     # ──────────────────────────────────────────────────────────────────────
+    # ── Auto-unmute de voz en secciones sin letra ────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
+    AUTO_UNMUTE_FADE_S = 0.5  # duración del fundido (segundos)
+    _AUTO_UNMUTE_ROW_H = 24  # alto reservado para la fila del checkbox (px)
+
+    def _on_auto_unmute_toggled(self, checked: bool):
+        self.auto_unmute_enabled = checked
+
+    def _current_lyric_is_blank(self, current_time: float) -> bool:
+        """True si la línea de letra activa en `current_time` está vacía.
+
+        Las líneas en blanco se guardan como `<center></center>`; al quitar
+        las etiquetas no queda texto. Antes de la primera línea se considera
+        que NO está en blanco (se mantiene la voz muteada en la intro).
+        """
+        if not self.lyrics:
+            return False
+        html = None
+        for t, h in self.lyrics:
+            if current_time >= t:
+                html = h
+            else:
+                break
+        if html is None:
+            return False
+        text = re.sub(r'<[^>]*>', '', html).replace('&nbsp;', '').strip()
+        return text == ''
+
+    def _auto_unmute_ramp(self, pos: int, n: int, sr: int):
+        """Devuelve una rampa de ganancia (n,) para la voz, o None.
+
+        Interpola linealmente `self._auto_unmute_gain` hacia su objetivo
+        (1.0 en líneas en blanco, 0.0 en el resto) a lo largo de
+        `AUTO_UNMUTE_FADE_S` segundos. Devuelve None cuando la voz debe
+        quedar totalmente muteada (sin aporte).
+        """
+        if self.auto_unmute_enabled and self.mute_states["vocals"]:
+            target = 1.0 if self._current_lyric_is_blank(pos / sr) else 0.0
+        elif self._auto_unmute_gain > 0.0:
+            # Checkbox desactivado o voz desmuteada manualmente: fundir a 0
+            target = 0.0
+        else:
+            self._auto_unmute_gain = 0.0
+            return None
+
+        fade_frames = max(1, int(self.AUTO_UNMUTE_FADE_S * sr))
+        start_g = self._auto_unmute_gain
+        step = n / fade_frames
+        if target > start_g:
+            end_g = min(target, start_g + step)
+        else:
+            end_g = max(target, start_g - step)
+
+        ramp = np.linspace(start_g, end_g, n, dtype='float32')
+        self._auto_unmute_gain = end_g
+        if start_g <= 0.0 and end_g <= 0.0:
+            return None
+        return ramp
+
+    # ──────────────────────────────────────────────────────────────────────
     # ── Actualización de display ─────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
     def update_display(self):
@@ -988,6 +1061,34 @@ class AudioPlayer(QMainWindow):
             col = QVBoxLayout()
             col.addWidget(btn)
             col.addWidget(slider)
+
+            if track == "vocals":
+                self.auto_unmute_check = QCheckBox("Auto-unmute")
+                self.auto_unmute_check.setObjectName("auto_unmute_check")
+                self.auto_unmute_check.setToolTip(
+                    "Desmutea la voz en las secciones sin letra (con fundido)"
+                )
+                # Mismos assets de checkbox que el editor de letras (incluyen
+                # la palomita); el estilizado custom perdía la marca al activar.
+                unchecked = style_url('images/split_dialog/checkbox_unchecked.png')
+                checked = style_url('images/split_dialog/checkbox_checked.png')
+                hover = style_url('images/split_dialog/checkbox_hover01.png')
+                hover_checked = style_url('images/split_dialog/checkbox_hover02.png')
+                self.auto_unmute_check.setStyleSheet(f"""
+                    QCheckBox {{ color: #cfcfe0; spacing: 8px; }}
+                    QCheckBox::indicator {{ width: 18px; height: 18px; image: url({unchecked}); }}
+                    QCheckBox::indicator:checked {{ image: url({checked}); }}
+                    QCheckBox::indicator:unchecked:hover {{ image: url({hover}); }}
+                    QCheckBox::indicator:checked:hover {{ image: url({hover_checked}); }}
+                """)
+                self.auto_unmute_check.setFixedHeight(self._AUTO_UNMUTE_ROW_H)
+                self.auto_unmute_check.toggled.connect(self._on_auto_unmute_toggled)
+                col.addWidget(self.auto_unmute_check)
+            else:
+                # Mismo alto reservado que el checkbox de la voz para que los
+                # iconos/sliders de todas las columnas queden alineados.
+                col.addSpacing(self._AUTO_UNMUTE_ROW_H)
+
             outer.addLayout(col)
 
         self.mute_buttons = list(self._track_buttons.values())

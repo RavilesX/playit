@@ -673,11 +673,13 @@ class LyricsSyncDialog(BaseDialog):
         unchecked = style_url('images/split_dialog/checkbox_unchecked.png')
         checked = style_url('images/split_dialog/checkbox_checked.png')
         hover = style_url('images/split_dialog/checkbox_hover01.png')
+        hover_checked = style_url('images/split_dialog/checkbox_hover02.png')
         self.from_cursor_chk.setStyleSheet(f"""
             QCheckBox {{ color: #cfcfe0; spacing: 8px; }}
             QCheckBox::indicator {{ width: 18px; height: 18px; image: url({unchecked}); }}
             QCheckBox::indicator:checked {{ image: url({checked}); }}
             QCheckBox::indicator:unchecked:hover {{ image: url({hover}); }}
+            QCheckBox::indicator:checked:hover {{ image: url({hover_checked}); }}
         """)
         bar.addWidget(self.from_cursor_chk)
         bar.addStretch(1)
