@@ -556,7 +556,20 @@ class LyricsSyncDialog(BaseDialog):
         # manualmente con los SizeGrip (sin maximizar).
         self.setMinimumSize(760, 420)
         self.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
-        self.resize(1100, 560)
+
+        # Ancho = 90% de la ventana principal, dejando 5% de margen por lado.
+        # El alto se mantiene fijo (560).
+        if parent is not None:
+            main = parent.window()
+            geo = main.geometry()
+            w = int(geo.width() * 0.90)
+            self.resize(w, 560)
+            self.move(
+                geo.x() + int(geo.width() * 0.05),
+                geo.y() + int((geo.height() - 560) / 2),
+            )
+        else:
+            self.resize(1100, 560)
 
         self.audio = load_vocals(vocals_path)
         self.lines = parse_lrc(lrc_path)

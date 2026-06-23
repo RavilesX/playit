@@ -1,0 +1,106 @@
+name: Build ejecutables
+
+# Cuándo corre: en cada push a main y al crear un tag vX.Y.Z (release).
+# También se puede lanzar a mano desde la pestaña Actions de GitHub.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  # ---------- LINUX ----------
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar dependencias del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg portaudio19-dev libsndfile1 libxcb-cursor0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias de Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics pyinstaller
+
+      - name: Inyectar versión desde el tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: echo "__version__ = \"${GITHUB_REF_NAME#v}\"" > version.py
+
+      - name: Compilar con PyInstaller
+        run: pyinstaller --clean -y PlayIt.spec
+
+      - name: Subir ejecutable Linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlayIt-linux
+          path: dist/PlayIt
+
+  # ---------- WINDOWS ----------
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias de Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics pyinstaller
+
+      - name: Inyectar versión desde el tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: echo "__version__ = \"${GITHUB_REF_NAME#v}\"" > version.py
+
+      - name: Compilar con PyInstaller
+        run: pyinstaller --clean -y PlayIt.spec
+
+      - name: Subir ejecutable Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlayIt-windows
+          path: dist/PlayIt.exe
+
+  # ---------- RELEASE (solo en tags v*) ----------
+  release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write   # necesario para crear la Release
+    steps:
+      - name: Descargar ejecutable Linux
+        uses: actions/download-artifact@v4
+        with:
+          name: PlayIt-linux
+          path: linux
+
+      - name: Descargar ejecutable Windows
+        uses: actions/download-artifact@v4
+        with:
+          name: PlayIt-windows
+          path: windows
+
+      - name: Renombrar con la versión
+        run: |
+          mv linux/PlayIt        PlayIt-${GITHUB_REF_NAME}-linux
+          mv windows/PlayIt.exe  PlayIt-${GITHUB_REF_NAME}-windows.exe
+
+      - name: Crear GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            PlayIt-${{ github.ref_name }}-linux
+            PlayIt-${{ github.ref_name }}-windows.exe
+          generate_release_notes: true

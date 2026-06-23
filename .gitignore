@@ -4,5 +4,6 @@ build/
 dist/
 __pycache__/
 playit.exe
+PlayIt.exe
 CLAUDE.md
 DOCUMENTACION_FUNCIONAL.md

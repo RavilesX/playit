@@ -77,6 +77,9 @@ class DemucsWorker(QObject):
             raise RuntimeError(error_msg)
 
     def _extract_cover(self):
+        # Track repetido: conservar la portada existente, solo reemplazar stems.
+        if (self.base_path / "cover.png").exists():
+            return
         try:
             audio = MP3(self.src_path)
             if not audio.tags:
@@ -91,6 +94,9 @@ class DemucsWorker(QObject):
             print(f"No se pudo extraer portada: {e}")
 
     def _create_json(self):
+        # Track repetido: conservar el JSON existente, solo reemplazar stems.
+        if (self.base_path / "data.json").exists():
+            return
         data = {
             self.artist: {
                 self.song: {"path": str(self.base_path)}

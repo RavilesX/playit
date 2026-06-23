@@ -19,6 +19,7 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox
 from resources import resource_path, bg_image,styled_message_box
 from ui_components import DialogTitleBar, StyledButtons
+from version import __version__
 import os
 import string
 from pathlib import Path
@@ -75,7 +76,7 @@ class AboutDialog(BaseDialog):
         self.main_layout.addWidget(paypal_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def _create_text_display(self) -> QTextEdit:
-        version_path = resource_path('images/main_window/version.png')
+        version_path = resource_path('images/main_window/main_icon.png')
         about_text = self._get_about_text(version_path)
 
         text_edit = QTextEdit()
@@ -116,9 +117,10 @@ class AboutDialog(BaseDialog):
         li{{color:#b23c56;}}
         sub{{color:#c5c6c8;font-family: Arial, Helvetica, sans-serif;}}
         </style>
-        <center><img src="{version_path}"></center>
-        <p>Reproductor de Audio que permite separación de pistas usando Demucs.</p>
-        <sub>ESTE SOFTWARE SE PROPORCIONA 'TAL CUAL', SIN GARANTÍAS DE NINGÚN TIPO, YA SEAN EXPRESAS O IMPLÍCITAS, INCLUYENDO, PERO NO LIMITADO A, GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO, LOS AUTORES O COLABORADORES SERÁN RESPONSABLES DE DAÑOS DIRECTOS, INDIRECTOS, INCIDENTALES, ESPECIALES, EJEMPLARES O CONSECUENTES (INCLUYENDO, PERO NO LIMITADO A, LA ADQUISICIÓN DE BIENES O SERVICIOS SUSTITUTOS; LA PÉRDIDA DE USO, DATOS O BENEFICIOS; O LA INTERRUPCIÓN DEL NEGOCIO) DE CUALQUIER MANERA CAUSADOS Y BAJO CUALQUIER TEORÍA DE RESPONSABILIDAD, YA SEA POR CONTRATO, RESPONSABILIDAD ESTRICTA O AGRAVIO (INCLUYENDO NEGLIGENCIA O DE OTRA MANERA) QUE SURJA DE CUALQUIER FORMA DEL USO DE ESTE SOFTWARE, INCLUSO SI SE HA AVISADO DE LA POSIBILIDAD DE TALES DAÑOS.</sub>
+        <center><img src="{version_path}" width="100" height="100"></center>
+        <center><sub>Versión {__version__}</sub></center>
+        <p>Reproductor de Audio con separación de pistas.</p>
+        <sub>ESTE SOFTWARE SE PROPORCIONA 'TAL CUAL', SIN GARANTÍAS DE NINGÚN TIPO, YA SEAN EXPRESAS O IMPLÍCITAS, INCLUYENDO, PERO NO LIMITADO A, GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO, LOS AUTORES O COLABORADORES SERÁN RESPONSABLES DE DAÑOS DIRECTOS, INDIRECTOS, INCIDENTALES, ESPECIALES, EJEMPLARES O CONSECUENTES (INCLUYENDO, PERO NO LIMITADO A, LA ADQUISICIÓN DE BIENES O SERVICIOS SUSTITUTOS; LA PÉRDIDA DE USO, DATOS O BENEFICIOS; O LA INTERRUPCIÓN DEL NEGOCIO) DE CUALQUIER MANERA CAUSADOS Y BAJO CUALQUIER TEORÍA DE RESPONSABILIDAD, YA SEA POR CONTRATO, RESPONSABILIDAD ESTRICTA O AGRAVIO (INCLUYENDO NEGLIGENCIA O DE OTRA MANERA) QUE SURJA DE CUALQUIER FORMA DEL USO DE ESTE SOFTWARE, INCLUSO SI SE HA AVISADO DE LA POSIBILIDAD DE TALES DAÑOS. Mire la Licencia pública general GNU para obtener más detalles.Debería haber recibido una copia de la Licencia Pública General GNU junto con este programa. En caso contrario, consulte: https://www.gnu.org/licenses/.</sub>
         <p>Desarrollado por: RavilesX</p><p>Email: ravilesx@gmail.com</p>
         """
 
