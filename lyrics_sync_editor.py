@@ -78,6 +78,16 @@ _LRC_TS = re.compile(r'\[(\d+):(\d+\.\d+)\]')
 # el texto sobre la onda, pero se conservan en el archivo al guardar.
 _HTML_TAG = re.compile(r'<[^>]+>')
 
+# Colores opcionales para distinguir cantantes (canciones a varias voces).
+# La etiqueta es un <font color> HTML: la ventana principal la pinta sola al
+# hacer setHtml, y en el editor se oculta con strip_tags y se detecta con
+# extract_color. None = color por defecto de cada vista.
+LYRIC_COLORS = {
+    "azul": "#3AABEF",
+    "blanco": "#F6F5F4",
+}
+_FONT_COLOR = re.compile(r'<font\s+color="([^"]+)"', re.IGNORECASE)
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Modelo de datos
@@ -168,9 +178,36 @@ def strip_tags(text: str) -> str:
     return _HTML_TAG.sub('', text)
 
 
-def wrap_lyric(text: str) -> str:
-    """Envuelve el texto del usuario con las etiquetas que espera el .lrc."""
+def wrap_lyric(text: str, color: str | None = None) -> str:
+    """Envuelve el texto del usuario con las etiquetas que espera el .lrc.
+
+    color: None usa el color por defecto; "azul"/"blanco" añaden una etiqueta
+    <font> invisible para el usuario que pinta la línea en ambas vistas.
+    """
+    if color in LYRIC_COLORS:
+        text = f'<font color="{LYRIC_COLORS[color]}">{text}</font>'
     return f'<center>{text}</center>'
+
+
+def extract_color(text: str) -> str | None:
+    """Devuelve el nombre del color de la línea, o None si usa el de por defecto."""
+    m = _FONT_COLOR.search(text)
+    if not m:
+        return None
+    hexv = m.group(1).lower()
+    for name, value in LYRIC_COLORS.items():
+        if value.lower() == hexv:
+            return name
+    return None
+
+
+def _color_btn_css(hexv: str, active: bool) -> str:
+    """Estilo de un botón-muestra de color en el editor de texto."""
+    border = "#F88FFF" if active else "#555569"
+    return (
+        f"QPushButton {{ background:{hexv};"
+        f" border:2px solid {border}; border-radius:4px; }}"
+    )
 
 
 def fold_text(text: str) -> str:
@@ -302,6 +339,8 @@ class WaveformWidget(QWidget):
     _C_EDGE = QColor(0xC0, 0x4A, 0xD6)
     _C_CURSOR = QColor(80, 220, 255)
     _C_TEXT = QColor(220, 220, 220)
+    # Color por defecto del texto de lyric (igual que la ventana principal).
+    _C_LYRIC_DEFAULT = QColor("#F88FFF")
 
     def __init__(self, audio: VocalsAudio, lines: list[LyricLine], parent=None):
         super().__init__(parent)
@@ -396,8 +435,8 @@ class WaveformWidget(QWidget):
 
     def _draw_blocks(self, p: QPainter):
         h = self.height()
-        fm = QFontMetrics(QFont("Sans", 8))
-        font = QFont("Sans", 8)
+        fm = QFontMetrics(QFont("Sans", 11))
+        font = QFont("Sans", 11)
         for i, line in enumerate(self.lines):
             x0 = self.sec_to_x(line.start)
             end = self.lines[i + 1].start if i + 1 < len(self.lines) else self.audio.duration
@@ -410,14 +449,19 @@ class WaveformWidget(QWidget):
             # Borde de inicio (lo que se arrastra)
             p.setPen(QPen(self._C_EDGE, 2))
             p.drawLine(int(x0), 0, int(x0), h)
-            # Etiqueta: #índice tiempo + texto
-            p.setPen(QPen(self._C_TEXT, 1))
+            # Etiqueta: #índice tiempo + texto. El texto se pinta con el color
+            # de la línea (azul/blanco) si lo tiene; el encabezado va siempre
+            # en el color por defecto.
             p.setFont(font)
+            color = extract_color(line.text)
+            text_pen = QColor(LYRIC_COLORS[color]) if color else self._C_LYRIC_DEFAULT
             head = f"#{i + 1}  {line.start:.3f}"
             preview = strip_tags(line.text).replace('\n', ' ')
             avail = max(10, int(x1 - x0) - 8)
             elided = fm.elidedText(preview, Qt.TextElideMode.ElideRight, avail)
+            p.setPen(QPen(text_pen, 1))
             p.drawText(int(x0) + 4, 14, elided)
+            p.setPen(QPen(self._C_TEXT, 1))
             p.drawText(int(x0) + 4, h - 16, head)
 
     def _draw_cursor(self, p: QPainter):
@@ -828,9 +872,10 @@ class LyricsSyncDialog(BaseDialog):
             return
         sel = sorted(self.waveform.selection)
         start = self.lines[sel[0]].start
+        color = extract_color(self.lines[sel[0]].text)
         textos = [strip_tags(self.lines[i].text).strip() for i in sel]
         merged = ' '.join(t for t in textos if t)
-        self.lines[sel[0]] = LyricLine(start, wrap_lyric(merged))
+        self.lines[sel[0]] = LyricLine(start, wrap_lyric(merged, color))
         for i in reversed(sel[1:]):
             del self.lines[i]
         self.waveform.select_single(sel[0])
@@ -924,11 +969,46 @@ class LyricsSyncDialog(BaseDialog):
             editor.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
             editor.setMinimumWidth(360)
 
+        bbox = dlg.findChild(QDialogButtonBox)
+
+        # Botones de color (azul/blanco): añaden una etiqueta invisible que
+        # pinta la línea para distinguir cantantes. Funcionan como toggle:
+        # volver a pulsar el color activo regresa al color por defecto.
+        color_state = {"color": extract_color(self.lines[index].text)}
+        if bbox is not None and editor is not None:
+            color_btns: dict[str, QPushButton] = {}
+
+            def _refresh_color():
+                name = color_state["color"]
+                hexv = LYRIC_COLORS[name] if name else None
+                editor.setStyleSheet(
+                    "QPlainTextEdit { background:#2a2a3d;"
+                    " border:1px solid #7d73e8; border-radius:4px; padding:3px;"
+                    " font-size:16px;"
+                    f" color:{hexv or '#F88FFF'}; }}"
+                )
+                for cname, btn in color_btns.items():
+                    btn.setStyleSheet(
+                        _color_btn_css(LYRIC_COLORS[cname], cname == name)
+                    )
+
+            def _toggle(c):
+                color_state["color"] = None if color_state["color"] == c else c
+                _refresh_color()
+
+            for cname in ("azul", "blanco"):
+                b = bbox.addButton("", QDialogButtonBox.ButtonRole.ActionRole)
+                if b is not None:
+                    b.setFixedSize(22, 22)
+                    b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                    b.clicked.connect(lambda _=False, c=cname: _toggle(c))
+                    color_btns[cname] = b
+            _refresh_color()
+
         # Botón "Separar línea": parte el texto en el cursor. Lo de antes
         # queda en la línea actual; lo de después forma una línea nueva con
         # timestamp en la posición del cursor de reproducción.
         split = {"do": False, "after": ""}
-        bbox = dlg.findChild(QDialogButtonBox)
         if bbox is not None and editor is not None:
             split_btn = bbox.addButton(
                 "Separar línea", QDialogButtonBox.ButtonRole.ActionRole,
@@ -946,11 +1026,28 @@ class LyricsSyncDialog(BaseDialog):
             if split_btn is not None:
                 split_btn.clicked.connect(_do_split)
 
+        # Cosmética del button box: label "Color:" antes de las muestras y un
+        # espacio que separe la sección de color de "Separar línea". Se hace al
+        # final porque cada addButton re-arma el layout y borraría los insertos.
+        if bbox is not None and color_btns:
+            lay = bbox.layout()
+            if lay is not None:
+                idx = lay.indexOf(color_btns["azul"])
+                if idx >= 0:
+                    lbl = QLabel("Color:")
+                    lbl.setStyleSheet("color:#cfcfe0; background:transparent;")
+                    lay.insertWidget(idx, lbl)
+                bidx = lay.indexOf(color_btns["blanco"])
+                if bidx >= 0:
+                    lay.insertSpacing(bidx + 1, 24)
+
         if dlg.exec():
-            self.lines[index].text = wrap_lyric(dlg.textValue())
+            color = color_state["color"]
+            self.lines[index].text = wrap_lyric(dlg.textValue(), color)
             if split["do"]:
                 self.lines.append(
-                    LyricLine(self.waveform.playback_pos, wrap_lyric(split["after"]))
+                    LyricLine(self.waveform.playback_pos,
+                              wrap_lyric(split["after"], color))
                 )
                 self.lines.sort(key=lambda l: l.start)
             self.waveform.update()
