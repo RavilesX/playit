@@ -708,6 +708,26 @@ class LyricsSyncDialog(BaseDialog):
         self.merge_btn.setEnabled(False)
         bar.addWidget(self.merge_btn)
 
+        # Muestras de color: aplican color (o lo quitan) a TODAS las líneas
+        # seleccionadas (multiselección con Ctrl/Shift). El primer botón es el
+        # color por defecto (rosa); los otros, azul y blanco.
+        bar.addSpacing(12)
+        bar.addWidget(QLabel("Color:"))
+        self.color_btns = []
+        for cname, hexv in (
+            ("default", "#F88FFF"),
+            ("azul", LYRIC_COLORS["azul"]),
+            ("blanco", LYRIC_COLORS["blanco"]),
+        ):
+            swatch = QPushButton()
+            swatch.setFixedSize(22, 22)
+            swatch.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            swatch.setStyleSheet(_color_btn_css(hexv, False))
+            color = None if cname == "default" else cname
+            swatch.clicked.connect(lambda _=False, c=color: self._apply_color(c))
+            bar.addWidget(swatch)
+            self.color_btns.append(swatch)
+
         # Offset global: desplaza TODAS las líneas el valor elegido.
         bar.addSpacing(12)
         bar.addWidget(QLabel("Offset:"))
@@ -882,6 +902,16 @@ class LyricsSyncDialog(BaseDialog):
 
     def _update_merge_state(self):
         self.merge_btn.setEnabled(self._can_merge())
+
+    def _apply_color(self, color: str | None):
+        """Asigna (o quita) el color a todas las líneas seleccionadas."""
+        sel = sorted(i for i in self.waveform.selection if 0 <= i < len(self.lines))
+        if not sel:
+            return
+        for i in sel:
+            clean = strip_tags(self.lines[i].text)
+            self.lines[i].text = wrap_lyric(clean, color)
+        self.waveform.update()
 
     def _shift_all(self, delta: float):
         """Adelanta (+) o retrasa (−) líneas el offset elegido.

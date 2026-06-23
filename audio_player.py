@@ -1186,11 +1186,26 @@ class AudioPlayer(QMainWindow):
         self.update_status()
 
     def remove_selected(self):
-        for item in self.playlist_widget.selectedItems():
-            row = self.playlist_widget.row(item)
+        # Recordar la canción actual por identidad: al borrar filas anteriores
+        # los índices se corren y current_index dejaría de coincidir.
+        current_song = (self.playlist[self.current_index]
+                        if 0 <= self.current_index < len(self.playlist) else None)
+        # Borrar de mayor a menor para que cada pop no recorra los índices
+        # restantes que aún faltan por eliminar.
+        rows = sorted(
+            (self.playlist_widget.row(it)
+             for it in self.playlist_widget.selectedItems()),
+            reverse=True,
+        )
+        for row in rows:
             self.playlist_widget.takeItem(row)
             song = self.playlist.pop(row)
             self._playlist_keys.discard((song['artist'], song['song']))
+        # Reubicar current_index a la misma canción; -1 si fue eliminada.
+        if current_song is not None:
+            self.current_index = next(
+                (i for i, s in enumerate(self.playlist) if s is current_song), -1,
+            )
         self.update_status()
 
     def sort_playlist(self, key: str = "artist", reverse: bool = False):
