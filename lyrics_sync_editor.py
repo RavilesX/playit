@@ -39,7 +39,9 @@ import numpy as np
 import sounddevice as sd
 import soundfile as sf
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QTextOption
+from PyQt6.QtGui import (
+    QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut, QTextOption,
+)
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialogButtonBox,
@@ -85,7 +87,12 @@ _HTML_TAG = re.compile(r'<[^>]+>')
 LYRIC_COLORS = {
     "azul": "#3AABEF",
     "blanco": "#F6F5F4",
+    # Rojo (apagado): marca líneas que disparan el auto-unmute de voz igual
+    # que una línea en blanco, aunque tengan texto. Ver _current_lyric_is_blank.
+    "rojo": "#B23A36",
 }
+# Color que actúa como "línea en blanco" para el auto-unmute aunque tenga texto.
+AUTO_UNMUTE_COLOR = "rojo"
 _FONT_COLOR = re.compile(r'<font\s+color="([^"]+)"', re.IGNORECASE)
 
 
@@ -700,6 +707,10 @@ class LyricsSyncDialog(BaseDialog):
         self.play_btn.setFixedSize(44, 28)
         bar.addWidget(self.play_btn)
         self.add_btn = QPushButton("＋ Línea")
+        self.add_btn.setToolTip(
+            "Clic: agrega línea en blanco (Ctrl+N)\n"
+            "Mantener presionado 1 s: agrega línea con texto (Ctrl+Shift+N)"
+        )
         bar.addWidget(self.add_btn)
         self.del_btn = QPushButton("－ Línea")
         bar.addWidget(self.del_btn)
@@ -709,22 +720,18 @@ class LyricsSyncDialog(BaseDialog):
         bar.addWidget(self.merge_btn)
 
         # Muestras de color: aplican color (o lo quitan) a TODAS las líneas
-        # seleccionadas (multiselección con Ctrl/Shift). El primer botón es el
-        # color por defecto (rosa); los otros, azul y blanco.
+        # seleccionadas (multiselección con Ctrl/Shift). Funcionan como toggle:
+        # volver a pulsar el color activo regresa al color por defecto (rosa).
+        # El rojo va a la derecha; marca líneas que disparan el auto-unmute.
         bar.addSpacing(12)
         bar.addWidget(QLabel("Color:"))
         self.color_btns = []
-        for cname, hexv in (
-            ("default", "#F88FFF"),
-            ("azul", LYRIC_COLORS["azul"]),
-            ("blanco", LYRIC_COLORS["blanco"]),
-        ):
+        for cname in ("azul", "blanco", "rojo"):
             swatch = QPushButton()
             swatch.setFixedSize(22, 22)
             swatch.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            swatch.setStyleSheet(_color_btn_css(hexv, False))
-            color = None if cname == "default" else cname
-            swatch.clicked.connect(lambda _=False, c=color: self._apply_color(c))
+            swatch.setStyleSheet(_color_btn_css(LYRIC_COLORS[cname], False))
+            swatch.clicked.connect(lambda _=False, c=cname: self._apply_color(c))
             bar.addWidget(swatch)
             self.color_btns.append(swatch)
 
@@ -745,6 +752,7 @@ class LyricsSyncDialog(BaseDialog):
         bar.addWidget(self.fwd_btn)
         # Si está marcado, el offset solo afecta líneas desde el cursor.
         self.from_cursor_chk = QCheckBox("Solo desde el cursor")
+        self.from_cursor_chk.setChecked(True)
         # Indicador con los assets de checkbox de la app (incluyen la palomita);
         # el estilizado custom perdía la marca al activarse.
         unchecked = style_url('images/split_dialog/checkbox_unchecked.png')
@@ -797,7 +805,20 @@ class LyricsSyncDialog(BaseDialog):
 
     def _wire(self):
         self.play_btn.clicked.connect(self._toggle_play)
-        self.add_btn.clicked.connect(self._add_line)
+        # Botón "＋ Línea": clic normal agrega línea en blanco; mantenerlo
+        # presionado 1 s abre el diálogo de texto. Se usa un temporizador que
+        # arranca al presionar; si dispara antes de soltar, abre el diálogo y
+        # marca el evento para que el "clicked" posterior no agregue otra línea.
+        self._add_hold_timer = QTimer(self)
+        self._add_hold_timer.setSingleShot(True)
+        self._add_hold_timer.setInterval(1000)
+        self._add_hold_timer.timeout.connect(self._on_add_hold)
+        self._add_hold_fired = False
+        self.add_btn.pressed.connect(self._on_add_pressed)
+        self.add_btn.released.connect(self._on_add_released)
+        # Atajos: Ctrl+N línea en blanco, Ctrl+Shift+N línea con texto.
+        QShortcut(QKeySequence("Ctrl+N"), self, activated=self._add_line_blank)
+        QShortcut(QKeySequence("Ctrl+Shift+N"), self, activated=self._add_line_with_text)
         self.del_btn.clicked.connect(self._delete_line)
         self.merge_btn.clicked.connect(self._merge_lines)
         self.waveform.selection_changed.connect(self._update_merge_state)
@@ -853,20 +874,44 @@ class LyricsSyncDialog(BaseDialog):
             self.play_btn.setText("▶")
 
     # ── Agregar línea ──────────────────────────────────────────────────
-    def _add_line(self):
-        """Crea una línea nueva en la posición actual del cursor."""
+    def _on_add_pressed(self):
+        self._add_hold_fired = False
+        self._add_hold_timer.start()
+
+    def _on_add_released(self):
+        # Si el temporizador ya disparó, el diálogo se abrió por mantener
+        # presionado: no hacer nada más al soltar. Si no, fue un clic normal.
+        if self._add_hold_timer.isActive():
+            self._add_hold_timer.stop()
+            if not self._add_hold_fired:
+                self._add_line_blank()
+
+    def _on_add_hold(self):
+        self._add_hold_fired = True
+        self._add_line_with_text()
+
+    def _insert_line(self, text: str):
+        """Inserta una línea con `text` en la posición del cursor y la selecciona."""
+        pos = self.waveform.playback_pos
+        new_line = LyricLine(pos, wrap_lyric(text))
+        self.lines.append(new_line)
+        self.lines.sort(key=lambda l: l.start)
+        index = next(i for i, l in enumerate(self.lines) if l is new_line)
+        self.waveform.select_single(index)
+
+    def _add_line_blank(self):
+        """Agrega una línea en blanco en el cursor, sin diálogo."""
+        self._insert_line("")
+
+    def _add_line_with_text(self):
+        """Abre el diálogo de texto y agrega la línea en el cursor."""
         pos = self.waveform.playback_pos
         text, ok = QInputDialog.getMultiLineText(
             self, "Nueva línea", f"Texto (inicio en {pos:.3f}s)", "",
         )
         if not ok:
             return
-        # Se guardan las tags + el texto escrito por el usuario.
-        new_line = LyricLine(pos, wrap_lyric(text))
-        self.lines.append(new_line)
-        self.lines.sort(key=lambda l: l.start)
-        index = next(i for i, l in enumerate(self.lines) if l is new_line)
-        self.waveform.select_single(index)
+        self._insert_line(text)
 
     def _delete_line(self):
         """Elimina todas las líneas seleccionadas."""
@@ -904,10 +949,18 @@ class LyricsSyncDialog(BaseDialog):
         self.merge_btn.setEnabled(self._can_merge())
 
     def _apply_color(self, color: str | None):
-        """Asigna (o quita) el color a todas las líneas seleccionadas."""
+        """Asigna (o quita) el color a todas las líneas seleccionadas.
+
+        Toggle: si todas las líneas seleccionadas ya tienen ese color, se
+        vuelve al color por defecto (None).
+        """
         sel = sorted(i for i in self.waveform.selection if 0 <= i < len(self.lines))
         if not sel:
             return
+        if color is not None and all(
+            extract_color(self.lines[i].text) == color for i in sel
+        ):
+            color = None
         for i in sel:
             clean = strip_tags(self.lines[i].text)
             self.lines[i].text = wrap_lyric(clean, color)
@@ -926,6 +979,9 @@ class LyricsSyncDialog(BaseDialog):
             if line.start >= threshold:
                 line.start = max(0.0, min(dur, line.start + delta))
         self.waveform.update()
+        # Sacar el foco del spinbox de offset: si no, la barra espaciadora
+        # seguiría editando su valor en vez de reanudar la reproducción.
+        self.waveform.setFocus()
 
     # ── Buscador ───────────────────────────────────────────────────────
     def _on_search_text_changed(self, _text: str):
@@ -1026,7 +1082,7 @@ class LyricsSyncDialog(BaseDialog):
                 color_state["color"] = None if color_state["color"] == c else c
                 _refresh_color()
 
-            for cname in ("azul", "blanco"):
+            for cname in ("azul", "blanco", "rojo"):
                 b = bbox.addButton("", QDialogButtonBox.ButtonRole.ActionRole)
                 if b is not None:
                     b.setFixedSize(22, 22)
@@ -1067,7 +1123,7 @@ class LyricsSyncDialog(BaseDialog):
                     lbl = QLabel("Color:")
                     lbl.setStyleSheet("color:#cfcfe0; background:transparent;")
                     lay.insertWidget(idx, lbl)
-                bidx = lay.indexOf(color_btns["blanco"])
+                bidx = lay.indexOf(color_btns["rojo"])
                 if bidx >= 0:
                     lay.insertSpacing(bidx + 1, 24)
 
@@ -1116,6 +1172,13 @@ class LyricsSyncDialog(BaseDialog):
         self._timer.stop()
         self.player.stop()
         super().closeEvent(event)
+
+    def accept(self):
+        # accept() no dispara closeEvent: detener aquí el audio y el timer
+        # para que la reproducción no siga tras cerrar al guardar.
+        self._timer.stop()
+        self.player.stop()
+        super().accept()
 
     def reject(self):
         if self._has_changes():

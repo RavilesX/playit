@@ -269,7 +269,7 @@ class TestDialogLineas:
             staticmethod(lambda *a, **k: ("nueva linea", True)),
         )
         dialog.waveform.playback_pos = 3.0
-        dialog._add_line()
+        dialog._add_line_with_text()
         agregada = next(l for l in dialog.lines if round(l.start, 2) == 3.0)
         assert agregada.text == "<center>nueva linea</center>"
 
@@ -279,8 +279,20 @@ class TestDialogLineas:
             staticmethod(lambda *a, **k: ("", False)),
         )
         antes = len(dialog.lines)
-        dialog._add_line()
+        dialog._add_line_with_text()
         assert len(dialog.lines) == antes
+
+    def test_add_line_blank_no_abre_dialogo(self, dialog, monkeypatch):
+        # No debe invocar el diálogo de texto; agrega una línea vacía.
+        def _boom(*a, **k):
+            raise AssertionError("no debe abrir diálogo")
+        monkeypatch.setattr(lse.QInputDialog, "getMultiLineText", staticmethod(_boom))
+        dialog.waveform.playback_pos = 3.0
+        antes = len(dialog.lines)
+        dialog._add_line_blank()
+        assert len(dialog.lines) == antes + 1
+        agregada = next(l for l in dialog.lines if round(l.start, 2) == 3.0)
+        assert agregada.text == "<center></center>"
 
     def test_delete_line_borra_seleccionada(self, dialog):
         dialog.waveform.selection = {1}

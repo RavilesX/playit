@@ -54,7 +54,7 @@ from ui_components import TitleBar, CustomDial, SizeGrip
 from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog
 from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
 from audio_visualizer import AudioAnalyzer, VisualizerWidget
-from lyrics_sync_editor import LyricsSyncDialog
+from lyrics_sync_editor import AUTO_UNMUTE_COLOR, LYRIC_COLORS, LyricsSyncDialog
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -365,6 +365,14 @@ class AudioPlayer(QMainWindow):
     def _create_track_controls(self):
         self.track_buttons_layout = self.track_buttons()
 
+    # Modos de ordenamiento que recorre el botón toggle (key, reverse, etiqueta)
+    _SORT_MODES = (
+        ("artist", False, "Artista A-Z"),
+        ("artist", True, "Artista Z-A"),
+        ("song", False, "Título A-Z"),
+        ("song", True, "Título Z-A"),
+    )
+
     def _create_playlist_dock(self):
         self.playlist_dock = QDockWidget(self)
         self.playlist_widget = QListWidget()
@@ -372,8 +380,59 @@ class AudioPlayer(QMainWindow):
         self.playlist_widget.setFixedWidth(500)
         self.playlist_widget.setUniformItemSizes(True)
         self._audio_icon = QIcon(resource_path('images/main_window/audio_icon.png'))
-        self.playlist_dock.setWidget(self.playlist_widget)
+
+        # Contenedor: mini barra de herramientas arriba + lista debajo
+        container = QWidget()
+        container.setFixedWidth(500)
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(2)
+        vbox.addLayout(self._create_playlist_toolbar())
+        vbox.addWidget(self.playlist_widget)
+
+        self.playlist_dock.setWidget(container)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.playlist_dock)
+
+    def _create_playlist_toolbar(self):
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(4, 4, 4, 0)
+        toolbar.setSpacing(4)
+
+        self._sort_mode = -1  # -1 = sin orden (carpeta recién cargada)
+
+        folder_btn = QPushButton("Seleccionar carpeta")
+        folder_btn.setObjectName("playlistToolBtn")
+        folder_btn.clicked.connect(lambda: self.load_folder())
+
+        load_btn = QPushButton("Cargar playlist")
+        load_btn.setObjectName("playlistToolBtn")
+        load_btn.clicked.connect(self.load_playlist_mlst)
+
+        clear_btn = QPushButton("Limpiar")
+        clear_btn.setObjectName("playlistToolBtn")
+        clear_btn.clicked.connect(self.clear_playlist)
+
+        self.sort_toggle_btn = QPushButton("Ordenar")
+        self.sort_toggle_btn.setObjectName("playlistToolBtn")
+        self.sort_toggle_btn.clicked.connect(self._cycle_sort)
+
+        self.sort_label = QLabel("Sin orden")
+        self.sort_label.setObjectName("playlistSortLabel")
+
+        for w in (folder_btn, load_btn, clear_btn, self.sort_toggle_btn):
+            toolbar.addWidget(w)
+        toolbar.addWidget(self.sort_label)
+        toolbar.addStretch()
+        return toolbar
+
+    def _reset_sort_label(self):
+        self._sort_mode = -1
+        self.sort_label.setText("Sin orden")
+
+    def _cycle_sort(self):
+        next_mode = (self._sort_mode + 1) % len(self._SORT_MODES)
+        key, reverse, _ = self._SORT_MODES[next_mode]
+        self.sort_playlist(key, reverse=reverse)
 
     def _setup_main_layout(self):
         layout = QVBoxLayout(self.main_frame)
@@ -895,11 +954,13 @@ class AudioPlayer(QMainWindow):
         self.auto_unmute_enabled = checked
 
     def _current_lyric_is_blank(self, current_time: float) -> bool:
-        """True si la línea de letra activa en `current_time` está vacía.
+        """True si la línea de letra activa en `current_time` dispara auto-unmute.
 
-        Las líneas en blanco se guardan como `<center></center>`; al quitar
-        las etiquetas no queda texto. Antes de la primera línea se considera
-        que NO está en blanco (se mantiene la voz muteada en la intro).
+        Dispara cuando la línea está vacía (se guarda como `<center></center>`;
+        al quitar las etiquetas no queda texto) o cuando tiene el color rojo
+        (`AUTO_UNMUTE_COLOR`), que actúa como línea en blanco aunque tenga texto.
+        Antes de la primera línea se considera que NO dispara (la voz sigue
+        muteada en la intro).
         """
         if not self.lyrics:
             return False
@@ -911,6 +972,9 @@ class AudioPlayer(QMainWindow):
                 break
         if html is None:
             return False
+        red_hex = LYRIC_COLORS[AUTO_UNMUTE_COLOR].lower()
+        if f'color="{red_hex}"' in html.lower():
+            return True
         text = re.sub(r'<[^>]*>', '', html).replace('&nbsp;', '').strip()
         return text == ''
 
@@ -1083,6 +1147,7 @@ class AudioPlayer(QMainWindow):
                 """)
                 self.auto_unmute_check.setFixedHeight(self._AUTO_UNMUTE_ROW_H)
                 self.auto_unmute_check.toggled.connect(self._on_auto_unmute_toggled)
+                self.auto_unmute_check.setChecked(True)
                 col.addWidget(self.auto_unmute_check)
             else:
                 # Mismo alto reservado que el checkbox de la voz para que los
@@ -1144,6 +1209,8 @@ class AudioPlayer(QMainWindow):
             )
         if not path:
             return
+        # Carpeta nueva: items sin ordenar
+        self._reset_sort_label()
         self.status_label.setText("Cargando playlist...")
         try:
             self.lazy_playlist.load_playlist_lazy(Path(path))
@@ -1160,6 +1227,7 @@ class AudioPlayer(QMainWindow):
         self._playlist_keys.clear()
         self.playlist_widget.clear()
         self.current_index = -1
+        self._reset_sort_label()
         self._set_playback_buttons_enabled(False)
         self.stop_btn.setEnabled(False)
 
@@ -1213,6 +1281,13 @@ class AudioPlayer(QMainWindow):
         reproducción y rehace los ítems del widget en el nuevo orden."""
         if not self.playlist:
             return
+
+        # Sincronizar etiqueta y modo del toggle (también si se ordena por menú)
+        for i, (k, r, label) in enumerate(self._SORT_MODES):
+            if k == key and r == reverse:
+                self._sort_mode = i
+                self.sort_label.setText(label)
+                break
 
         # Recordar la canción en reproducción para restaurar su índice
         current_song = None
@@ -1348,6 +1423,8 @@ class AudioPlayer(QMainWindow):
                 self._set_playback_buttons_enabled(True)
 
             self._current_mlst_path = file_path
+            if added:
+                self._reset_sort_label()
             self.status_label.setText(
                 f"Playlist cargada: {data.get('name', '')} ({added} nuevas canciones)"
             )
