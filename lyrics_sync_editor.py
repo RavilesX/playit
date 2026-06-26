@@ -93,6 +93,12 @@ LYRIC_COLORS = {
 }
 # Color que actúa como "línea en blanco" para el auto-unmute aunque tenga texto.
 AUTO_UNMUTE_COLOR = "rojo"
+# Texto de ayuda (tooltip) de cada botón de color.
+LYRIC_COLOR_TIPS = {
+    "azul": "Azul: segundo cantante",
+    "blanco": "Blanco: ambos cantantes",
+    "rojo": "Rojo: deja oír esa parte de la voz con el auto-unmute",
+}
 _FONT_COLOR = re.compile(r'<font\s+color="([^"]+)"', re.IGNORECASE)
 
 
@@ -731,6 +737,7 @@ class LyricsSyncDialog(BaseDialog):
             swatch.setFixedSize(22, 22)
             swatch.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             swatch.setStyleSheet(_color_btn_css(LYRIC_COLORS[cname], False))
+            swatch.setToolTip(LYRIC_COLOR_TIPS[cname])
             swatch.clicked.connect(lambda _=False, c=cname: self._apply_color(c))
             bar.addWidget(swatch)
             self.color_btns.append(swatch)
@@ -779,6 +786,28 @@ class LyricsSyncDialog(BaseDialog):
         self.search_box.setStyleSheet(self._SEARCH_NORMAL)
         bar.addWidget(self.search_box)
 
+        # Navegación: inicio / resultado anterior / siguiente / final.
+        # Anterior y Siguiente solo se activan cuando hay texto en el buscador.
+        self.goto_start_btn = QPushButton("|<")
+        self.goto_start_btn.setToolTip("Ir al inicio de la pista (Ctrl+Inicio)")
+        self.search_prev_btn = QPushButton("<")
+        self.search_prev_btn.setToolTip("Resultado anterior (Ctrl+←)")
+        self.search_next_btn = QPushButton(">")
+        self.search_next_btn.setToolTip("Resultado siguiente (Ctrl+→)")
+        self.goto_end_btn = QPushButton(">|")
+        self.goto_end_btn.setToolTip("Ir a la última línea de la letra (Ctrl+Fin)")
+        for b in (self.goto_start_btn, self.search_prev_btn,
+                  self.search_next_btn, self.goto_end_btn):
+            b.setFixedSize(28, 28)
+            b.setStyleSheet(
+                "QPushButton { color: #F88FFF; font-size: 15px; font-weight: bold;"
+                " padding: 0; }"
+                "QPushButton:disabled { color: #6a4a6a; }"
+            )
+            bar.addWidget(b)
+        self.search_prev_btn.setEnabled(False)
+        self.search_next_btn.setEnabled(False)
+
         self.main_layout.addLayout(bar)
 
         # Acciones guardar / cancelar
@@ -798,6 +827,8 @@ class LyricsSyncDialog(BaseDialog):
         # por accidente y siempre llega al keyPressEvent del diálogo.
         for btn in (self.play_btn, self.add_btn, self.del_btn, self.merge_btn,
                     self.back_btn, self.fwd_btn, self.from_cursor_chk,
+                    self.goto_start_btn, self.search_prev_btn,
+                    self.search_next_btn, self.goto_end_btn,
                     self.save_btn, self.cancel_btn):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
@@ -828,6 +859,15 @@ class LyricsSyncDialog(BaseDialog):
         self.cancel_btn.clicked.connect(self.reject)
         self.search_box.returnPressed.connect(self._search_next)
         self.search_box.textChanged.connect(self._on_search_text_changed)
+        # Navegación: inicio / anterior / siguiente / final + atajos.
+        self.goto_start_btn.clicked.connect(self._goto_start)
+        self.search_prev_btn.clicked.connect(self._search_prev)
+        self.search_next_btn.clicked.connect(self._search_next)
+        self.goto_end_btn.clicked.connect(self._goto_end)
+        QShortcut(QKeySequence("Ctrl+Home"), self, activated=self._goto_start)
+        QShortcut(QKeySequence("Ctrl+Left"), self, activated=self._search_prev)
+        QShortcut(QKeySequence("Ctrl+Right"), self, activated=self._search_next)
+        QShortcut(QKeySequence("Ctrl+End"), self, activated=self._goto_end)
         self.scrollbar.valueChanged.connect(self._on_scroll)
         self.waveform.view_changed.connect(self._sync_scroll_from_view)
         self.waveform.seek_requested.connect(self._on_seek)
@@ -984,10 +1024,14 @@ class LyricsSyncDialog(BaseDialog):
         self.waveform.setFocus()
 
     # ── Buscador ───────────────────────────────────────────────────────
-    def _on_search_text_changed(self, _text: str):
+    def _on_search_text_changed(self, text: str):
         # Texto nuevo: reinicia el ciclo y limpia el estado rojo.
         self._search_index = -1
         self.search_box.setStyleSheet(self._SEARCH_NORMAL)
+        # Anterior/Siguiente solo con texto en el buscador.
+        has_text = bool(text.strip())
+        self.search_prev_btn.setEnabled(has_text)
+        self.search_next_btn.setEnabled(has_text)
 
     def _search_next(self):
         """Salta al siguiente registro que contenga el texto, en bucle.
@@ -1010,13 +1054,59 @@ class LyricsSyncDialog(BaseDialog):
                 return
         self.search_box.setStyleSheet(self._SEARCH_RED)
 
+    def _search_prev(self):
+        """Salta al registro coincidente anterior, en bucle. Sin texto: nada."""
+        term = fold_text(self.search_box.text().strip())
+        n = len(self.lines)
+        if not term or n == 0:
+            self.search_box.setStyleSheet(
+                self._SEARCH_RED if term else self._SEARCH_NORMAL
+            )
+            return
+        base = self._search_index if self._search_index >= 0 else 0
+        for offset in range(1, n + 1):
+            i = (base - offset) % n
+            if term in fold_text(strip_tags(self.lines[i].text)):
+                self._search_index = i
+                self.search_box.setStyleSheet(self._SEARCH_NORMAL)
+                self._goto_line(i)
+                return
+        self.search_box.setStyleSheet(self._SEARCH_RED)
+
+    def _goto_start(self):
+        """Mueve el cursor de reproducción al inicio de la pista."""
+        self._move_cursor_to(0.0)
+
+    def _goto_end(self):
+        """Mueve el cursor a la última línea de la letra (o al final si no hay)."""
+        if self.lines:
+            last = max(range(len(self.lines)), key=lambda i: self.lines[i].start)
+            self._goto_line(last)
+        else:
+            self._move_cursor_to(self.audio.duration)
+
+    def _move_cursor_to(self, pos: float):
+        """Coloca el cursor en `pos`, reencuadra la vista y reanuda el seek."""
+        pos = max(0.0, min(self.audio.duration, pos))
+        self.waveform.playback_pos = pos
+        self.waveform.set_start_pos(pos - self.waveform.visible_seconds / 2)
+        if self.player.playing:
+            self.player.play(pos)
+        self.waveform.update()
+        # Foco a la waveform: que la barra espaciadora reproduzca de inmediato.
+        self.waveform.setFocus()
+
     def _goto_line(self, index: int):
         """Selecciona la línea, mueve el cursor y centra la vista en ella."""
         line = self.lines[index]
         self.waveform.select_single(index)
         self.waveform.playback_pos = line.start
         self.waveform.set_start_pos(line.start - self.waveform.visible_seconds / 2)
+        if self.player.playing:
+            self.player.play(line.start)
         self.waveform.update()
+        # Foco a la waveform: que la barra espaciadora reproduzca de inmediato.
+        self.waveform.setFocus()
 
     # ── Teclado ────────────────────────────────────────────────────────
     def keyPressEvent(self, event):
@@ -1087,6 +1177,7 @@ class LyricsSyncDialog(BaseDialog):
                 if b is not None:
                     b.setFixedSize(22, 22)
                     b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                    b.setToolTip(LYRIC_COLOR_TIPS[cname])
                     b.clicked.connect(lambda _=False, c=cname: _toggle(c))
                     color_btns[cname] = b
             _refresh_color()
