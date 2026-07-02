@@ -43,6 +43,7 @@ from PyQt6.QtGui import (
     QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut, QTextOption,
 )
 from PyQt6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -1168,8 +1169,8 @@ class LyricsSyncDialog(BaseDialog):
         # pinta la línea para distinguir cantantes. Funcionan como toggle:
         # volver a pulsar el color activo regresa al color por defecto.
         color_state = {"color": extract_color(self.lines[index].text)}
+        color_btns: dict[str, QPushButton] = {}
         if bbox is not None and editor is not None:
-            color_btns: dict[str, QPushButton] = {}
 
             def _refresh_color():
                 name = color_state["color"]
@@ -1225,7 +1226,9 @@ class LyricsSyncDialog(BaseDialog):
         # final porque cada addButton re-arma el layout y borraría los insertos.
         if bbox is not None and color_btns:
             lay = bbox.layout()
-            if lay is not None:
+            # El layout del button box es un QBoxLayout; el isinstance además
+            # le da al checker el tipo con insertWidget/insertSpacing.
+            if isinstance(lay, QBoxLayout):
                 idx = lay.indexOf(color_btns["azul"])
                 if idx >= 0:
                     lbl = QLabel("Color:")
