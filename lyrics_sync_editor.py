@@ -54,7 +54,6 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollBar,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -835,6 +834,14 @@ class LyricsSyncDialog(BaseDialog):
 
         self._refresh_scroll_range()
 
+    def _add_shortcut(self, keys: str, slot) -> None:
+        """Crea un QShortcut del diálogo conectado a `slot`.
+
+        Conexión explícita en vez del kwarg `activated=` del constructor
+        (funciona, pero los stubs de PyQt6 no lo declaran y el IDE lo marca).
+        """
+        QShortcut(QKeySequence(keys), self).activated.connect(slot)
+
     def _wire(self):
         self.play_btn.clicked.connect(self._toggle_play)
         # Botón "＋ Línea": clic normal agrega línea en blanco; mantenerlo
@@ -849,8 +856,8 @@ class LyricsSyncDialog(BaseDialog):
         self.add_btn.pressed.connect(self._on_add_pressed)
         self.add_btn.released.connect(self._on_add_released)
         # Atajos: Ctrl+N línea en blanco, Ctrl+Shift+N línea con texto.
-        QShortcut(QKeySequence("Ctrl+N"), self, activated=self._add_line_blank)
-        QShortcut(QKeySequence("Ctrl+Shift+N"), self, activated=self._add_line_with_text)
+        self._add_shortcut("Ctrl+N", self._add_line_blank)
+        self._add_shortcut("Ctrl+Shift+N", self._add_line_with_text)
         self.del_btn.clicked.connect(self._delete_line)
         self.merge_btn.clicked.connect(self._merge_lines)
         self.waveform.selection_changed.connect(self._update_merge_state)
@@ -863,16 +870,16 @@ class LyricsSyncDialog(BaseDialog):
         # Ctrl+F enfoca el buscador (la acción "Buscar canción..." de la
         # ventana principal se deshabilita mientras el editor está abierto
         # para que no se dispare su diálogo).
-        QShortcut(QKeySequence("Ctrl+F"), self, activated=self._focus_search)
+        self._add_shortcut("Ctrl+F", self._focus_search)
         # Navegación: inicio / anterior / siguiente / final + atajos.
         self.goto_start_btn.clicked.connect(self._goto_start)
         self.search_prev_btn.clicked.connect(self._search_prev)
         self.search_next_btn.clicked.connect(self._search_next)
         self.goto_end_btn.clicked.connect(self._goto_end)
-        QShortcut(QKeySequence("Ctrl+Home"), self, activated=self._goto_start)
-        QShortcut(QKeySequence("Ctrl+Left"), self, activated=self._search_prev)
-        QShortcut(QKeySequence("Ctrl+Right"), self, activated=self._search_next)
-        QShortcut(QKeySequence("Ctrl+End"), self, activated=self._goto_end)
+        self._add_shortcut("Ctrl+Home", self._goto_start)
+        self._add_shortcut("Ctrl+Left", self._search_prev)
+        self._add_shortcut("Ctrl+Right", self._search_next)
+        self._add_shortcut("Ctrl+End", self._goto_end)
         self.scrollbar.valueChanged.connect(self._on_scroll)
         self.waveform.view_changed.connect(self._sync_scroll_from_view)
         self.waveform.seek_requested.connect(self._on_seek)
