@@ -781,6 +781,7 @@ class LyricsSyncDialog(BaseDialog):
         bar.addWidget(QLabel("Buscar:"))
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("texto…")
+        self.search_box.setToolTip("Buscar en la letra (Ctrl+F)")
         self.search_box.setFixedWidth(160)
         self.search_box.setClearButtonEnabled(True)
         self.search_box.setStyleSheet(self._SEARCH_NORMAL)
@@ -859,6 +860,10 @@ class LyricsSyncDialog(BaseDialog):
         self.cancel_btn.clicked.connect(self.reject)
         self.search_box.returnPressed.connect(self._search_next)
         self.search_box.textChanged.connect(self._on_search_text_changed)
+        # Ctrl+F enfoca el buscador (la acción "Buscar canción..." de la
+        # ventana principal se deshabilita mientras el editor está abierto
+        # para que no se dispare su diálogo).
+        QShortcut(QKeySequence("Ctrl+F"), self, activated=self._focus_search)
         # Navegación: inicio / anterior / siguiente / final + atajos.
         self.goto_start_btn.clicked.connect(self._goto_start)
         self.search_prev_btn.clicked.connect(self._search_prev)
@@ -1024,6 +1029,11 @@ class LyricsSyncDialog(BaseDialog):
         self.waveform.setFocus()
 
     # ── Buscador ───────────────────────────────────────────────────────
+    def _focus_search(self):
+        """Lleva el foco a la caja de búsqueda y selecciona su texto (Ctrl+F)."""
+        self.search_box.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.search_box.selectAll()
+
     def _on_search_text_changed(self, text: str):
         # Texto nuevo: reinicia el ciclo y limpia el estado rojo.
         self._search_index = -1

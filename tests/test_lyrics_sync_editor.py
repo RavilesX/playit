@@ -559,6 +559,12 @@ class TestDialogBuscador:
         dialog._search_next()
         assert dialog._search_index == 1
 
+    def test_focus_search_enfoca_y_selecciona(self, dialog):
+        dialog.search_box.setText("hola")
+        dialog._focus_search()
+        assert dialog.focusWidget() is dialog.search_box
+        assert dialog.search_box.selectedText() == "hola"
+
     def test_cambiar_texto_reinicia_indice(self, dialog):
         self._set_lines(dialog, ["hola sol", "hola luna"])
         dialog.search_box.setText("hola")

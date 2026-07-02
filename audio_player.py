@@ -1512,7 +1512,13 @@ class AudioPlayer(QMainWindow):
         dialog = LyricsSyncDialog(
             self, path / "separated" / "vocals.mp3", path / "lyrics.lrc",
         )
-        dialog.exec()
+        # Ctrl+F dentro del editor enfoca su buscador; deshabilitar la acción
+        # de búsqueda global para que no abra su diálogo encima del editor.
+        self.search_action.setEnabled(False)
+        try:
+            dialog.exec()
+        finally:
+            self.search_action.setEnabled(True)
 
         if dialog.saved:
             # Invalidar cache y recargar letras editadas.
