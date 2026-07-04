@@ -1,6 +1,6 @@
 # playit
 Reproductor de audio con demucs integrado
-Versión funcional en Windows y Linux
+Versión funcional en Windows y Linux; soporte para macOS (aún sin probar en hardware real)
 Probado en:
 
 Windows 10
@@ -50,6 +50,36 @@ source venv/bin/activate
 python3 main.py
 
 Guárdalo como playit.sh, dale permisos con chmod +x playit.sh, y ya solo ejecutas ./playit.sh.
+
+Para ejecutarlo en macOS desde la consola:
+
+1.- Instala FFmpeg con Homebrew (https://brew.sh)
+
+brew install ffmpeg
+
+En macOS no hace falta instalar portaudio ni libsndfile: los wheels de pip de sounddevice y soundfile ya traen esas librerías incluidas.
+
+2.- Crea un entorno virtual y activa
+
+python3 -m venv venv
+
+source venv/bin/activate
+
+3.- Instala las dependencias Python
+
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+
+4.- Ejecuta
+
+python3 main.py
+
+Nota sobre Demucs en Apple Silicon (M1/M2/M3): la separación de pistas usa aceleración MPS automáticamente si PyTorch la soporta, no hay que instalar CUDA.
+
+Nota sobre el ejecutable PlayIt.app descargado de Releases: al no estar firmado con un certificado de Apple, Gatekeeper lo bloqueará con un mensaje de "app dañada" o "desarrollador no identificado". Para abrirlo la primera vez:
+
+xattr -cr PlayIt.app
+
+o bien clic derecho sobre PlayIt.app → Abrir → Abrir.
 
 
 Cualquier duda o colaboración

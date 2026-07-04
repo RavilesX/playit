@@ -37,7 +37,7 @@ import sounddevice as sd
 import soundfile as sf
 import numpy as np
 from platform_utils import (
-    IS_WINDOWS, IS_LINUX,
+    IS_WINDOWS, IS_MAC,
     run_silent, check_command_exists, get_python_cmd,
     detect_nvidia_gpu, check_visual_cpp, check_pytorch_cuda,
 )
@@ -156,9 +156,9 @@ class AudioPlayer(QMainWindow):
         self.last_in_queue = {"artist": "", "song": ""}
         self._verification_attempts = 0
 
-        # Dependencias — marcamos vc_available=True en Linux (no se necesita)
+        # Dependencias — marcamos vc_available=True fuera de Windows (no se necesita)
         self.python_available = False
-        self.vc_available = not IS_WINDOWS  # Linux no necesita Visual C++
+        self.vc_available = not IS_WINDOWS  # Linux/macOS no necesitan Visual C++
         self.ytdlp_available = False
         self.ffmpeg_available = False
         self.gpu_available = False
@@ -1909,6 +1909,18 @@ class AudioPlayer(QMainWindow):
         )
         return reply == QMessageBox.StandardButton.Yes
 
+    def _check_brew(self) -> bool:
+        """En macOS los instaladores dependen de Homebrew; avisa si falta."""
+        if not IS_MAC or check_command_exists('brew'):
+            return True
+        styled_message_box(
+            self, "Homebrew no encontrado",
+            "Esta instalación requiere Homebrew y no está instalado.\n"
+            "Instálelo desde https://brew.sh y vuelva a intentarlo.",
+            QMessageBox.Icon.Warning,
+        )
+        return False
+
     def _start_worker_thread(self, worker, thread_attr: str, worker_attr: str,
                              on_finished, on_error, status_msg: str):
         thread = QThread()
@@ -1954,7 +1966,10 @@ class AudioPlayer(QMainWindow):
                 self, "Python ya instalado", "Python ya está instalado.",
                 QMessageBox.Icon.Information,
             )
-        pkg = "Python" if IS_LINUX else "Python mediante winget"
+        if not self._check_brew():
+            return
+        pkg = ("Python mediante winget" if IS_WINDOWS
+               else "Python mediante Homebrew" if IS_MAC else "Python")
         if not self._confirm_install(pkg):
             return
         self._start_worker_thread(
@@ -1998,7 +2013,10 @@ class AudioPlayer(QMainWindow):
                 self, "FFmpeg ya instalado", "FFmpeg ya está instalado.",
                 QMessageBox.Icon.Information,
             )
-        pkg = "FFmpeg" if IS_LINUX else "FFmpeg mediante winget"
+        if not self._check_brew():
+            return
+        pkg = ("FFmpeg mediante winget" if IS_WINDOWS
+               else "FFmpeg mediante Homebrew" if IS_MAC else "FFmpeg")
         if not self._confirm_install(pkg):
             return
         self._start_worker_thread(
@@ -2274,9 +2292,14 @@ class AudioPlayer(QMainWindow):
              not self.ffmpeg_available),
             ("install_demucs_action", "Instalar Demucs", self.install_demucs,
              self.python_available and not self.demucs_available),
-            ("install_cuda_action", "Instalar CUDA (GPU Nvidia necesario)", self.install_cuda,
-             self.python_available and self.gpu_available and not self.pytorch_cuda_available),
         ]
+
+        # CUDA no existe en macOS; Demucs usa MPS automáticamente ahí
+        if not IS_MAC:
+            dep_specs.append(
+                ("install_cuda_action", "Instalar CUDA (GPU Nvidia necesario)", self.install_cuda,
+                 self.python_available and self.gpu_available and not self.pytorch_cuda_available)
+            )
 
         if IS_WINDOWS:
             dep_specs.insert(1, (

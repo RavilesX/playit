@@ -15,13 +15,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import json
+import os
 import shutil
 import io
 from pathlib import Path
 from mutagen.mp3 import MP3
 from PIL import Image
 from PyQt6.QtCore import QObject, pyqtSignal
-from platform_utils import run_silent, get_python_cmd
+from platform_utils import run_silent, get_python_cmd, check_pytorch_mps
 
 
 class DemucsWorker(QObject):
@@ -60,15 +61,25 @@ class DemucsWorker(QObject):
 
     def _run_demucs(self):
         python = get_python_cmd()
+
+        # Apple Silicon: acelerar con MPS; las ops que MPS no soporta caen a CPU
+        device_args = []
+        env = None
+        if check_pytorch_mps():
+            device_args = ["-d", "mps"]
+            env = os.environ.copy()
+            env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
         cmd = [
             python, "-m", "demucs",
             "-n", "htdemucs_ft",
+            *device_args,
             "-o", str(self.base_path / "separated"),
             "--mp3",
             str(self.src_path),
         ]
 
-        result = run_silent(cmd, timeout=7200)  # 2 horas máximo
+        result = run_silent(cmd, timeout=7200, env=env)  # 2 horas máximo
 
         if result.returncode != 0:
             error_msg = f"Demucs falló con código {result.returncode}"

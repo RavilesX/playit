@@ -78,6 +78,8 @@ def get_pip_cmd() -> list:
 # ── Detección de hardware ────────────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────
 def detect_nvidia_gpu() -> bool:
+    if IS_MAC:
+        return False  # Los Mac modernos no llevan GPU NVIDIA (sin soporte CUDA)
     if IS_WINDOWS:
         try:
             result = run_silent(
@@ -129,6 +131,22 @@ def check_pytorch_cuda() -> bool:
         return False
 
 
+def check_pytorch_mps() -> bool:
+    """Detecta aceleración MPS (Apple Silicon). El torch normal de pip ya la trae."""
+    if not IS_MAC:
+        return False
+    python = get_python_cmd()
+    try:
+        result = run_silent(
+            [python, '-c',
+             'import torch; exit(0 if torch.backends.mps.is_available() else 1)'],
+            timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # ── Instaladores por plataforma ──────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────
@@ -158,6 +176,8 @@ def get_python_install_cmd() -> list:
             'sudo', 'apt-get', 'install', '-y',
             'python3', 'python3-pip', 'python3-venv',
         ]
+    elif IS_MAC:
+        return ['brew', 'install', 'python@3.13']
     return []
 
 

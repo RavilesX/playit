@@ -72,9 +72,43 @@ jobs:
           name: PlayIt-windows
           path: dist/PlayIt.exe
 
+  # ---------- MACOS (Apple Silicon; usar macos-13 para Intel) ----------
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias de Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics pyinstaller
+
+      - name: Inyectar versión desde el tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: echo "__version__ = \"${GITHUB_REF_NAME#v}\"" > version.py
+
+      - name: Compilar con PyInstaller
+        run: pyinstaller --clean -y PlayIt.spec
+
+      # ditto preserva permisos de ejecución y symlinks del bundle,
+      # que upload-artifact perdería si se sube la carpeta .app directa
+      - name: Comprimir PlayIt.app
+        run: ditto -c -k --keepParent dist/PlayIt.app PlayIt-macos.zip
+
+      - name: Subir ejecutable macOS
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlayIt-macos
+          path: PlayIt-macos.zip
+
   # ---------- RELEASE (solo en tags v*) ----------
   release:
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -92,10 +126,17 @@ jobs:
           name: PlayIt-windows
           path: windows
 
+      - name: Descargar ejecutable macOS
+        uses: actions/download-artifact@v4
+        with:
+          name: PlayIt-macos
+          path: macos
+
       - name: Renombrar con la versión
         run: |
-          mv linux/PlayIt        PlayIt-${GITHUB_REF_NAME}-linux
-          mv windows/PlayIt.exe  PlayIt-${GITHUB_REF_NAME}-windows.exe
+          mv linux/PlayIt          PlayIt-${GITHUB_REF_NAME}-linux
+          mv windows/PlayIt.exe    PlayIt-${GITHUB_REF_NAME}-windows.exe
+          mv macos/PlayIt-macos.zip PlayIt-${GITHUB_REF_NAME}-macos.zip
 
       - name: Crear GitHub Release
         uses: softprops/action-gh-release@v2
@@ -103,4 +144,5 @@ jobs:
           files: |
             PlayIt-${{ github.ref_name }}-linux
             PlayIt-${{ github.ref_name }}-windows.exe
+            PlayIt-${{ github.ref_name }}-macos.zip
           generate_release_notes: true
