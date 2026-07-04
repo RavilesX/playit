@@ -63,6 +63,24 @@ def get_hidden_subprocess_kwargs() -> dict:
     return {}
 
 
+# Finder lanza las apps con un PATH mínimo (/usr/bin:/bin:...) que no incluye
+# las rutas de Homebrew, así que ffmpeg/brew instalados ahí serían invisibles
+# para la app y sus subprocesos.
+_MAC_EXTRA_PATHS = ('/opt/homebrew/bin', '/usr/local/bin')
+
+
+def _augment_mac_path(env: dict | None) -> dict | None:
+    if not IS_MAC:
+        return env
+    env = dict(env) if env is not None else os.environ.copy()
+    parts = env.get('PATH', '').split(os.pathsep) if env.get('PATH') else []
+    for p in _MAC_EXTRA_PATHS:
+        if p not in parts:
+            parts.append(p)
+    env['PATH'] = os.pathsep.join(parts)
+    return env
+
+
 def run_silent(cmd, *, timeout=300, check=False, **extra_kwargs) -> subprocess.CompletedProcess:
     kwargs = {
         'capture_output': True,
@@ -71,6 +89,7 @@ def run_silent(cmd, *, timeout=300, check=False, **extra_kwargs) -> subprocess.C
         **get_hidden_subprocess_kwargs(),
         **extra_kwargs,
     }
+    kwargs['env'] = _augment_mac_path(kwargs.get('env'))
     return subprocess.run(cmd, check=check, **kwargs)
 
 
