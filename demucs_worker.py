@@ -22,7 +22,7 @@ from pathlib import Path
 from mutagen.mp3 import MP3
 from PIL import Image
 from PyQt6.QtCore import QObject, pyqtSignal
-from platform_utils import run_silent, get_python_cmd, check_pytorch_mps
+from platform_utils import run_silent, get_python_cmd, get_data_dir, check_pytorch_mps
 
 
 class DemucsWorker(QObject):
@@ -35,7 +35,7 @@ class DemucsWorker(QObject):
         self.artist = artist
         self.song = song
         self.src_path = Path(src_path)
-        self.base_path = Path("music_library") / artist / song
+        self.base_path = get_data_dir() / "music_library" / artist / song
 
     def run(self):
         try:

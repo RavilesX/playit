@@ -14,9 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal
-from platform_utils import run_silent
+from platform_utils import run_silent, get_data_dir
 
 
 class YTDLPDownloadWorker(QObject):
@@ -51,7 +50,7 @@ class YTDLPDownloadWorker(QObject):
 
     def run(self):
         try:
-            download_dir = Path("./mp3Downloads")
+            download_dir = get_data_dir() / "mp3Downloads"
             download_dir.mkdir(exist_ok=True)
 
             cmd = [

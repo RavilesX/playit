@@ -17,6 +17,7 @@
 import os
 import sys
 import subprocess
+from pathlib import Path
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ── Detección de plataforma ──────────────────────────────────────────────────
@@ -24,6 +25,25 @@ import subprocess
 IS_WINDOWS = os.name == 'nt'
 IS_LINUX = sys.platform.startswith('linux')
 IS_MAC = sys.platform == 'darwin'
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ── Rutas de datos ────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+def get_data_dir() -> Path:
+    """Carpeta base escribible para datos de la app (music_library, logs).
+
+    En Windows/Linux se conserva el comportamiento histórico: rutas relativas
+    al directorio de trabajo (el ejecutable se lanza desde su carpeta). En
+    macOS eso no sirve: Finder lanza el .app con cwd=/ y Gatekeeper puede
+    ejecutarlo translocado en un volumen de solo lectura, así que se usa
+    ~/Music/PlayIt.
+    """
+    if IS_MAC:
+        data_dir = Path.home() / 'Music' / 'PlayIt'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        return data_dir
+    return Path('.')
 
 
 # ──────────────────────────────────────────────────────────────────────────────

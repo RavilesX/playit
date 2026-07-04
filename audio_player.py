@@ -38,7 +38,7 @@ import soundfile as sf
 import numpy as np
 from platform_utils import (
     IS_WINDOWS, IS_MAC,
-    run_silent, check_command_exists, get_python_cmd,
+    run_silent, check_command_exists, get_python_cmd, get_data_dir,
     detect_nvidia_gpu, check_visual_cpp, check_pytorch_cuda,
 )
 from demucs_worker import DemucsWorker
@@ -60,7 +60,7 @@ from lyrics_sync_editor import AUTO_UNMUTE_COLOR, LYRIC_COLORS, LyricsSyncDialog
 # ── Constantes ────────────────────────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────────
 TRACK_NAMES = ("drums", "vocals", "bass", "other")
-DEFAULT_LIBRARY = Path("music_library")
+DEFAULT_LIBRARY = get_data_dir() / "music_library"
 DEFAULT_VOLUME = 25
 LYRICS_FONT_MIN = 20
 LYRICS_FONT_MAX = 82
@@ -1873,7 +1873,7 @@ class AudioPlayer(QMainWindow):
             result = run_silent([python, '-m', 'demucs', '--help'], timeout=15)
             self.demucs_available = result.returncode == 0
         except Exception as e:
-            Path("demucs_error.log").write_text(f"Error checking Demucs: {e}")
+            (get_data_dir() / "demucs_error.log").write_text(f"Error checking Demucs: {e}")
             self.demucs_available = False
 
     def _check_python_installation(self):
