@@ -60,32 +60,65 @@ class DemucsWorker(QObject):
             self.error.emit(f"Error: {str(e)}")
 
     def _run_demucs(self):
-        python = get_python_cmd()
+        use_mps = check_pytorch_mps()
+        result = self._exec_demucs(mps=use_mps)
 
-        # Apple Silicon: acelerar con MPS; las ops que MPS no soporta caen a CPU
-        device_args = []
+        # MPS puede fallar según la combinación torch/demucs;
+        # reintentar en CPU antes de rendirse
+        if result.returncode != 0 and use_mps:
+            self._log_failure(result, "Intento con MPS falló, reintentando en CPU")
+            result = self._exec_demucs(mps=False)
+
+        if result.returncode != 0:
+            self._log_failure(result, "Intento final falló")
+            error_msg = f"Demucs falló con código {result.returncode}"
+            detail = self._relevant_output(result)
+            if detail:
+                error_msg += f"\n{detail}"
+            error_msg += f"\n\nLog completo en: {get_data_dir() / 'demucs_error.log'}"
+            raise RuntimeError(error_msg)
+
+    def _exec_demucs(self, mps: bool):
+        python = get_python_cmd()
         env = None
-        if check_pytorch_mps():
-            device_args = ["-d", "mps"]
+        if mps:
+            # Las ops que MPS no soporta caen a CPU en vez de abortar
             env = os.environ.copy()
             env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-
         cmd = [
             python, "-m", "demucs",
             "-n", "htdemucs_ft",
-            *device_args,
+            *(["-d", "mps"] if mps else []),
             "-o", str(self.base_path / "separated"),
             "--mp3",
             str(self.src_path),
         ]
+        return run_silent(cmd, timeout=7200, env=env)  # 2 horas máximo
 
-        result = run_silent(cmd, timeout=7200, env=env)  # 2 horas máximo
+    @staticmethod
+    def _relevant_output(result) -> str:
+        """Últimas líneas útiles del output, sin barras de progreso ni descargas."""
+        lines = []
+        for stream in (result.stderr or "", result.stdout or ""):
+            for ln in stream.splitlines():
+                s = ln.strip()
+                if not s or "%|" in s or s.startswith("Downloading:"):
+                    continue
+                lines.append(s)
+        return "\n".join(lines[-15:])
 
-        if result.returncode != 0:
-            error_msg = f"Demucs falló con código {result.returncode}"
-            if result.stderr:
-                error_msg += f"\nError: {result.stderr.strip()}"
-            raise RuntimeError(error_msg)
+    @staticmethod
+    def _log_failure(result, context: str):
+        try:
+            log = get_data_dir() / "demucs_error.log"
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(
+                    f"\n===== {context} (código {result.returncode}) =====\n"
+                    f"--- stderr ---\n{result.stderr or ''}\n"
+                    f"--- stdout ---\n{result.stdout or ''}\n"
+                )
+        except Exception:
+            pass  # el log nunca debe tumbar la separación
 
     def _extract_cover(self):
         # Track repetido: conservar la portada existente, solo reemplazar stems.
