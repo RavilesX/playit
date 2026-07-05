@@ -219,7 +219,11 @@ class DialogTitleBar(TitleBar):
                         """
         self.setStyleSheet(btn_style)
 
-        # Conectar correctamente el cierre
+        # Cerrar = reject. Quitar antes la conexión a close() heredada de
+        # TitleBar: con ambas, un clic disparaba reject dos veces (close()
+        # también llama reject vía closeEvent) y los diálogos con
+        # confirmación de cambios preguntaban dos veces.
+        self.close_btn.clicked.disconnect()
         self.close_btn.clicked.connect(parent.reject)
 
 
