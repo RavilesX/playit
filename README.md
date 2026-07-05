@@ -1,168 +1,289 @@
-# playit
-Reproductor de audio con demucs integrado
-Versión funcional en Windows y Linux; soporte para macOS (aún sin probar en hardware real)
-Probado en:
+<div align="center">
 
-Windows 10
+<img src="images/main_window/main_icon.png" width="120" alt="PlayIt">
 
-Windows 11
+# PlayIt
 
-Linux Mint
+**Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-Linux Ubuntu
+[![Versión](https://img.shields.io/badge/versión-1.2.1-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
+[![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
-Linux Suse
+[Español](#español) · [English](#english)
 
-Para ejecutarlo en Linux desde la consola:
+</div>
 
-1.- Instala las dependencias del sistema
+---
 
-sudo apt update
+# Español
 
-sudo apt install python3 python3-pip python3-venv ffmpeg portaudio19-dev libsndfile1
+## Descripción
 
-portaudio19-dev es necesario porque sounddevice lo usa por debajo para hablar con el hardware de audio, en Windows esto viene incluido, pero en Linux hay que instalarlo explícitamente. libsndfile1 es lo mismo pero para soundfile.
+PlayIt es un reproductor de audio de escritorio que separa canciones en cuatro pistas independientes (batería, voz, bajo y otros instrumentos) usando [Demucs](https://github.com/facebookresearch/demucs), y las reproduce de forma simultánea con volumen y silencio independientes por pista. Ideal para practicar un instrumento, hacer karaoke o estudiar mezclas.
 
-2.- Crea un entorno virtual y activa
+### Características
 
-python3 -m venv venv
+- **Separación de pistas** con Demucs (modelo `htdemucs_ft`), con aceleración GPU (CUDA en NVIDIA, MPS en Apple Silicon) y cola de procesamiento.
+- **Reproducción multi-pista**: 4 stems sincronizados con control de volumen/mute individual.
+- **Letras sincronizadas (LRC)**: descarga automática, offset ajustable, colores por intérprete y editor visual de sincronización sobre la forma de onda de la voz.
+- **Auto-unmute**: reactiva la voz con fundido en las secciones sin letra (modo karaoke inteligente).
+- **Descarga desde YouTube** (yt-dlp) directa a MP3.
+- **Visualizador de audio** tipo CAVA renderizado en NumPy.
+- **Playlists** `.mlst` con ordenamiento por artista/título.
+- **Instalador de dependencias integrado**: la app detecta e instala lo que falta desde su propio menú.
 
-source venv/bin/activate
+## Sistemas soportados
 
-3.- Instala las dependencias Python
+| Sistema | Estado |
+|---|---|
+| Windows 10 / 11 | ✅ Probado |
+| Linux (Mint, Ubuntu, openSUSE) | ✅ Probado |
+| macOS (Apple Silicon) | ✅ Probado en Mac Mini M2 |
+| macOS (Intel) | ⚠️ Sin binario oficial; posible desde código fuente |
 
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+## Requisitos de hardware
 
-sudo apt install libxcb-cursor0
+|  | Mínimo | Recomendado |
+|---|---|---|
+| CPU | Doble núcleo 64 bits | 4+ núcleos |
+| RAM | 4 GB (solo reproducción) / 8 GB (separación) | 16 GB |
+| GPU | No requerida | NVIDIA con CUDA, o Apple Silicon (MPS) |
+| Disco | ~1 GB (app + modelos) | 3 GB+ (biblioteca separada crece ~40 MB por canción) |
 
-4.- Ejecuta
+Tiempos de referencia separando una canción de ~4:30 con `htdemucs_ft`:
 
-python3 main.py
+- Apple M2 (MPS): **~3 min**
+- CPU moderna sin GPU: **~12 min**
 
-Para no escribir todo eso cada vez, puedes crear un script de arranque:
+## Instalación (ejecutables)
 
-bash#!/bin/bash
+Descarga la última versión desde [Releases](https://github.com/RavilesX/playit/releases/latest).
 
-cd ~/playit
+**Windows** — descarga `PlayIt-vX.Y.Z-windows.exe` y ejecútalo.
 
-source venv/bin/activate
+**Linux** — descarga `PlayIt-vX.Y.Z-linux.tar.gz`:
 
-python3 main.py
+```bash
+tar -xzf PlayIt-vX.Y.Z-linux.tar.gz
+./PlayIt
+```
 
-Guárdalo como playit.sh, dale permisos con chmod +x playit.sh, y ya solo ejecutas ./playit.sh.
+**macOS** — descarga `PlayIt-vX.Y.Z-macos.zip`, descomprime y, como la app no está firmada, autorízala la primera vez:
 
-Para ejecutarlo en macOS desde la consola:
-
-1.- Instala FFmpeg con Homebrew (https://brew.sh)
-
-brew install ffmpeg
-
-En macOS no hace falta instalar portaudio ni libsndfile: los wheels de pip de sounddevice y soundfile ya traen esas librerías incluidas.
-
-2.- Crea un entorno virtual y activa
-
-python3 -m venv venv
-
-source venv/bin/activate
-
-3.- Instala las dependencias Python
-
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
-
-4.- Ejecuta
-
-python3 main.py
-
-Nota sobre Demucs en Apple Silicon (M1/M2/M3): la separación de pistas usa aceleración MPS automáticamente si PyTorch la soporta, no hay que instalar CUDA.
-
-Nota sobre el ejecutable PlayIt.app descargado de Releases: al no estar firmado con un certificado de Apple, Gatekeeper lo bloqueará con un mensaje de "app dañada" o "desarrollador no identificado". Para abrirlo la primera vez:
-
+```bash
 xattr -cr PlayIt.app
-
-o bien clic derecho sobre PlayIt.app → Abrir → Abrir.
-
-
-Cualquier duda o colaboración
-
-ravilesx@gmail.com
-
-## Análisis del Código
-
-### Arquitectura General
-PlayIt es un reproductor de audio avanzado con separación de fuentes integrada utilizando Demucs. La aplicación está construida con PyQt6 para la interfaz gráfica y utiliza un sistema de workers en hilos separados para tareas pesadas como descarga, separación de audio e instalación de dependencias.
-
-### Componentes Principales
-
-#### Núcleo de la Aplicación
-- **main.py**: Punto de entrada principal. Crea la aplicación PyQt6, muestra una pantalla de splash y inicializa el AudioPlayer.
-- **audio_player.py**: Clase principal que maneja la interfaz de usuario y la lógica del reproductor. Incluye gestión de playlists, controles de reproducción, visualización de letras y separación de audio.
-
-#### Workers de Procesamiento
-- **demucs_worker.py**: Maneja la separación de audio en stems (drums, vocals, bass, other) usando el modelo htdemucs_ft de Demucs.
-- **ytdlp_worker.py**: Procesa archivos de audio descargados con yt-dlp, convirtiéndolos a formato WAV para separación.
-- **ffmpeg_worker.py**: Utiliza FFmpeg para conversión de formatos de audio.
-- **ytdlp_download_worker.py**: Descarga audio desde YouTube u otras plataformas usando yt-dlp.
-
-#### Workers de Instalación
-- **demucs_install_worker.py**: Instala Demucs y sus dependencias (PyTorch, etc.).
-- **cuda_worker.py**: Instala soporte CUDA para aceleración GPU.
-- **python_worker.py**: Instala Python si no está disponible.
-- **visualc_worker.py**: Instala Visual C++ Redistributables en Windows.
-- **ffmpeg_worker.py**: Instala FFmpeg.
-
-#### Utilidades y UI
-- **platform_utils.py**: Funciones específicas de plataforma (Windows/Linux) para ejecutar comandos, detectar GPU, etc.
-- **resources.py**: Gestión de recursos (imágenes, mensajes estilizados).
-- **lazy_resources.py**: Carga diferida de recursos pesados (audio, imágenes, letras, playlists).
-- **ui_components.py**: Componentes personalizados de UI (barras de título, diales, grips de tamaño).
-- **dialogs.py**: Diálogos modales (acerca de, cola, separación, descarga).
-- **base_worker.py**: Clase base para workers con señales PyQt6.
-
-### Características Principales
-- **Reproducción de Audio**: Soporte para múltiples formatos con sounddevice/soundfile.
-- **Separación de Fuentes**: Integración con Demucs para separar pistas en componentes individuales.
-- **Descarga desde YouTube**: Descarga de audio desde plataformas de video.
-- **Gestión de Playlists**: Carga y gestión de bibliotecas musicales.
-- **Visualización de Letras**: Búsqueda y display de letras de canciones.
-- **Interfaz Personalizable**: Tema oscuro con imágenes de fondo y estilos CSS.
-- **Instalación Automática**: Detección e instalación automática de dependencias faltantes.
-
-### Tecnologías Utilizadas
-- **PyQt6**: Framework para interfaz gráfica.
-- **Demucs**: Biblioteca para separación de fuentes de audio.
-- **yt-dlp**: Herramienta para descarga de video/audio.
-- **FFmpeg**: Procesamiento de multimedia.
-- **Sounddevice/Soundfile**: Reproducción y manipulación de audio.
-- **Requests**: Para búsquedas de letras y metadatos.
-- **Mutagen/Pillow**: Manejo de metadatos y imágenes.
-
-### Estructura de Archivos
+open PlayIt.app
 ```
-├── main.py                 # Punto de entrada
-├── audio_player.py         # Interfaz principal
-├── dialogs.py              # Diálogos de UI
-├── ui_components.py        # Componentes UI personalizados
-├── resources.py            # Gestión de recursos
-├── lazy_resources.py       # Carga diferida
-├── platform_utils.py       # Utilidades de plataforma
-├── base_worker.py          # Clase base para workers
-├── *_worker.py             # Workers especializados
-├── estilos.css             # Estilos de la aplicación
-├── images/                 # Recursos gráficos
-└── README.md               # Este archivo
+
+(o clic derecho sobre `PlayIt.app` → Abrir → Abrir).
+
+### Dependencias externas
+
+La app las detecta y ofrece instalarlas desde **Opciones → Dependencias**:
+
+| Dependencia | Para qué | Notas |
+|---|---|---|
+| Python 3.10+ | Demucs y yt-dlp | |
+| FFmpeg | Decodificar/convertir audio | |
+| Demucs (+ PyTorch) | Separación de pistas | En Apple Silicon se instala en un entorno nativo con MPS automáticamente |
+| yt-dlp | Descarga desde YouTube | Opcional |
+| CUDA (PyTorch) | Aceleración NVIDIA | Opcional; requiere GPU NVIDIA |
+| Visual C++ Redistributable | Solo Windows | |
+
+En macOS el instalador integrado requiere [Homebrew](https://brew.sh).
+
+## Ejecución desde código fuente
+
+**Linux**
+
+```bash
+sudo apt update
+sudo apt install python3 python3-pip python3-venv ffmpeg portaudio19-dev libsndfile1 libxcb-cursor0
+git clone https://github.com/RavilesX/playit.git && cd playit
+python3 -m venv venv && source venv/bin/activate
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+python3 main.py
 ```
+
+`portaudio19-dev` y `libsndfile1` son el backend de audio de `sounddevice`/`soundfile`; en Windows y macOS los wheels de pip ya los incluyen.
+
+**macOS**
+
+```bash
+brew install ffmpeg
+git clone https://github.com/RavilesX/playit.git && cd playit
+python3 -m venv venv && source venv/bin/activate
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+python3 main.py
+```
+
+**Windows** (con [Python 3.10+](https://www.python.org/downloads/) y [FFmpeg](https://ffmpeg.org) instalados)
+
+```powershell
+git clone https://github.com/RavilesX/playit.git; cd playit
+python -m venv venv; .\venv\Scripts\activate
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+python main.py
+```
+
+### Tests y build
+
+```bash
+pip install pytest pytest-qt pyinstaller
+pytest                      # suite de pruebas (headless)
+pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
+```
+
+## Versión actual
+
+**v1.2.1** — primera versión con soporte completo de macOS (Apple Silicon), aceleración MPS automática, cronómetro de separación con reporte de dispositivo (CPU/CUDA/MPS) y binario Linux empaquetado en tar.gz. Historial completo en [Releases](https://github.com/RavilesX/playit/releases).
+
+## Contacto
+
+- **Autor**: Ricardo Aviles Sanders (RavilesX)
+- **Email**: ravilesx@gmail.com
+- **GitHub**: [github.com/RavilesX](https://github.com/RavilesX)
+
+Reportes de bugs y sugerencias: [Issues](https://github.com/RavilesX/playit/issues).
 
 ## Licencia
 
-Copyright (C) 2025-2026  Ricardo Aviles Sanders
+[GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.html) © 2025-2026 Ricardo Aviles Sanders
 
-PlayIt es software libre bajo la **Licencia Pública General de GNU, versión 3 (GPLv3)**.
-Puedes redistribuirlo y/o modificarlo bajo los términos de dicha licencia. El texto
-completo está en el archivo [LICENSE](LICENSE).
+---
 
-Esta licencia es obligatoria porque PlayIt usa **PyQt6**, distribuida bajo GPLv3 (o
-licencia comercial de Riverbank). Otras dependencias son compatibles: Demucs (MIT),
-yt-dlp (Unlicense), NumPy/SoundFile/Pillow/Mutagen (BSD/MIT). FFmpeg se invoca como
-binario externo (LGPL/GPL).
+# English
 
-Este programa se distribuye SIN NINGUNA GARANTÍA. Ver la GPLv3 para más detalles.
+## Overview
+
+PlayIt is a desktop audio player that splits songs into four independent stems (drums, vocals, bass and other instruments) using [Demucs](https://github.com/facebookresearch/demucs), and plays them back simultaneously with per-stem volume and mute. Great for practicing an instrument, karaoke, or studying mixes.
+
+### Features
+
+- **Stem separation** with Demucs (`htdemucs_ft` model), GPU-accelerated (CUDA on NVIDIA, MPS on Apple Silicon), with a processing queue.
+- **Multi-stem playback**: 4 synchronized stems with individual volume/mute.
+- **Synced lyrics (LRC)**: automatic fetching, adjustable offset, per-singer colors, and a visual sync editor over the vocals waveform.
+- **Auto-unmute**: fades vocals back in during sections without lyrics (smart karaoke mode).
+- **YouTube download** (yt-dlp) straight to MP3.
+- **CAVA-style audio visualizer** rendered in NumPy.
+- **`.mlst` playlists** with artist/title sorting.
+- **Built-in dependency installer**: the app detects and installs what's missing from its own menu.
+
+## Supported systems
+
+| System | Status |
+|---|---|
+| Windows 10 / 11 | ✅ Tested |
+| Linux (Mint, Ubuntu, openSUSE) | ✅ Tested |
+| macOS (Apple Silicon) | ✅ Tested on a Mac Mini M2 |
+| macOS (Intel) | ⚠️ No official binary; possible from source |
+
+## Hardware requirements
+
+|  | Minimum | Recommended |
+|---|---|---|
+| CPU | 64-bit dual core | 4+ cores |
+| RAM | 4 GB (playback only) / 8 GB (separation) | 16 GB |
+| GPU | Not required | NVIDIA with CUDA, or Apple Silicon (MPS) |
+| Disk | ~1 GB (app + models) | 3 GB+ (separated library grows ~40 MB per song) |
+
+Reference times separating a ~4:30 song with `htdemucs_ft`:
+
+- Apple M2 (MPS): **~3 min**
+- Modern CPU, no GPU: **~12 min**
+
+## Installation (binaries)
+
+Download the latest version from [Releases](https://github.com/RavilesX/playit/releases/latest).
+
+**Windows** — download `PlayIt-vX.Y.Z-windows.exe` and run it.
+
+**Linux** — download `PlayIt-vX.Y.Z-linux.tar.gz`:
+
+```bash
+tar -xzf PlayIt-vX.Y.Z-linux.tar.gz
+./PlayIt
+```
+
+**macOS** — download `PlayIt-vX.Y.Z-macos.zip`, unzip it and, since the app is unsigned, authorize it on first launch:
+
+```bash
+xattr -cr PlayIt.app
+open PlayIt.app
+```
+
+(or right-click `PlayIt.app` → Open → Open).
+
+### External dependencies
+
+The app detects them and offers to install them from **Opciones → Dependencias**:
+
+| Dependency | Purpose | Notes |
+|---|---|---|
+| Python 3.10+ | Demucs and yt-dlp | |
+| FFmpeg | Audio decoding/conversion | |
+| Demucs (+ PyTorch) | Stem separation | On Apple Silicon it installs into a native venv with MPS automatically |
+| yt-dlp | YouTube download | Optional |
+| CUDA (PyTorch) | NVIDIA acceleration | Optional; requires an NVIDIA GPU |
+| Visual C++ Redistributable | Windows only | |
+
+On macOS the built-in installer requires [Homebrew](https://brew.sh).
+
+## Running from source
+
+**Linux**
+
+```bash
+sudo apt update
+sudo apt install python3 python3-pip python3-venv ffmpeg portaudio19-dev libsndfile1 libxcb-cursor0
+git clone https://github.com/RavilesX/playit.git && cd playit
+python3 -m venv venv && source venv/bin/activate
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+python3 main.py
+```
+
+`portaudio19-dev` and `libsndfile1` are the audio backend for `sounddevice`/`soundfile`; on Windows and macOS the pip wheels already bundle them.
+
+**macOS**
+
+```bash
+brew install ffmpeg
+git clone https://github.com/RavilesX/playit.git && cd playit
+python3 -m venv venv && source venv/bin/activate
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+python3 main.py
+```
+
+**Windows** (with [Python 3.10+](https://www.python.org/downloads/) and [FFmpeg](https://ffmpeg.org) installed)
+
+```powershell
+git clone https://github.com/RavilesX/playit.git; cd playit
+python -m venv venv; .\venv\Scripts\activate
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+python main.py
+```
+
+### Tests and build
+
+```bash
+pip install pytest pytest-qt pyinstaller
+pytest                      # test suite (headless)
+pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
+```
+
+## Current version
+
+**v1.2.1** — first version with full macOS (Apple Silicon) support, automatic MPS acceleration, a separation stopwatch reporting the device used (CPU/CUDA/MPS), and the Linux binary packaged as tar.gz. Full history in [Releases](https://github.com/RavilesX/playit/releases).
+
+## Contact
+
+- **Author**: Ricardo Aviles Sanders (RavilesX)
+- **Email**: ravilesx@gmail.com
+- **GitHub**: [github.com/RavilesX](https://github.com/RavilesX)
+
+Bug reports and suggestions: [Issues](https://github.com/RavilesX/playit/issues).
+
+## License
+
+[GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.html) © 2025-2026 Ricardo Aviles Sanders
