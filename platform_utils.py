@@ -105,7 +105,7 @@ def check_command_exists(cmd: str) -> bool:
 # En macOS, Demucs/PyTorch corren en un venv dedicado arm64 nativo dentro de
 # get_data_dir(), aislado de cualquier otro python3 en el PATH (p. ej. una
 # instalación de Anaconda x86_64/Rosetta, que no soporta MPS). Se crea con
-# DemucsInstallWorker; ver MACOS_MPS_UPGRADE.md.
+# DemucsInstallWorker.
 def get_mac_venv_dir() -> Path:
     return get_data_dir() / "mps_env"
 

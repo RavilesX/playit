@@ -28,7 +28,7 @@ class DemucsInstallWorker(BaseInstallWorker):
         if IS_MAC:
             # Demucs necesita torch con MPS funcional: se instala en un venv
             # dedicado arm64 nativo, aislado de cualquier python3 x86_64/Rosetta
-            # que gane en el PATH (p. ej. Anaconda). Ver MACOS_MPS_UPGRADE.md.
+            # que gane en el PATH (p. ej. Anaconda).
             python = str(get_mac_venv_python())
             if not get_mac_venv_dir().exists():
                 venv_cmd = get_mac_venv_create_cmd()
