@@ -285,8 +285,8 @@ class SplitDialog(BaseDialog):
         self.accept_btn = self._create_accept_button()
         cancel_btn = self._create_cancel_button()
 
-        layout.addWidget(self.accept_btn)
         layout.addWidget(cancel_btn)
+        layout.addWidget(self.accept_btn)
         return layout
 
     def _create_accept_button(self) -> QPushButton:
