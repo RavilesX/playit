@@ -706,8 +706,8 @@ class LyricsSyncDialog(BaseDialog):
         scroll_row.addWidget(self.scrollbar)
         self.main_layout.addLayout(scroll_row)
 
-        # Nivel 2: edición (play/líneas/colores) y offset. El buscador va en
-        # una fila aparte para que el editor pueda encogerse sin encimar nada.
+        # Nivel 2: edición (play/líneas/colores). El offset y el buscador van
+        # en una fila aparte para que el editor pueda encogerse sin encimar nada.
         # Espaciado explícito: el default de macOS es notablemente mayor.
         bar = QHBoxLayout()
         bar.setContentsMargins(6, 0, 6, 0)
@@ -745,9 +745,16 @@ class LyricsSyncDialog(BaseDialog):
             bar.addWidget(swatch)
             self.color_btns.append(swatch)
 
+        bar.addStretch(1)
+        self.main_layout.addLayout(bar)
+
+        # Nivel 3: offset (con su alcance), buscador y navegación.
+        bar2 = QHBoxLayout()
+        bar2.setContentsMargins(6, 0, 6, 0)
+        bar2.setSpacing(6)
+
         # Offset global: desplaza TODAS las líneas el valor elegido.
-        bar.addSpacing(12)
-        bar.addWidget(QLabel("Offset:"))
+        bar2.addWidget(QLabel("Offset:"))
         self.offset_spin = QDoubleSpinBox()
         self.offset_spin.setRange(0.1, 2.0)
         self.offset_spin.setSingleStep(0.1)
@@ -755,18 +762,16 @@ class LyricsSyncDialog(BaseDialog):
         self.offset_spin.setValue(0.5)
         self.offset_spin.setSuffix(" s")
         self.offset_spin.setFixedWidth(70)
-        bar.addWidget(self.offset_spin)
-        self.back_btn = QPushButton("« Antes")
-        self.fwd_btn = QPushButton("Después »")
-        bar.addWidget(self.back_btn)
-        bar.addWidget(self.fwd_btn)
-        bar.addStretch(1)
-        self.main_layout.addLayout(bar)
-
-        # Nivel 3: alcance del offset + buscador y navegación.
-        bar2 = QHBoxLayout()
-        bar2.setContentsMargins(6, 0, 6, 0)
-        bar2.setSpacing(6)
+        bar2.addWidget(self.offset_spin)
+        # Solo el símbolo, compactos: ahorran ancho en la fila
+        self.back_btn = QPushButton("«")
+        self.back_btn.setToolTip("Mover líneas hacia antes (resta el offset)")
+        self.fwd_btn = QPushButton("»")
+        self.fwd_btn.setToolTip("Mover líneas hacia después (suma el offset)")
+        for b in (self.back_btn, self.fwd_btn):
+            b.setFixedSize(28, 28)
+        bar2.addWidget(self.back_btn)
+        bar2.addWidget(self.fwd_btn)
         # Si está marcado, el offset solo afecta líneas desde el cursor.
         self.from_cursor_chk = QCheckBox("Solo desde el cursor")
         self.from_cursor_chk.setChecked(True)
