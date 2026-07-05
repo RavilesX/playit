@@ -793,9 +793,8 @@ class LyricsSyncDialog(BaseDialog):
 
         # Buscador de texto: Enter salta al siguiente registro coincidente,
         # en bucle. Sin coincidencias → fondo rojo.
-        bar2.addWidget(QLabel("Buscar:"))
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("texto…")
+        self.search_box.setPlaceholderText("Buscar")
         self.search_box.setToolTip("Buscar en la letra (Ctrl+F)")
         self.search_box.setFixedWidth(160)
         self.search_box.setClearButtonEnabled(True)
