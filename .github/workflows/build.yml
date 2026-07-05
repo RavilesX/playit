@@ -37,11 +37,16 @@ jobs:
       - name: Compilar con PyInstaller
         run: pyinstaller --clean -y PlayIt.spec
 
+      # tar preserva el bit de ejecución; upload-artifact y los assets de
+      # release lo pierden si se sube el binario suelto
+      - name: Empaquetar binario Linux
+        run: tar -czf PlayIt-linux.tar.gz -C dist PlayIt
+
       - name: Subir ejecutable Linux
         uses: actions/upload-artifact@v4
         with:
           name: PlayIt-linux
-          path: dist/PlayIt
+          path: PlayIt-linux.tar.gz
 
   # ---------- WINDOWS ----------
   build-windows:
@@ -134,15 +139,15 @@ jobs:
 
       - name: Renombrar con la versión
         run: |
-          mv linux/PlayIt          PlayIt-${GITHUB_REF_NAME}-linux
-          mv windows/PlayIt.exe    PlayIt-${GITHUB_REF_NAME}-windows.exe
-          mv macos/PlayIt-macos.zip PlayIt-${GITHUB_REF_NAME}-macos.zip
+          mv linux/PlayIt-linux.tar.gz PlayIt-${GITHUB_REF_NAME}-linux.tar.gz
+          mv windows/PlayIt.exe        PlayIt-${GITHUB_REF_NAME}-windows.exe
+          mv macos/PlayIt-macos.zip    PlayIt-${GITHUB_REF_NAME}-macos.zip
 
       - name: Crear GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            PlayIt-${{ github.ref_name }}-linux
+            PlayIt-${{ github.ref_name }}-linux.tar.gz
             PlayIt-${{ github.ref_name }}-windows.exe
             PlayIt-${{ github.ref_name }}-macos.zip
           generate_release_notes: true
