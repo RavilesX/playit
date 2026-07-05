@@ -314,6 +314,9 @@ class AudioPlayer(QMainWindow):
 
     def _create_tab_widget(self):
         self.tabs = QTabWidget()
+        # macOS recorta el texto de las pestañas con "…" (elide); en
+        # Windows/Linux no pasa. Sin elide + min-width en el QSS se ven completas.
+        self.tabs.setElideMode(Qt.TextElideMode.ElideNone)
 
         self.cover_label = QLabel()
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -41,7 +41,8 @@ QTabWidget::tab-bar{
     alignment: center;
 }
 
-/* Pestañas con el mismo estilo que los botones de la toolbar de playlist */
+/* Pestañas con el mismo estilo que los botones de la toolbar de playlist.
+   min-width: el estilo nativo de macOS comprime las pestañas y corta el texto */
 QTabBar::tab{
     background-color: rgba(43,43,43,0.4);
     color: #e0e0e0;
@@ -51,6 +52,7 @@ QTabBar::tab{
     font-size: 11px;
     font-weight: bold;
     margin: 2px;
+    min-width: 60px;
 }
 
 QTabBar::tab:hover{
