@@ -22,7 +22,10 @@ from pathlib import Path
 from mutagen.mp3 import MP3
 from PIL import Image
 from PyQt6.QtCore import QObject, pyqtSignal
-from platform_utils import run_silent, get_python_cmd, get_data_dir, check_pytorch_mps
+from platform_utils import (
+    run_silent, get_python_cmd, get_data_dir,
+    check_pytorch_mps, check_pytorch_cuda,
+)
 
 
 class DemucsWorker(QObject):
@@ -36,6 +39,7 @@ class DemucsWorker(QObject):
         self.song = song
         self.src_path = Path(src_path)
         self.base_path = get_data_dir() / "music_library" / artist / song
+        self.device_used = "CPU"  # dispositivo con el que realmente corrió demucs
 
     def run(self):
         try:
@@ -61,12 +65,18 @@ class DemucsWorker(QObject):
 
     def _run_demucs(self):
         use_mps = check_pytorch_mps()
+        if use_mps:
+            self.device_used = "MPS"
+        else:
+            # Sin -d explícito, demucs usa CUDA si torch la ve; misma detección
+            self.device_used = "CUDA" if check_pytorch_cuda() else "CPU"
         result = self._exec_demucs(mps=use_mps)
 
         # MPS puede fallar según la combinación torch/demucs;
         # reintentar en CPU antes de rendirse
         if result.returncode != 0 and use_mps:
             self._log_failure(result, "Intento con MPS falló, reintentando en CPU")
+            self.device_used = "CPU"
             result = self._exec_demucs(mps=False)
 
         if result.returncode != 0:

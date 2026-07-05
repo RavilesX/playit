@@ -1808,6 +1808,7 @@ class AudioPlayer(QMainWindow):
 
     def _on_demucs_success(self):
         job = self._current_demucs_job
+        device = getattr(self.demucs_worker, 'device_used', 'CPU')
         self.scan_folder(DEFAULT_LIBRARY)
         self._finish_demucs_job()
         self._process_next_job()
@@ -1822,7 +1823,8 @@ class AudioPlayer(QMainWindow):
             styled_message_box(
                 self, "Tiempo de separación",
                 f"{job['artist']} - {job['song']}\n\n"
-                f"El proceso tomó {mins} min {secs} s ({elapsed:.1f} s en total).",
+                f"El proceso tomó {mins} min {secs} s.\n"
+                f"Procesado con: {device}",
                 QMessageBox.Icon.Information,
             )
 

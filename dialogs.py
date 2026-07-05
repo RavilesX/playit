@@ -252,7 +252,7 @@ class SplitDialog(BaseDialog):
 
         # Layout
         self.main_layout.addWidget(file_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.main_layout.addSpacing(10)
+        self.main_layout.addSpacing(20)
         self.main_layout.addWidget(self.file_path)
         self.main_layout.addWidget(extract_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         self.main_layout.addWidget(QLabel("Artista*"))
