@@ -15,15 +15,43 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from base_worker import BaseInstallWorker
-from platform_utils import get_pip_cmd, get_python_cmd
+from platform_utils import (
+    get_pip_cmd, get_python_cmd, IS_MAC,
+    get_mac_venv_dir, get_mac_venv_python, get_mac_venv_create_cmd,
+)
 
 
 class DemucsInstallWorker(BaseInstallWorker):
     def get_commands(self):
-        python = get_python_cmd()
-        return [
+        commands = []
+
+        if IS_MAC:
+            # Demucs necesita torch con MPS funcional: se instala en un venv
+            # dedicado arm64 nativo, aislado de cualquier python3 x86_64/Rosetta
+            # que gane en el PATH (p. ej. Anaconda). Ver MACOS_MPS_UPGRADE.md.
+            python = str(get_mac_venv_python())
+            if not get_mac_venv_dir().exists():
+                venv_cmd = get_mac_venv_create_cmd()
+                if not venv_cmd:
+                    raise RuntimeError(
+                        "No se encontró un Python arm64 nativo de Homebrew para crear "
+                        "el entorno de Demucs. Instale Python desde el menú primero."
+                    )
+                commands.append({
+                    'cmd': venv_cmd,
+                    'error_msg': 'No se pudo crear el entorno Python nativo (arm64) para Demucs',
+                    'timeout': 120,
+                })
+            pip = [python, '-m', 'pip']
+            demucs_pkgs = ['torch', 'torchaudio', 'demucs']
+        else:
+            python = get_python_cmd()
+            pip = get_pip_cmd()
+            demucs_pkgs = ['demucs']
+
+        commands += [
             {
-                'cmd': [*get_pip_cmd(), 'install', 'demucs'],
+                'cmd': [*pip, 'install', *demucs_pkgs],
                 'error_msg': 'Error instalando Demucs',
                 'timeout': 600,
             },
@@ -40,3 +68,4 @@ class DemucsInstallWorker(BaseInstallWorker):
                 'timeout': 600,
             },
         ]
+        return commands

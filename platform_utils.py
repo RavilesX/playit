@@ -102,9 +102,23 @@ def check_command_exists(cmd: str) -> bool:
         return False
 
 
+# En macOS, Demucs/PyTorch corren en un venv dedicado arm64 nativo dentro de
+# get_data_dir(), aislado de cualquier otro python3 en el PATH (p. ej. una
+# instalación de Anaconda x86_64/Rosetta, que no soporta MPS). Se crea con
+# DemucsInstallWorker; ver MACOS_MPS_UPGRADE.md.
+def get_mac_venv_dir() -> Path:
+    return get_data_dir() / "mps_env"
+
+
+def get_mac_venv_python() -> Path:
+    return get_mac_venv_dir() / "bin" / "python3"
+
+
 def get_python_cmd() -> str:
     if IS_WINDOWS:
         return 'python'
+    if IS_MAC and get_mac_venv_python().exists():
+        return str(get_mac_venv_python())
     return 'python3' if check_command_exists('python3') else 'python'
 
 
@@ -218,6 +232,48 @@ def get_python_install_cmd() -> list:
     elif IS_MAC:
         return ['brew', 'install', 'python@3.13']
     return []
+
+
+# Candidatos, en orden de preferencia, para el Python arm64 nativo que
+# arranca get_mac_venv_dir(). '/opt/homebrew/bin/python3.13' es el binario
+# versionado que instala get_python_install_cmd() en macOS (Homebrew deja los
+# alias sin versión fuera del PATH para paquetes python@X.Y); se incluye el
+# alias genérico como respaldo por si ya hay otro Python de Homebrew linkeado.
+_MAC_BOOTSTRAP_PYTHON_CANDIDATES = (
+    '/opt/homebrew/bin/python3.13',
+    '/opt/homebrew/bin/python3',
+)
+
+
+def find_mac_arm64_bootstrap_python() -> str | None:
+    """Busca un Python arm64 nativo de Homebrew para crear get_mac_venv_dir().
+
+    Se evita depender de get_python_cmd()/PATH porque ahí puede ganar un
+    python3 x86_64 bajo Rosetta (p. ej. Anaconda), que no sirve para MPS.
+    """
+    for candidate in _MAC_BOOTSTRAP_PYTHON_CANDIDATES:
+        if not Path(candidate).exists():
+            continue
+        try:
+            result = run_silent(
+                [candidate, '-c',
+                 'import platform; exit(0 if platform.machine() == "arm64" else 1)'],
+                timeout=10,
+            )
+            if result.returncode == 0:
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
+def get_mac_venv_create_cmd() -> list:
+    """Comando para crear el venv dedicado a Demucs/MPS. Lista vacía si no
+    hay ningún Python arm64 de Homebrew disponible todavía (falta instalarlo)."""
+    bootstrap = find_mac_arm64_bootstrap_python()
+    if not bootstrap:
+        return []
+    return [bootstrap, '-m', 'venv', str(get_mac_venv_dir())]
 
 
 def get_ytdlp_install_cmd() -> list:
