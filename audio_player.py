@@ -154,6 +154,7 @@ class AudioPlayer(QMainWindow):
         self.demucs_thread = None
         self.demucs_worker = None
         self.last_in_queue = {"artist": "", "song": ""}
+        self._current_demucs_job: dict | None = None
         self._verification_attempts = 0
 
         # Dependencias — marcamos vc_available=True fuera de Windows (no se necesita)
@@ -1749,9 +1750,10 @@ class AudioPlayer(QMainWindow):
         self.split_dialog.process_started.connect(self.process_song)
         self.split_dialog.show()
 
-    def process_song(self, artist: str, song: str, file_path: str):
+    def process_song(self, artist: str, song: str, file_path: str, timed: bool = False):
         self.last_in_queue = {"artist": artist, "song": song}
-        self.demucs_queue.append({"artist": artist, "song": song, "file_path": file_path})
+        self.demucs_queue.append({"artist": artist, "song": song,
+                                  "file_path": file_path, "timed": timed})
         if not self.demucs_active:
             self._process_next_job()
         else:
@@ -1771,6 +1773,9 @@ class AudioPlayer(QMainWindow):
             self._cleanup_demucs_job()
             self.demucs_active = True
             self.demucs_progress = 0
+            # Cronómetro opcional del proceso (benchmark de hardware)
+            job['t0'] = time.monotonic()
+            self._current_demucs_job = job
             self.update_status()
 
             self.demucs_worker = DemucsWorker(job['artist'], job['song'], job['file_path'])
@@ -1802,12 +1807,24 @@ class AudioPlayer(QMainWindow):
         self.demucs_worker = None
 
     def _on_demucs_success(self):
+        job = self._current_demucs_job
         self.scan_folder(DEFAULT_LIBRARY)
         self._finish_demucs_job()
         self._process_next_job()
         if not self.demucs_queue and self.processing_multiple:
             self.processing_multiple = False
             self._start_file_verification()
+        # Al final (con el track ya en la playlist y el siguiente trabajo de la
+        # cola ya lanzado, para que el diálogo modal no la detenga)
+        if job and job.get('timed'):
+            elapsed = time.monotonic() - job['t0']
+            mins, secs = divmod(int(round(elapsed)), 60)
+            styled_message_box(
+                self, "Tiempo de separación",
+                f"{job['artist']} - {job['song']}\n\n"
+                f"El proceso tomó {mins} min {secs} s ({elapsed:.1f} s en total).",
+                QMessageBox.Icon.Information,
+            )
 
     def _finish_demucs_job(self):
         self.demucs_active = False

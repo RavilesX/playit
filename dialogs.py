@@ -16,8 +16,8 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPoint,QDir
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox
-from resources import resource_path, bg_image,styled_message_box
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox, QCheckBox
+from resources import resource_path, bg_image, styled_message_box, style_url
 from ui_components import DialogTitleBar, StyledButtons
 from version import __version__
 import os
@@ -230,7 +230,7 @@ class QueueDialog(BaseDialog):
 
 
 class SplitDialog(BaseDialog):
-    process_started = pyqtSignal(str, str, str)
+    process_started = pyqtSignal(str, str, str, bool)
     dialog_closed = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -259,9 +259,32 @@ class SplitDialog(BaseDialog):
         self.main_layout.addWidget(self.artist)
         self.main_layout.addWidget(QLabel("Canción*"))
         self.main_layout.addWidget(self.song)
+        self.main_layout.addWidget(self._create_timing_checkbox())
         self.main_layout.addLayout(btn_layout)
 
         self._setup_validation()
+
+    def _create_timing_checkbox(self) -> QCheckBox:
+        """Checkbox para medir cuánto tarda la separación (benchmark de hardware)."""
+        self.timing_chk = QCheckBox("Cronometrar proceso")
+        self.timing_chk.setChecked(False)
+        self.timing_chk.setToolTip(
+            "Al terminar la separación muestra el tiempo total que tomó el proceso"
+        )
+        # Mismos assets de checkbox que el resto de la app (incluyen la
+        # palomita); el indicador default pierde la marca sobre el tema oscuro.
+        unchecked = style_url('images/split_dialog/checkbox_unchecked.png')
+        checked = style_url('images/split_dialog/checkbox_checked.png')
+        hover = style_url('images/split_dialog/checkbox_hover01.png')
+        hover_checked = style_url('images/split_dialog/checkbox_hover02.png')
+        self.timing_chk.setStyleSheet(f"""
+            QCheckBox {{ color: #cfcfe0; spacing: 8px; font-size: 12px; }}
+            QCheckBox::indicator {{ width: 18px; height: 18px; image: url({unchecked}); }}
+            QCheckBox::indicator:checked {{ image: url({checked}); }}
+            QCheckBox::indicator:unchecked:hover {{ image: url({hover}); }}
+            QCheckBox::indicator:checked:hover {{ image: url({hover_checked}); }}
+        """)
+        return self.timing_chk
 
     def _create_file_button(self) -> QPushButton:
         btn = QPushButton()
@@ -364,7 +387,8 @@ class SplitDialog(BaseDialog):
         self.process_started.emit(
             self.artist.text().strip(),
             self.song.text().strip(),
-            self.file_path.text()
+            self.file_path.text(),
+            self.timing_chk.isChecked()
         )
         self.hide()
         self.dialog_closed.emit()
