@@ -1235,6 +1235,7 @@ class AudioPlayer(QMainWindow):
         self._reset_sort_label()
         self._set_playback_buttons_enabled(False)
         self.stop_btn.setEnabled(False)
+        self.update_status()
 
     def scan_folder(self, path: Path):
         """Escaneo síncrono de la biblioteca; agrega vía _on_songs_loaded
