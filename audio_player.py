@@ -343,8 +343,9 @@ class AudioPlayer(QMainWindow):
         self.lyrics_container = QWidget()
         self.lyrics_container.setLayout(lyrics_layout)
 
-        self.tabs.addTab(self.cover_label, "Portada")
+        # Letras primero: es la pestaña visible por defecto
         self.tabs.addTab(self.lyrics_container, "Letras")
+        self.tabs.addTab(self.cover_label, "Portada")
 
     def _create_progress_bar(self):
         self.progress_song = QSlider(Qt.Orientation.Horizontal, self)

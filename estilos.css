@@ -36,6 +36,11 @@ QTabWidget::pane{
     border:0;
 }
 
+/* Pestañas centradas en todos los SO (macOS lo hace por default; Linux/Windows no) */
+QTabWidget::tab-bar{
+    alignment: center;
+}
+
 QTabBar::tab{
     background: rgba(117,117,117,0.5);
     color: white;

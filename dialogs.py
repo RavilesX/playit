@@ -234,7 +234,9 @@ class SplitDialog(BaseDialog):
     dialog_closed = pyqtSignal()
 
     def __init__(self, parent=None):
-        super().__init__(parent, "Dividir Canción", (360, 440))
+        # 460 de alto: los widgets nativos de macOS son más altos y con 440
+        # el botón MP3 quedaba pegado al textbox
+        super().__init__(parent, "Dividir Canción", (360, 460))
         self._setup_split_ui()
 
     def _setup_split_ui(self):
@@ -250,6 +252,7 @@ class SplitDialog(BaseDialog):
 
         # Layout
         self.main_layout.addWidget(file_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.main_layout.addSpacing(10)
         self.main_layout.addWidget(self.file_path)
         self.main_layout.addWidget(extract_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         self.main_layout.addWidget(QLabel("Artista*"))

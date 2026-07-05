@@ -706,9 +706,12 @@ class LyricsSyncDialog(BaseDialog):
         scroll_row.addWidget(self.scrollbar)
         self.main_layout.addLayout(scroll_row)
 
-        # Nivel 2: botones de opciones (separado del scroll).
+        # Nivel 2: edición (play/líneas/colores) y offset. El buscador va en
+        # una fila aparte para que el editor pueda encogerse sin encimar nada.
+        # Espaciado explícito: el default de macOS es notablemente mayor.
         bar = QHBoxLayout()
         bar.setContentsMargins(6, 0, 6, 0)
+        bar.setSpacing(6)
         self.play_btn = QPushButton("▶")
         self.play_btn.setFixedSize(44, 28)
         bar.addWidget(self.play_btn)
@@ -757,6 +760,13 @@ class LyricsSyncDialog(BaseDialog):
         self.fwd_btn = QPushButton("Después »")
         bar.addWidget(self.back_btn)
         bar.addWidget(self.fwd_btn)
+        bar.addStretch(1)
+        self.main_layout.addLayout(bar)
+
+        # Nivel 3: alcance del offset + buscador y navegación.
+        bar2 = QHBoxLayout()
+        bar2.setContentsMargins(6, 0, 6, 0)
+        bar2.setSpacing(6)
         # Si está marcado, el offset solo afecta líneas desde el cursor.
         self.from_cursor_chk = QCheckBox("Solo desde el cursor")
         self.from_cursor_chk.setChecked(True)
@@ -773,19 +783,19 @@ class LyricsSyncDialog(BaseDialog):
             QCheckBox::indicator:unchecked:hover {{ image: url({hover}); }}
             QCheckBox::indicator:checked:hover {{ image: url({hover_checked}); }}
         """)
-        bar.addWidget(self.from_cursor_chk)
-        bar.addStretch(1)
+        bar2.addWidget(self.from_cursor_chk)
+        bar2.addStretch(1)
 
         # Buscador de texto: Enter salta al siguiente registro coincidente,
         # en bucle. Sin coincidencias → fondo rojo.
-        bar.addWidget(QLabel("Buscar:"))
+        bar2.addWidget(QLabel("Buscar:"))
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("texto…")
         self.search_box.setToolTip("Buscar en la letra (Ctrl+F)")
         self.search_box.setFixedWidth(160)
         self.search_box.setClearButtonEnabled(True)
         self.search_box.setStyleSheet(self._SEARCH_NORMAL)
-        bar.addWidget(self.search_box)
+        bar2.addWidget(self.search_box)
 
         # Navegación: inicio / resultado anterior / siguiente / final.
         # Anterior y Siguiente solo se activan cuando hay texto en el buscador.
@@ -805,15 +815,16 @@ class LyricsSyncDialog(BaseDialog):
                 " padding: 0; }"
                 "QPushButton:disabled { color: #6a4a6a; }"
             )
-            bar.addWidget(b)
+            bar2.addWidget(b)
         self.search_prev_btn.setEnabled(False)
         self.search_next_btn.setEnabled(False)
 
-        self.main_layout.addLayout(bar)
+        self.main_layout.addLayout(bar2)
 
         # Acciones guardar / cancelar
         actions = QHBoxLayout()
         actions.setContentsMargins(6, 4, 6, 6)
+        actions.setSpacing(6)
         self.hint = QLabel("Espacio: play/pausa · Supr: borrar · Ctrl/Shift: multi-selección · arrastra el borde · doble-click edita")
         self.hint.setStyleSheet("color:#9aa; background: transparent; border: none;")
         actions.addWidget(self.hint)
