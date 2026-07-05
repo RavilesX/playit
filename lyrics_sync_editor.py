@@ -770,6 +770,13 @@ class LyricsSyncDialog(BaseDialog):
         self.fwd_btn.setToolTip("Mover líneas hacia después (suma el offset)")
         for b in (self.back_btn, self.fwd_btn):
             b.setFixedSize(28, 28)
+            # Mismo estilo compacto que los botones de navegación: sin el
+            # padding: 0 el propio botón se come el carácter
+            b.setStyleSheet(
+                "QPushButton { color: #F88FFF; font-size: 15px; font-weight: bold;"
+                " padding: 0; }"
+                "QPushButton:disabled { color: #6a4a6a; }"
+            )
         bar2.addWidget(self.back_btn)
         bar2.addWidget(self.fwd_btn)
         # Si está marcado, el offset solo afecta líneas desde el cursor.
