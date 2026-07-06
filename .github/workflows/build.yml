@@ -38,9 +38,12 @@ jobs:
         run: pyinstaller --clean -y PlayIt.spec
 
       # tar preserva el bit de ejecución; upload-artifact y los assets de
-      # release lo pierden si se sube el binario suelto
+      # release lo pierden si se sube el binario suelto. Se incluye el icono
+      # para que el usuario pueda crear su lanzador .desktop
       - name: Empaquetar binario Linux
-        run: tar -czf PlayIt-linux.tar.gz -C dist PlayIt
+        run: |
+          cp images/main_window/main_icon.png dist/
+          tar -czf PlayIt-linux.tar.gz -C dist PlayIt main_icon.png
 
       - name: Subir ejecutable Linux
         uses: actions/upload-artifact@v4
