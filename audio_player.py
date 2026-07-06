@@ -347,9 +347,11 @@ class AudioPlayer(QMainWindow):
         self.lyrics_container = QWidget()
         self.lyrics_container.setLayout(lyrics_layout)
 
-        # Letras primero: es la pestaña visible por defecto
         self.tabs.addTab(self.lyrics_container, "Letras")
         self.tabs.addTab(self.cover_label, "Portada")
+        # Portada visible al iniciar; al reproducir una canción se
+        # cambia automáticamente a Letras (ver play_current)
+        self.tabs.setCurrentWidget(self.cover_label)
 
     def _create_progress_bar(self):
         self.progress_song = QSlider(Qt.Orientation.Horizontal, self)
@@ -396,7 +398,7 @@ class AudioPlayer(QMainWindow):
         vbox.addWidget(self.playlist_widget)
 
         self.playlist_dock.setWidget(container)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.playlist_dock)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.playlist_dock)
 
     def _create_playlist_toolbar(self):
         toolbar = QHBoxLayout()
@@ -639,6 +641,7 @@ class AudioPlayer(QMainWindow):
         self.update_lyrics_menu_state()
         self.highlight_current_song()
         self._control_channels('play')
+        self.tabs.setCurrentWidget(self.lyrics_container)
 
     def play_next(self):
         self.next_btn.setEnabled(False)

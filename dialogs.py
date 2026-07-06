@@ -168,8 +168,8 @@ class SearchDialog(BaseDialog):
         )
         self.cancel_btn.setAutoDefault(False)
 
-        btn_layout.addWidget(self.accept_btn)
         btn_layout.addWidget(self.cancel_btn)
+        btn_layout.addWidget(self.accept_btn)        
         return btn_layout
 
     def _create_action_button(self, obj_name: str, image_path: str, callback) -> QPushButton:
