@@ -27,6 +27,16 @@ from mutagen.mp3 import MP3
 import re
 
 
+def get_song_duration(song_folder: Path) -> str:
+    """Duración de la canción como "M:SS" leyendo solo el header del stem
+    (todos los stems duran lo mismo). Cadena vacía si no se puede leer."""
+    try:
+        seconds = MP3(str(song_folder / "separated" / "other.mp3")).info.length
+        return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+    except Exception:
+        return ""
+
+
 class ResourceCache:
     """Cache inteligente con lazy loading y gestión automática de memoria"""
 
@@ -511,7 +521,8 @@ class LazyPlaylistLoader(QObject):
                                     "song": song,
                                     "path": song_folder,
                                     "has_separated": separated_folder.exists(),
-                                    "json_data": song_data
+                                    "json_data": song_data,
+                                    "duration": get_song_duration(song_folder),
                                 }
 
                                 batch.append(song_info)

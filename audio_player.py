@@ -50,9 +50,10 @@ from cuda_worker import CudaInstallWorker
 from ytdlp_download_worker import YTDLPDownloadWorker
 from demucs_install_worker import DemucsInstallWorker
 from resources import styled_message_box, bg_image, resource_path, style_url
-from ui_components import TitleBar, CustomDial, SizeGrip
+from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
 from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog
-from lazy_resources import LazyAudioManager, LazyImageManager, LazyLyricsManager, LazyPlaylistLoader
+from lazy_resources import (LazyAudioManager, LazyImageManager, LazyLyricsManager,
+                            LazyPlaylistLoader, get_song_duration)
 from audio_visualizer import AudioAnalyzer, VisualizerWidget
 from lyrics_sync_editor import AUTO_UNMUTE_COLOR, LYRIC_COLORS, LyricsSyncDialog
 
@@ -386,6 +387,7 @@ class AudioPlayer(QMainWindow):
         self.playlist_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.playlist_widget.setFixedWidth(500)
         self.playlist_widget.setUniformItemSizes(True)
+        self.playlist_widget.setItemDelegate(PlaylistItemDelegate(self.playlist_widget))
         self._audio_icon = QIcon(resource_path('images/main_window/audio_icon.png'))
 
         # Contenedor: mini barra de herramientas arriba + lista debajo
@@ -571,6 +573,12 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     # ── Lazy loading callbacks ───────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
+    def _create_playlist_item(self, song_data: dict) -> QListWidgetItem:
+        item = QListWidgetItem(f"{song_data['artist']} - {song_data['song']}")
+        item.setIcon(self._audio_icon)
+        item.setData(PlaylistItemDelegate.DURATION_ROLE, song_data.get('duration', ''))
+        return item
+
     def _on_songs_loaded(self, batch: list):
         self.playlist_widget.setUpdatesEnabled(False)
         try:
@@ -581,9 +589,7 @@ class AudioPlayer(QMainWindow):
 
                 self._playlist_keys.add(key)
                 self.playlist.append(song_data)
-                item = QListWidgetItem(f"{song_data['artist']} - {song_data['song']}")
-                item.setIcon(self._audio_icon)
-                self.playlist_widget.addItem(item)
+                self.playlist_widget.addItem(self._create_playlist_item(song_data))
 
                 self._check_and_fetch_lyrics_async(
                     song_data['path'], song_data['artist'], song_data['song']
@@ -1314,9 +1320,7 @@ class AudioPlayer(QMainWindow):
         try:
             self.playlist_widget.clear()
             for song_data in self.playlist:
-                item = QListWidgetItem(f"{song_data['artist']} - {song_data['song']}")
-                item.setIcon(self._audio_icon)
-                self.playlist_widget.addItem(item)
+                self.playlist_widget.addItem(self._create_playlist_item(song_data))
         finally:
             self.playlist_widget.setUpdatesEnabled(True)
 
@@ -1417,12 +1421,11 @@ class AudioPlayer(QMainWindow):
                         "artist": artist,
                         "song": title,
                         "path": Path(path),
+                        "duration": get_song_duration(Path(path)),
                     }
                     self._playlist_keys.add((artist, title))
                     self.playlist.append(song_data)
-                    item = QListWidgetItem(f"{artist} - {title}")
-                    item.setIcon(self._audio_icon)
-                    self.playlist_widget.addItem(item)
+                    self.playlist_widget.addItem(self._create_playlist_item(song_data))
                     self._check_and_fetch_lyrics_async(path, artist, title)
                     added += 1
             finally:

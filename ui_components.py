@@ -15,9 +15,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import math
-from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRect,pyqtSignal
-from PyQt6.QtGui import QPixmap, QPainter, QIcon
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QDial
+from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRect, QTimer, pyqtSignal
+from PyQt6.QtGui import QPixmap, QPainter, QIcon, QColor, QFont, QPalette
+from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton, QDial,
+                             QApplication, QStyle, QStyledItemDelegate,
+                             QStyleOptionViewItem)
 from resources import resource_path,bg_image
 
 
@@ -99,10 +101,34 @@ class TitleBar(QWidget):
 
 
 class CustomDial(QDial):
+    VALUE_COLOR = QColor("#F88FFF")  # rosa del tema (estilos.css)
+    VALUE_TIMEOUT_MS = 2000
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.background = QPixmap(resource_path('images/main_window/dial_bg.png'))  # Imagen de fondo
         self.knob = QPixmap(resource_path('images/main_window/knob.png'))  # Imagen del knob
+
+        # Indicador numérico temporal en el centro: visible mientras se
+        # mueve el dial y 2 s después del último cambio. Solo con señales de
+        # interacción del usuario (arrastre/rueda/teclado), no con el
+        # setValue programático del arranque
+        self._show_value = False
+        self._value_timer = QTimer(self)
+        self._value_timer.setSingleShot(True)
+        self._value_timer.setInterval(self.VALUE_TIMEOUT_MS)
+        self._value_timer.timeout.connect(self._hide_value)
+        self.sliderMoved.connect(self._on_user_change)
+        self.actionTriggered.connect(self._on_user_change)
+
+    def _on_user_change(self, _value):
+        self._show_value = True
+        self._value_timer.start()  # reinicia: los 2 s cuentan desde el último movimiento
+        self.update()
+
+    def _hide_value(self):
+        self._show_value = False
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -130,6 +156,14 @@ class CustomDial(QDial):
         painter.drawPixmap(-knob_scaled.width() // 2, -knob_scaled.height() // 2, knob_scaled)
         painter.resetTransform()
 
+        if self._show_value:
+            font = QFont(self.font())
+            font.setBold(True)
+            font.setPointSize(16)
+            painter.setFont(font)
+            painter.setPen(self.VALUE_COLOR)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, str(self.value()))
+
     def _calculate_angle(self):
         """Convierte el valor del dial a ángulo (0-270 grados)"""
         return 270 * (self.value() - self.minimum()) / (self.maximum() - self.minimum())
@@ -143,6 +177,66 @@ class CustomDial(QDial):
         return QPointF(
             center.x() + radius * math.cos(theta),
             center.y() + radius * math.sin(theta))
+
+class PlaylistItemDelegate(QStyledItemDelegate):
+    """Pinta la duración de la canción alineada a la derecha del renglón.
+
+    El título se elide antes de invadir la zona de la duración; el color de
+    la duración sigue al del ítem (blanco normal, negro cuando
+    highlight_current_song pone ForegroundRole, color de selección si aplica).
+    """
+
+    DURATION_ROLE = Qt.ItemDataRole.UserRole + 1
+    MARGIN = 6
+
+    def paint(self, painter, option, index):
+        duration = index.data(self.DURATION_ROLE)
+        if not duration:
+            super().paint(painter, option, index)
+            return
+
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        style = opt.widget.style() if opt.widget else QApplication.style()
+
+        dur_width = opt.fontMetrics.horizontalAdvance(duration) + self.MARGIN
+        text_rect = style.subElementRect(
+            QStyle.SubElement.SE_ItemViewItemText, opt, opt.widget)
+
+        # El renglón puede ser más ancho que el viewport (títulos largos):
+        # anclar la duración al borde visible, no al ancho total del ítem
+        right_limit = text_rect.right()
+        if opt.widget is not None:
+            right_limit = min(right_limit,
+                              opt.widget.viewport().rect().right() - self.MARGIN)
+        dur_rect = QRect(right_limit - dur_width, text_rect.top(),
+                         dur_width, text_rect.height())
+
+        # Fondo/selección/icono + título elidido para no tapar la duración
+        opt.text = opt.fontMetrics.elidedText(
+            opt.text, Qt.TextElideMode.ElideRight,
+            dur_rect.left() - text_rect.left() - self.MARGIN)
+        style.drawControl(
+            QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+
+        painter.save()
+        painter.setFont(opt.font)
+        # Seleccionado primero: el fondo de selección (negro con el QSS de
+        # foco) taparía el ForegroundRole oscuro del ítem en reproducción
+        fg = index.data(Qt.ItemDataRole.ForegroundRole)
+        if opt.state & QStyle.StateFlag.State_Selected:
+            pen_color = opt.palette.color(QPalette.ColorRole.HighlightedText)
+        elif fg is not None:
+            pen_color = fg.color()
+        else:
+            pen_color = opt.palette.color(QPalette.ColorRole.Text)
+        painter.setPen(pen_color)
+        painter.drawText(
+            dur_rect,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            duration)
+        painter.restore()
+
 
 class SizeGrip(QWidget):
     def __init__(self, parent, position):
