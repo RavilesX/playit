@@ -182,7 +182,7 @@ def parse_lrc(path) -> list[LyricLine]:
     if current_start is not None and current_text:
         lines.append(LyricLine(current_start, '\n'.join(current_text)))
 
-    lines.sort(key=lambda l: l.start)
+    lines.sort(key=lambda ln: ln.start)
     return lines
 
 
@@ -248,7 +248,7 @@ def seconds_to_lrc_ts(seconds: float) -> str:
 
 def write_lrc(path, lines: list[LyricLine]) -> None:
     """Reescribe el .lrc con las líneas (ordenadas por inicio)."""
-    ordered = sorted(lines, key=lambda l: l.start)
+    ordered = sorted(lines, key=lambda ln: ln.start)
     with open(path, 'w', encoding='utf-8') as f:
         for line in ordered:
             parts = line.text.split('\n')
@@ -843,7 +843,7 @@ class LyricsSyncDialog(BaseDialog):
         self.save_btn = QPushButton("Guardar")
         self.cancel_btn = QPushButton("Cancelar")
         actions.addWidget(self.cancel_btn)
-        actions.addWidget(self.save_btn)        
+        actions.addWidget(self.save_btn)
         self.main_layout.addLayout(actions)
 
         # Sin foco de teclado: así la barra espaciadora nunca activa un botón
@@ -970,8 +970,8 @@ class LyricsSyncDialog(BaseDialog):
         pos = self.waveform.playback_pos
         new_line = LyricLine(pos, wrap_lyric(text))
         self.lines.append(new_line)
-        self.lines.sort(key=lambda l: l.start)
-        index = next(i for i, l in enumerate(self.lines) if l is new_line)
+        self.lines.sort(key=lambda ln: ln.start)
+        index = next(i for i, ln in enumerate(self.lines) if ln is new_line)
         self.waveform.select_single(index)
 
     def _add_line_blank(self):
@@ -1242,6 +1242,12 @@ class LyricsSyncDialog(BaseDialog):
 
             if split_btn is not None:
                 split_btn.clicked.connect(_do_split)
+                split_btn.setToolTip("Separar línea en el cursor (Ctrl+D)")
+
+            # Atajo Ctrl+D solo dentro de este diálogo: con parent `dlg` y
+            # contexto WindowShortcut se destruye al cerrar y no interfiere
+            # con el Ctrl+D de la ventana principal (abrir diálogo de split).
+            QShortcut(QKeySequence("Ctrl+D"), dlg).activated.connect(_do_split)
 
         # Cosmética del button box: label "Color:" antes de las muestras y un
         # espacio que separe la sección de color de "Separar línea". Se hace al
@@ -1268,12 +1274,12 @@ class LyricsSyncDialog(BaseDialog):
                     LyricLine(self.waveform.playback_pos,
                               wrap_lyric(split["after"], color))
                 )
-                self.lines.sort(key=lambda l: l.start)
+                self.lines.sort(key=lambda ln: ln.start)
             self.waveform.update()
 
     # ── Detección de cambios ───────────────────────────────────────────
     def _snapshot(self):
-        return [(round(l.start, 3), l.text) for l in self.lines]
+        return [(round(ln.start, 3), ln.text) for ln in self.lines]
 
     def _has_changes(self) -> bool:
         return self._snapshot() != self._original

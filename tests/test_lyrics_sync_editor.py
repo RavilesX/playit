@@ -81,7 +81,7 @@ class TestParseLRC:
         p = tmp_path / "lyrics.lrc"
         p.write_text(LRC_EJEMPLO, encoding="utf-8")
         lines = parse_lrc(p)
-        assert [round(l.start, 2) for l in lines] == [1.0, 3.5, 60.25]
+        assert [round(ln.start, 2) for ln in lines] == [1.0, 3.5, 60.25]
 
     def test_anexa_lineas_sin_timestamp_al_bloque(self, tmp_path):
         p = tmp_path / "lyrics.lrc"
@@ -115,7 +115,7 @@ class TestFormatoYEscritura:
         ]
         write_lrc(p, original)
         reparsed = parse_lrc(p)
-        assert [round(l.start, 2) for l in reparsed] == [1.0, 3.5]
+        assert [round(ln.start, 2) for ln in reparsed] == [1.0, 3.5]
         assert reparsed[1].text == "<center>B</center>\nsegunda"
 
     def test_write_lrc_ordena_por_inicio(self, tmp_path):
@@ -247,7 +247,7 @@ class TestDialogShift:
     def test_shift_all_desplaza_todo(self, dialog):
         dialog.from_cursor_chk.setChecked(False)
         dialog._shift_all(0.5)
-        assert [round(l.start, 2) for l in dialog.lines] == [1.5, 5.5, 9.5]
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.5, 5.5, 9.5]
 
     def test_shift_all_clamp_a_cero(self, dialog):
         dialog.from_cursor_chk.setChecked(False)
@@ -259,7 +259,7 @@ class TestDialogShift:
         dialog.waveform.playback_pos = 4.0
         dialog._shift_all(0.5)
         # La de 1.0s no se mueve; las de 5.0 y 9.0 sí.
-        assert [round(l.start, 2) for l in dialog.lines] == [1.0, 5.5, 9.5]
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 5.5, 9.5]
 
 
 class TestDialogLineas:
@@ -270,7 +270,7 @@ class TestDialogLineas:
         )
         dialog.waveform.playback_pos = 3.0
         dialog._add_line_with_text()
-        agregada = next(l for l in dialog.lines if round(l.start, 2) == 3.0)
+        agregada = next(ln for ln in dialog.lines if round(ln.start, 2) == 3.0)
         assert agregada.text == "<center>nueva linea</center>"
 
     def test_add_line_cancelado_no_agrega(self, dialog, monkeypatch):
@@ -291,13 +291,13 @@ class TestDialogLineas:
         antes = len(dialog.lines)
         dialog._add_line_blank()
         assert len(dialog.lines) == antes + 1
-        agregada = next(l for l in dialog.lines if round(l.start, 2) == 3.0)
+        agregada = next(ln for ln in dialog.lines if round(ln.start, 2) == 3.0)
         assert agregada.text == "<center></center>"
 
     def test_delete_line_borra_seleccionada(self, dialog):
         dialog.waveform.selection = {1}
         dialog._delete_line()
-        assert [round(l.start, 2) for l in dialog.lines] == [1.0, 9.0]
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 9.0]
 
     def test_delete_line_sin_seleccion_no_hace_nada(self, dialog):
         dialog.waveform.clear_selection()
@@ -308,7 +308,7 @@ class TestDialogLineas:
     def test_delete_multiple_borra_todas(self, dialog):
         dialog.waveform.selection = {0, 2}
         dialog._delete_line()
-        assert [round(l.start, 2) for l in dialog.lines] == [5.0]
+        assert [round(ln.start, 2) for ln in dialog.lines] == [5.0]
         assert dialog.waveform.selection == set()
 
 
@@ -358,7 +358,7 @@ class TestDialogUnir:
         # Líneas: 1.0/uno, 5.0/dos, 9.0/tres.
         dialog.waveform.selection = {0, 1}
         dialog._merge_lines()
-        assert [round(l.start, 2) for l in dialog.lines] == [1.0, 9.0]
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 9.0]
         assert strip_tags(dialog.lines[0].text) == "uno dos"
 
     def test_merge_no_contiguo_no_hace_nada(self, dialog):
@@ -435,10 +435,10 @@ class TestDialogEditarTexto:
         # Se agregó una línea.
         assert len(dialog.lines) == n_antes + 1
         # Línea actual conserva lo de antes del cursor (con trim).
-        actual = next(l for l in dialog.lines if l.start == 1.0)
+        actual = next(ln for ln in dialog.lines if ln.start == 1.0)
         assert strip_tags(actual.text) == "hola"
         # Nueva línea: texto tras el cursor, timestamp en el cursor de play.
-        nueva = next(l for l in dialog.lines if l.start == 2.5)
+        nueva = next(ln for ln in dialog.lines if ln.start == 2.5)
         assert strip_tags(nueva.text) == "mundo"
 
 

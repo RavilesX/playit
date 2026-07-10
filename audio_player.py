@@ -671,6 +671,11 @@ class AudioPlayer(QMainWindow):
         if self.playback_state == "Activa":
             self._control_channels('pause')
             self._update_playback_ui('Pausada')
+        elif self.playback_state == "Detenido":
+            # Tras Stop se limpiaron letras, portada y metadatos: arranque
+            # completo en vez de solo reanudar los streams.
+            self.play_current()
+            return
         else:
             self._control_channels('unpause')
             self._update_playback_ui('Activa')
@@ -1256,9 +1261,12 @@ class AudioPlayer(QMainWindow):
                 dir_path = json_file.parent
                 for artist, songs in data.items():
                     for song in songs:
-                        songs_found.append(
-                            {"artist": artist, "song": song, "path": dir_path}
-                        )
+                        songs_found.append({
+                            "artist": artist,
+                            "song": song,
+                            "path": dir_path,
+                            "duration": get_song_duration(dir_path),
+                        })
             except Exception as e:
                 styled_message_box(
                     self, "Error",
@@ -1310,9 +1318,11 @@ class AudioPlayer(QMainWindow):
             current_song = self.playlist[self.current_index]
 
         if key == "song":
-            sort_key = lambda s: (s['song'].lower(), s['artist'].lower())
+            def sort_key(s):
+                return (s['song'].lower(), s['artist'].lower())
         else:
-            sort_key = lambda s: (s['artist'].lower(), s['song'].lower())
+            def sort_key(s):
+                return (s['artist'].lower(), s['song'].lower())
         self.playlist.sort(key=sort_key, reverse=reverse)
 
         # Rehacer los ítems del widget en el nuevo orden
@@ -1526,11 +1536,16 @@ class AudioPlayer(QMainWindow):
         )
         # Ctrl+F dentro del editor enfoca su buscador; deshabilitar la acción
         # de búsqueda global para que no abra su diálogo encima del editor.
+        # Ctrl+D se usa dentro del editor para separar línea; deshabilitar la
+        # acción global de dividir para que no abra su diálogo encima.
+        split_was_enabled = self.split_action.isEnabled()
         self.search_action.setEnabled(False)
+        self.split_action.setEnabled(False)
         try:
             dialog.exec()
         finally:
             self.search_action.setEnabled(True)
+            self.split_action.setEnabled(split_was_enabled)
 
         if dialog.saved:
             # Invalidar cache y recargar letras editadas.
