@@ -72,6 +72,7 @@ PEAKS_PER_SECOND = 200      # resolución de los peaks precalculados
 DEFAULT_PX_PER_SEC = 150    # escala horizontal fija (zoom queda como variable)
 EDGE_GRAB_PX = 6            # margen en px para "agarrar" el inicio de una línea
 MIN_GAP = 0.05             # separación mínima en segundos entre líneas
+UNDO_MAX = 100             # tope de snapshots del historial de deshacer
 WHEEL_SCROLL_SECONDS = 0.6  # cuánto desplaza la rueda del mouse por muesca
 
 # Regex del timestamp LRC: [mm:ss.xx]
@@ -338,6 +339,7 @@ class WaveformWidget(QWidget):
 
     line_selected = pyqtSignal(int)          # índice de línea seleccionada
     line_changed = pyqtSignal(int)           # índice cuyo inicio se editó
+    drag_started = pyqtSignal()              # se agarró un borde (pre-arrastre)
     edit_text_requested = pyqtSignal(int)    # doble-click sobre un bloque
     seek_requested = pyqtSignal(float)       # click pide reposicionar cursor
     view_changed = pyqtSignal()              # cambió start_pos (sincroniza scrollbar)
@@ -505,6 +507,7 @@ class WaveformWidget(QWidget):
         mods = event.modifiers()
         edge = self._edge_at(x)
         if edge is not None:
+            self.drag_started.emit()
             self._drag_index = edge
             self._drag_orig = self.lines[edge].start
             self._drag_start_x = x
@@ -633,6 +636,10 @@ class LyricsSyncDialog(BaseDialog):
         self.player = MiniVocalsPlayer(self.audio)
         # Estado inicial para detectar cambios sin guardar.
         self._original = self._snapshot()
+        # Historial de deshacer/rehacer: copias de self.lines previas a cada
+        # mutación; el redo se llena al deshacer y se vacía con cada mutación.
+        self._undo_stack: list[list[LyricLine]] = []
+        self._redo_stack: list[list[LyricLine]] = []
 
         self._build_content()
         self._wire()
@@ -836,7 +843,7 @@ class LyricsSyncDialog(BaseDialog):
         actions = QHBoxLayout()
         actions.setContentsMargins(6, 4, 6, 6)
         actions.setSpacing(6)
-        self.hint = QLabel("Espacio: play/pausa · Supr: borrar · Ctrl/Shift: multi-selección · arrastra el borde · doble-click edita")
+        self.hint = QLabel("Espacio: play/pausa · Supr: borrar · Ctrl+Z/Ctrl+Shift+Z: deshacer/rehacer · Ctrl/Shift: multi-selección · arrastra el borde · doble-click edita")
         self.hint.setStyleSheet("color:#9aa; background: transparent; border: none;")
         actions.addWidget(self.hint)
         actions.addStretch(1)
@@ -881,6 +888,12 @@ class LyricsSyncDialog(BaseDialog):
         # Atajos: Ctrl+N línea en blanco, Ctrl+Shift+N línea con texto.
         self._add_shortcut("Ctrl+N", self._add_line_blank)
         self._add_shortcut("Ctrl+Shift+N", self._add_line_with_text)
+        # Deshacer/rehacer: cada mutación (agregar, borrar, unir, separar,
+        # editar, color, offset, arrastre de borde) empuja un snapshot previo.
+        self._add_shortcut("Ctrl+Z", self._undo)
+        self._add_shortcut("Ctrl+Shift+Z", self._redo)
+        self._add_shortcut("Ctrl+Y", self._redo)
+        self.waveform.drag_started.connect(self._push_undo)
         self.del_btn.clicked.connect(self._delete_line)
         self.merge_btn.clicked.connect(self._merge_lines)
         self.waveform.selection_changed.connect(self._update_merge_state)
@@ -967,6 +980,7 @@ class LyricsSyncDialog(BaseDialog):
 
     def _insert_line(self, text: str):
         """Inserta una línea con `text` en la posición del cursor y la selecciona."""
+        self._push_undo()
         pos = self.waveform.playback_pos
         new_line = LyricLine(pos, wrap_lyric(text))
         self.lines.append(new_line)
@@ -993,6 +1007,7 @@ class LyricsSyncDialog(BaseDialog):
         sel = sorted(i for i in self.waveform.selection if 0 <= i < len(self.lines))
         if not sel:
             return
+        self._push_undo()
         for i in reversed(sel):
             del self.lines[i]
         self.waveform.clear_selection()
@@ -1010,6 +1025,7 @@ class LyricsSyncDialog(BaseDialog):
         """
         if not self._can_merge():
             return
+        self._push_undo()
         sel = sorted(self.waveform.selection)
         start = self.lines[sel[0]].start
         color = extract_color(self.lines[sel[0]].text)
@@ -1032,6 +1048,7 @@ class LyricsSyncDialog(BaseDialog):
         sel = sorted(i for i in self.waveform.selection if 0 <= i < len(self.lines))
         if not sel:
             return
+        self._push_undo()
         if color is not None and all(
             extract_color(self.lines[i].text) == color for i in sel
         ):
@@ -1047,6 +1064,7 @@ class LyricsSyncDialog(BaseDialog):
         Con "Solo desde el cursor" marcado, afecta únicamente las líneas
         cuyo inicio es >= la posición del cursor de reproducción.
         """
+        self._push_undo()
         dur = self.audio.duration
         threshold = (self.waveform.playback_pos
                      if self.from_cursor_chk.isChecked() else -1.0)
@@ -1267,6 +1285,7 @@ class LyricsSyncDialog(BaseDialog):
                     lay.insertSpacing(bidx + 1, 24)
 
         if dlg.exec():
+            self._push_undo()
             color = color_state["color"]
             self.lines[index].text = wrap_lyric(dlg.textValue(), color)
             if split["do"]:
@@ -1276,6 +1295,57 @@ class LyricsSyncDialog(BaseDialog):
                 )
                 self.lines.sort(key=lambda ln: ln.start)
             self.waveform.update()
+
+    # ── Deshacer / Rehacer ─────────────────────────────────────────────
+    def _copy_lines(self) -> list[LyricLine]:
+        return [LyricLine(ln.start, ln.text) for ln in self.lines]
+
+    def _push_undo(self):
+        """Guarda una copia de las líneas antes de una mutación.
+
+        Toda mutación nueva invalida el historial de rehacer (igual que en
+        cualquier editor: tras deshacer y editar, ya no hay qué rehacer).
+        """
+        self._undo_stack.append(self._copy_lines())
+        if len(self._undo_stack) > UNDO_MAX:
+            del self._undo_stack[0]
+        self._redo_stack.clear()
+
+    def _restore_from(self, source: list, target: list) -> None:
+        """Restaura el último snapshot de `source` distinto al actual,
+        empujando el estado vigente a `target` (deshacer↔rehacer).
+
+        Los snapshots iguales al estado actual (p. ej. agarrar un borde sin
+        moverlo) se descartan para que cada atajo produzca un cambio
+        visible. Restaura in-place: waveform.lines es la misma lista.
+        """
+        while source:
+            snap = source.pop()
+            if snap != self.lines:
+                target.append(self._copy_lines())
+                self.lines[:] = snap
+                # Los índices seleccionados pueden ya no existir; limpiar
+                # también refresca el estado del botón Unir.
+                self.waveform.clear_selection()
+                self.waveform.update()
+                break
+
+    def _undo(self):
+        """Ctrl+Z. Con el foco en un campo de texto (buscador, spinbox)
+        delega en el undo nativo del campo."""
+        w = self.focusWidget()
+        if isinstance(w, QLineEdit):
+            w.undo()
+            return
+        self._restore_from(self._undo_stack, self._redo_stack)
+
+    def _redo(self):
+        """Ctrl+Shift+Z / Ctrl+Y. Misma delegación que _undo."""
+        w = self.focusWidget()
+        if isinstance(w, QLineEdit):
+            w.redo()
+            return
+        self._restore_from(self._redo_stack, self._undo_stack)
 
     # ── Detección de cambios ───────────────────────────────────────────
     def _snapshot(self):

@@ -22,7 +22,8 @@ import json
 from datetime import datetime
 import time
 from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QThread, QPoint, QEvent
-from PyQt6.QtGui import QAction, QPixmap, QKeySequence, QColor, QPainter, QIcon, QImage
+from PyQt6.QtGui import (QAction, QPixmap, QKeySequence, QColor, QPainter,
+                         QIcon, QImage, QShortcut)
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
     QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
@@ -64,7 +65,7 @@ TRACK_NAMES = ("drums", "vocals", "bass", "other")
 DEFAULT_LIBRARY = get_data_dir() / "music_library"
 DEFAULT_VOLUME = 25
 LYRICS_FONT_MIN = 20
-LYRICS_FONT_MAX = 82
+LYRICS_FONT_MAX = 100
 LYRICS_FONT_DEFAULT = 62
 STATUS_CACHE_TTL = 5.0
 VERIFICATION_MAX_ATTEMPTS = 60
@@ -273,6 +274,10 @@ class AudioPlayer(QMainWindow):
         if obj is getattr(self, 'main_frame', None) and \
                 event.type() == QEvent.Type.Resize:
             self._position_visualizer()
+        if event.type() == QEvent.Type.MouseButtonDblClick and \
+                obj in getattr(self, '_lyrics_click_areas', ()):
+            self._toggle_lyrics_fullscreen()
+            return True
         return super().eventFilter(obj, event)
 
     def _toggle_visualizer(self, enabled: bool):
@@ -347,6 +352,20 @@ class AudioPlayer(QMainWindow):
 
         self.lyrics_container = QWidget()
         self.lyrics_container.setLayout(lyrics_layout)
+
+        # Letras en pantalla completa: Esc sale (atajo con alcance al contenedor
+        # y sus hijos, para que funcione con el foco en cualquier QTextEdit);
+        # doble clic sobre la sección entra/sale (ver eventFilter).
+        self._lyrics_fullscreen = False
+        esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.lyrics_container)
+        esc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        esc.activated.connect(self._exit_lyrics_fullscreen)
+        self._lyrics_click_areas = tuple(
+            w.viewport() for w in
+            (self.lyrics_header, self.lyrics_current, self.lyrics_next)
+        ) + (self.lyrics_container,)
+        for w in self._lyrics_click_areas:
+            w.installEventFilter(self)
 
         self.tabs.addTab(self.lyrics_container, "Letras")
         self.tabs.addTab(self.cover_label, "Portada")
@@ -685,6 +704,72 @@ class AudioPlayer(QMainWindow):
         self._repeat = self.repeat_btn.isChecked()
         icon = "repeat_on" if self._repeat else "repeat"
         bg_image(self.repeat_btn, f"images/main_window/{icon}.png")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # ── Letras en pantalla completa ──────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
+    def _toggle_lyrics_fullscreen(self):
+        if self._lyrics_fullscreen:
+            self._exit_lyrics_fullscreen()
+        else:
+            self._enter_lyrics_fullscreen()
+
+    def _enter_lyrics_fullscreen(self):
+        if self._lyrics_fullscreen:
+            return
+        self._lyrics_fullscreen = True
+        self._lyrics_tab_index = self.tabs.indexOf(self.lyrics_container)
+        # Tamaños para fullscreen: letra actual al máximo y la siguiente +8px
+        # sobre su tamaño del QSS (fontInfo() no sirve: Qt no refleja la
+        # fuente de un stylesheet en font()). Ambos se restauran al salir.
+        self._fs_prev_font_size = self.lyrics_font_size
+        m = re.search(r"#lyrics_next\s*\{[^}]*?font-size:\s*(\d+)px",
+                      self.styleSheet())
+        fs_next_px = (int(m.group(1)) if m else 24) + 8
+        self.tabs.removeTab(self._lyrics_tab_index)
+        self.lyrics_container.setParent(None)
+        # Fuera de la ventana principal el contenedor deja de heredar su QSS
+        # (estilos.css, con las fuentes/tamaños de las letras): re-aplicarlo,
+        # más un fondo oscuro sólido porque como ventana independiente también
+        # pierde el fondo del pane de las tabs.
+        self.lyrics_container.setStyleSheet(
+            self.styleSheet()
+            + "\nQWidget { background-color: #14101c; }"
+            + f"\nQTextEdit#lyrics_next {{ font-size: {fs_next_px}px; }}"
+        )
+        self.lyrics_font_size = LYRICS_FONT_MAX
+        self.apply_lyrics_font()
+        # Las QAction del menú tienen contexto de la ventana principal y no
+        # disparan con esta ventana activa: replicar los atajos de letras
+        # aquí, ligados a las mismas acciones (trigger respeta su enabled).
+        # Se destruyen al salir para no duplicar los atajos en modo normal.
+        self._fs_shortcuts = []
+        for seq, action in (
+            ("Ctrl+Shift+Up", self.increase_font_action),
+            ("Ctrl+Shift+Down", self.decrease_font_action),
+            ("Ctrl+Shift+Right", self.advance_action),
+            ("Ctrl+Shift+Left", self.delay_action),
+        ):
+            sc = QShortcut(QKeySequence(seq), self.lyrics_container)
+            sc.activated.connect(action.trigger)
+            self._fs_shortcuts.append(sc)
+        self.lyrics_container.showFullScreen()
+        self.lyrics_container.setFocus()
+
+    def _exit_lyrics_fullscreen(self):
+        if not self._lyrics_fullscreen:
+            return
+        self._lyrics_fullscreen = False
+        for sc in self._fs_shortcuts:
+            sc.setEnabled(False)
+            sc.deleteLater()
+        self._fs_shortcuts = []
+        self.lyrics_container.setStyleSheet("")
+        self.lyrics_font_size = self._fs_prev_font_size
+        self.apply_lyrics_font()
+        self.tabs.insertTab(
+            self._lyrics_tab_index, self.lyrics_container, "Letras")
+        self.tabs.setCurrentWidget(self.lyrics_container)
 
     def stop_playback(self):
         self._control_channels('stop')
@@ -1534,18 +1619,20 @@ class AudioPlayer(QMainWindow):
         dialog = LyricsSyncDialog(
             self, path / "separated" / "vocals.mp3", path / "lyrics.lrc",
         )
-        # Ctrl+F dentro del editor enfoca su buscador; deshabilitar la acción
-        # de búsqueda global para que no abra su diálogo encima del editor.
-        # Ctrl+D se usa dentro del editor para separar línea; deshabilitar la
-        # acción global de dividir para que no abra su diálogo encima.
+        # El editor usa Ctrl+F (enfocar su buscador) y Ctrl+D (separar línea):
+        # deshabilitar las acciones globales con esos atajos (pantalla completa
+        # de letras y dividir) y la búsqueda global, para que no se disparen
+        # encima del editor.
         split_was_enabled = self.split_action.isEnabled()
         self.search_action.setEnabled(False)
         self.split_action.setEnabled(False)
+        self.lyrics_fullscreen_action.setEnabled(False)
         try:
             dialog.exec()
         finally:
             self.search_action.setEnabled(True)
             self.split_action.setEnabled(split_was_enabled)
+            self.lyrics_fullscreen_action.setEnabled(True)
 
         if dialog.saved:
             # Invalidar cache y recargar letras editadas.
@@ -2292,9 +2379,14 @@ class AudioPlayer(QMainWindow):
         options_menu.addAction(self.show_visualizer_action)
 
         self.search_action = QAction("Buscar canción...", self)
-        self.search_action.setShortcut("Ctrl+F")
+        self.search_action.setShortcut("Ctrl+Shift+F")
         self.search_action.triggered.connect(self.show_search_dialog)
         options_menu.addAction(self.search_action)
+
+        self.lyrics_fullscreen_action = QAction("Letras en pantalla completa", self)
+        self.lyrics_fullscreen_action.setShortcut("Ctrl+F")
+        self.lyrics_fullscreen_action.triggered.connect(self._enter_lyrics_fullscreen)
+        options_menu.addAction(self.lyrics_fullscreen_action)
 
         lyrics_menu = options_menu.addMenu("Modificar Lyrics")
         assert lyrics_menu is not None

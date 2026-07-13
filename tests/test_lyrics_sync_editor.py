@@ -21,6 +21,7 @@ from lyrics_sync_editor import (
     LyricsSyncDialog,
     VocalsAudio,
     WaveformWidget,
+    extract_color,
     fold_text,
     load_vocals,
     parse_lrc,
@@ -491,6 +492,139 @@ class TestDialogConfirmarCancelar:
         assert dialog._has_changes() is False
         dialog.lines[0].start += 0.5
         assert dialog._has_changes() is True
+
+
+class TestDialogDeshacer:
+    def test_undo_revierte_shift(self, dialog):
+        dialog.from_cursor_chk.setChecked(False)
+        dialog._shift_all(0.5)
+        dialog._undo()
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 5.0, 9.0]
+
+    def test_undo_revierte_delete(self, dialog):
+        dialog.waveform.selection = {1}
+        dialog._delete_line()
+        dialog._undo()
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 5.0, 9.0]
+        assert strip_tags(dialog.lines[1].text) == "dos"
+
+    def test_undo_revierte_agregar(self, dialog):
+        dialog.waveform.playback_pos = 3.0
+        dialog._add_line_blank()
+        assert len(dialog.lines) == 4
+        dialog._undo()
+        assert len(dialog.lines) == 3
+
+    def test_undo_revierte_merge(self, dialog):
+        dialog.waveform.selection = {0, 1}
+        dialog._merge_lines()
+        dialog._undo()
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 5.0, 9.0]
+        assert strip_tags(dialog.lines[0].text) == "uno"
+
+    def test_undo_revierte_color(self, dialog):
+        dialog.waveform.selection = {0}
+        dialog._apply_color("azul")
+        assert extract_color(dialog.lines[0].text) == "azul"
+        dialog._undo()
+        assert extract_color(dialog.lines[0].text) is None
+
+    def test_undo_revierte_arrastre(self, dialog):
+        # El agarre del borde emite drag_started, que empuja el snapshot.
+        dialog.waveform.drag_started.emit()
+        dialog.lines[0].start = 2.0
+        dialog._undo()
+        assert dialog.lines[0].start == pytest.approx(1.0)
+
+    def test_undo_descarta_snapshots_sin_cambio(self, dialog):
+        # Agarrar un borde sin moverlo deja un snapshot igual al estado:
+        # el Ctrl+Z siguiente debe saltárselo y deshacer el cambio real.
+        dialog.waveform.selection = {1}
+        dialog._delete_line()
+        dialog._push_undo()  # snapshot redundante (sin mutación después)
+        dialog._undo()
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 5.0, 9.0]
+
+    def test_undo_multiple_en_orden_inverso(self, dialog):
+        dialog.from_cursor_chk.setChecked(False)
+        dialog._shift_all(0.5)
+        dialog._shift_all(0.5)
+        dialog._undo()
+        assert round(dialog.lines[0].start, 2) == 1.5
+        dialog._undo()
+        assert round(dialog.lines[0].start, 2) == 1.0
+
+    def test_undo_sin_historial_no_hace_nada(self, dialog):
+        antes = dialog._snapshot()
+        dialog._undo()
+        assert dialog._snapshot() == antes
+
+    def test_undo_limpia_seleccion(self, dialog):
+        dialog.waveform.selection = {0, 2}
+        dialog._delete_line()
+        dialog._undo()
+        assert dialog.waveform.selection == set()
+
+    def test_undo_hasta_original_sin_cambios(self, dialog):
+        dialog.from_cursor_chk.setChecked(False)
+        dialog._shift_all(0.5)
+        assert dialog._has_changes() is True
+        dialog._undo()
+        assert dialog._has_changes() is False
+
+
+class TestDialogRehacer:
+    def test_redo_reaplica_lo_deshecho(self, dialog):
+        dialog.from_cursor_chk.setChecked(False)
+        dialog._shift_all(0.5)
+        dialog._undo()
+        dialog._redo()
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.5, 5.5, 9.5]
+
+    def test_redo_restaura_linea_borrada_y_reborra(self, dialog):
+        dialog.waveform.selection = {1}
+        dialog._delete_line()
+        dialog._undo()
+        assert len(dialog.lines) == 3
+        dialog._redo()
+        assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 9.0]
+
+    def test_mutacion_nueva_invalida_redo(self, dialog):
+        dialog.from_cursor_chk.setChecked(False)
+        dialog._shift_all(0.5)
+        dialog._undo()
+        dialog.waveform.selection = {0}
+        dialog._apply_color("azul")  # mutación nueva → redo vacío
+        dialog._redo()
+        assert extract_color(dialog.lines[0].text) == "azul"  # no cambió nada
+        assert round(dialog.lines[0].start, 2) == 1.0
+
+    def test_redo_sin_historial_no_hace_nada(self, dialog):
+        antes = dialog._snapshot()
+        dialog._redo()
+        assert dialog._snapshot() == antes
+
+    def test_ciclo_undo_redo_multiple(self, dialog):
+        dialog.from_cursor_chk.setChecked(False)
+        dialog._shift_all(0.5)   # 1.5
+        dialog._shift_all(0.5)   # 2.0
+        dialog._undo()
+        dialog._undo()
+        assert round(dialog.lines[0].start, 2) == 1.0
+        dialog._redo()
+        assert round(dialog.lines[0].start, 2) == 1.5
+        dialog._redo()
+        assert round(dialog.lines[0].start, 2) == 2.0
+        dialog._redo()  # historial agotado: no-op
+        assert round(dialog.lines[0].start, 2) == 2.0
+
+    def test_undo_tras_redo_vuelve_a_deshacer(self, dialog):
+        dialog.from_cursor_chk.setChecked(False)
+        dialog._shift_all(0.5)
+        dialog._undo()
+        dialog._redo()
+        dialog._undo()
+        assert round(dialog.lines[0].start, 2) == 1.0
 
 
 class TestFoldText:
