@@ -33,8 +33,9 @@ Dos piezas:
 import time
 
 import numpy as np
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QRectF
-from PyQt6.QtGui import QPainter, QColor, QLinearGradient, QBrush
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QRectF, QPointF
+from PyQt6.QtGui import (QPainter, QColor, QLinearGradient, QRadialGradient,
+                         QBrush, QPainterPath, QPen)
 from PyQt6.QtWidgets import QWidget
 
 
@@ -203,3 +204,167 @@ class VisualizerWidget(QWidget):
             x = i * slot + gap / 2.0
             rect = QRectF(x, h - bh, bar_w, bh)
             painter.drawRoundedRect(rect, radius, radius)
+
+
+class CircularVisualizerWidget(QWidget):
+    """Espectro radial para el fullscreen de letras.
+
+    Mismo contrato que VisualizerWidget (recibe ``bars_ready`` del
+    ``AudioAnalyzer``), pero pinta alrededor de un anillo interior, al
+    centro y semitransparente: no roba clics ni fondo. Tres estilos
+    (``set_style``): "bars" (barras radiales), "wave" (curva suave cerrada)
+    y "electric" (anillo dentado con glow y jitter por frame).
+    """
+
+    STYLES = ("bars", "wave", "electric")
+
+    def __init__(self, parent=None, style: str = "bars"):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._bars = np.zeros(0, dtype=np.float32)
+        self._gradient = None
+        self._gradient_r = -1.0
+        self._style = style if style in self.STYLES else "bars"
+        self._rng = np.random.default_rng()
+
+    def set_style(self, style: str):
+        if style in self.STYLES:
+            self._style = style
+            self.update()
+
+    def set_bars(self, bars: np.ndarray):
+        self._bars = bars
+        self.update()
+
+    def clear(self):
+        if self._bars.size:
+            self._bars = np.zeros_like(self._bars)
+            self.update()
+
+    def _build_gradient(self, r0: float, rmax: float):
+        # Radial (centrado en el origen lógico tras translate): azul cerca
+        # del anillo, rosa de la app hacia la punta. Alphas bajos para no
+        # competir con el texto de las letras.
+        grad = QRadialGradient(0.0, 0.0, rmax)
+        grad.setColorAt(max(0.0, r0 / rmax), QColor(80, 150, 255, 110))
+        grad.setColorAt(0.75, QColor(200, 70, 230, 130))
+        grad.setColorAt(1.0, QColor(248, 143, 255, 150))
+        self._gradient = QBrush(grad)
+        self._gradient_r = rmax
+
+    def _ring_points(self, r0: float, span: float,
+                     jitter: float = 0.0) -> np.ndarray:
+        """Puntos (x, y) del anillo modulado por el espectro.
+
+        radio_i = r0 + bars_i * span (+ jitter aleatorio opcional).
+        """
+        n = self._bars.size
+        ang = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
+        r = r0 + self._bars * span
+        if jitter > 0.0:
+            r = r + self._rng.uniform(-jitter, jitter, n)
+        return np.column_stack((r * np.cos(ang), r * np.sin(ang)))
+
+    @staticmethod
+    def _smooth_closed_path(pts: np.ndarray) -> QPainterPath:
+        """Curva cerrada suave: cuadráticas entre puntos medios consecutivos
+        usando cada punto como control (técnica estándar de midpoints)."""
+        n = len(pts)
+        mids = (pts + np.roll(pts, -1, axis=0)) / 2.0
+        path = QPainterPath(QPointF(*mids[-1]))
+        for i in range(n):
+            path.quadTo(QPointF(*pts[i]), QPointF(*mids[i]))
+        path.closeSubpath()
+        return path
+
+    def paintEvent(self, event):
+        n = self._bars.size
+        if n == 0:
+            return
+        w = self.width()
+        h = self.height()
+        if w <= 0 or h <= 0:
+            return
+
+        side = min(w, h)
+        r0 = side * 0.18            # radio del anillo interior
+        rmax = side * 0.48          # alcance máximo
+        span = rmax - r0
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.translate(w / 2.0, h / 2.0)
+
+        if self._style == "wave":
+            self._paint_wave(painter, r0, span, rmax)
+        elif self._style == "electric":
+            self._paint_electric(painter, r0, span)
+        else:
+            self._paint_bars(painter, r0, span, rmax)
+
+    def _paint_bars(self, painter: QPainter, r0: float, span: float,
+                    rmax: float):
+        n = self._bars.size
+        bar_w = (2.0 * np.pi * r0 / n) * 0.55
+        radius = bar_w * 0.4
+
+        if self._gradient is None or self._gradient_r != rmax:
+            self._build_gradient(r0, rmax)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._gradient)
+
+        # Giro base de 45° a la derecha: los graves (barras largas) quedan
+        # en diagonal en vez de apuntar hacia arriba.
+        painter.rotate(45.0)
+        step = 360.0 / n
+        for i in range(n):
+            # Largo mínimo de 2px: en silencio queda un anillo punteado tenue.
+            length = 2.0 + float(self._bars[i]) * span
+            painter.save()
+            painter.rotate(i * step)
+            rect = QRectF(-bar_w / 2.0, -(r0 + length), bar_w, length)
+            painter.drawRoundedRect(rect, radius, radius)
+            painter.restore()
+
+    def _paint_wave(self, painter: QPainter, r0: float, span: float,
+                    rmax: float):
+        """Dos capas de curva suave: relleno tenue + contorno brillante,
+        más un eco interior desfasado para dar profundidad."""
+        if self._gradient is None or self._gradient_r != rmax:
+            self._build_gradient(r0, rmax)
+
+        # Capa principal: relleno con el gradiente y borde rosa.
+        path = self._smooth_closed_path(self._ring_points(r0, span))
+        painter.setPen(QPen(QColor(248, 143, 255, 170), 2.5))
+        painter.setBrush(self._gradient)
+        painter.drawPath(path)
+
+        # Eco interior: misma forma al 70%, solo contorno azul tenue.
+        echo = self._smooth_closed_path(self._ring_points(r0 * 0.7, span * 0.7))
+        painter.setPen(QPen(QColor(80, 150, 255, 90), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(echo)
+
+    def _paint_electric(self, painter: QPainter, r0: float, span: float):
+        """Anillo dentado tipo rayo: polilínea cerrada sin suavizar, con
+        jitter aleatorio por frame (parpadeo) y glow en 3 pasadas."""
+        pts = self._ring_points(r0, span, jitter=span * 0.05)
+        path = QPainterPath(QPointF(*pts[0]))
+        for x, y in pts[1:]:
+            path.lineTo(QPointF(x, y))
+        path.closeSubpath()
+
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # Glow exterior violeta → núcleo casi blanco.
+        for width, color in (
+            (7.0, QColor(200, 70, 230, 45)),
+            (3.5, QColor(248, 143, 255, 100)),
+            (1.4, QColor(235, 245, 255, 220)),
+        ):
+            painter.setPen(QPen(color, width,
+                                Qt.PenStyle.SolidLine,
+                                Qt.PenCapStyle.RoundCap,
+                                Qt.PenJoinStyle.RoundJoin))
+            painter.drawPath(path)

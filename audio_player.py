@@ -55,7 +55,8 @@ from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
 from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog
 from lazy_resources import (LazyAudioManager, LazyImageManager, LazyLyricsManager,
                             LazyPlaylistLoader, get_song_duration)
-from audio_visualizer import AudioAnalyzer, VisualizerWidget
+from audio_visualizer import (AudioAnalyzer, CircularVisualizerWidget,
+                              VisualizerWidget)
 from lyrics_sync_editor import AUTO_UNMUTE_COLOR, LYRIC_COLORS, LyricsSyncDialog
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ DEFAULT_VOLUME = 25
 LYRICS_FONT_MIN = 20
 LYRICS_FONT_MAX = 100
 LYRICS_FONT_DEFAULT = 62
+LYRICS_NEXT_MIN_HEIGHT = 60
 STATUS_CACHE_TTL = 5.0
 VERIFICATION_MAX_ATTEMPTS = 60
 VERIFICATION_INTERVAL_MS = 30_000
@@ -278,6 +280,12 @@ class AudioPlayer(QMainWindow):
                 obj in getattr(self, '_lyrics_click_areas', ()):
             self._toggle_lyrics_fullscreen()
             return True
+        # Recentrar el visualizador circular si la ventana fullscreen cambia
+        # de tamaño (p. ej. al moverse a otro monitor).
+        if obj is getattr(self, 'lyrics_container', None) and \
+                event.type() == QEvent.Type.Resize and \
+                getattr(self, '_lyrics_fullscreen', False):
+            self._position_fs_visualizer()
         return super().eventFilter(obj, event)
 
     def _toggle_visualizer(self, enabled: bool):
@@ -287,6 +295,9 @@ class AudioPlayer(QMainWindow):
         if hasattr(self, 'visualizer'):
             self.visualizer.clear()
             self.visualizer.setVisible(enabled)
+        if getattr(self, '_fs_visualizer', None) is not None:
+            self._fs_visualizer.clear()
+            self._fs_visualizer.setVisible(enabled)
 
     def _position_visualizer(self):
         # Ocupa desde el borde superior de la barra de progreso hasta el fondo del
@@ -341,7 +352,7 @@ class AudioPlayer(QMainWindow):
 
         self.lyrics_next = QTextEdit()
         self.lyrics_next.setReadOnly(True)
-        self.lyrics_next.setFixedHeight(60)
+        self.lyrics_next.setFixedHeight(LYRICS_NEXT_MIN_HEIGHT)
         self.lyrics_next.setObjectName("lyrics_next")
         self.lyrics_next.setStyleSheet("background: transparent; border: none;")
 
@@ -357,6 +368,8 @@ class AudioPlayer(QMainWindow):
         # y sus hijos, para que funcione con el foco en cualquier QTextEdit);
         # doble clic sobre la sección entra/sale (ver eventFilter).
         self._lyrics_fullscreen = False
+        self._fs_visualizer = None
+        self._fs_viz_style = "wave"
         esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.lyrics_container)
         esc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         esc.activated.connect(self._exit_lyrics_fullscreen)
@@ -714,6 +727,31 @@ class AudioPlayer(QMainWindow):
         else:
             self._enter_lyrics_fullscreen()
 
+    def _set_fs_viz_style(self, style: str):
+        self._fs_viz_style = style
+        if self._fs_visualizer is not None:
+            self._fs_visualizer.set_style(style)
+        # Sincronizar el check del menú (también cuando se cicla con V).
+        for act in getattr(self, '_fs_viz_style_actions', []):
+            act.setChecked(act.data() == style)
+
+    def _cycle_fs_viz_style(self):
+        styles = CircularVisualizerWidget.STYLES
+        i = styles.index(self._fs_viz_style)
+        self._set_fs_viz_style(styles[(i + 1) % len(styles)])
+
+    def _position_fs_visualizer(self):
+        if self._fs_visualizer is None:
+            return
+        w = self.lyrics_container.width()
+        h = self.lyrics_container.height()
+        side = int(min(w, h) * 0.85)
+        # Un poco abajo del centro: el texto de la letra actual pesa arriba.
+        y_offset = int(h * 0.09)
+        self._fs_visualizer.setGeometry(
+            (w - side) // 2, (h - side) // 2 + y_offset, side, side)
+        self._fs_visualizer.lower()
+
     def _enter_lyrics_fullscreen(self):
         if self._lyrics_fullscreen:
             return
@@ -732,13 +770,31 @@ class AudioPlayer(QMainWindow):
         # (estilos.css, con las fuentes/tamaños de las letras): re-aplicarlo,
         # más un fondo oscuro sólido porque como ventana independiente también
         # pierde el fondo del pane de las tabs.
+        # Los QTextEdit van transparentes (la regla QWidget también los
+        # matchea y taparían el visualizador circular que va detrás); el
+        # fondo oscuro lo pone el contenedor.
         self.lyrics_container.setStyleSheet(
             self.styleSheet()
             + "\nQWidget { background-color: #14101c; }"
+            + "\nQTextEdit { background: transparent; }"
+            + "\nQTextEdit#lyrics_next { background: transparent; }"
             + f"\nQTextEdit#lyrics_next {{ font-size: {fs_next_px}px; }}"
         )
         self.lyrics_font_size = LYRICS_FONT_MAX
         self.apply_lyrics_font()
+        # Visualizador circular: centrado, detrás del texto, alimentado por
+        # el mismo AudioAnalyzer que las barras de la ventana principal.
+        self._fs_visualizer = CircularVisualizerWidget(
+            self.lyrics_container, style=self._fs_viz_style)
+        self._position_fs_visualizer()
+        self._fs_visualizer.show()
+        self._fs_visualizer.lower()
+        analyzer = getattr(self, 'analyzer', None)
+        if analyzer is not None:
+            analyzer.bars_ready.connect(self._fs_visualizer.set_bars)
+        action = getattr(self, 'show_visualizer_action', None)
+        if action is not None and not action.isChecked():
+            self._fs_visualizer.hide()
         # Las QAction del menú tienen contexto de la ventana principal y no
         # disparan con esta ventana activa: replicar los atajos de letras
         # aquí, ligados a las mismas acciones (trigger respeta su enabled).
@@ -753,6 +809,15 @@ class AudioPlayer(QMainWindow):
             sc = QShortcut(QKeySequence(seq), self.lyrics_container)
             sc.activated.connect(action.trigger)
             self._fs_shortcuts.append(sc)
+        # V: cicla el estilo del visualizador circular en vivo.
+        sc = QShortcut(QKeySequence("V"), self.lyrics_container)
+        sc.activated.connect(self._cycle_fs_viz_style)
+        self._fs_shortcuts.append(sc)
+        # Espacio: pausa/reanuda sin salir del fullscreen. El atajo
+        # intercepta antes de que el QTextEdit use la barra para scroll.
+        sc = QShortcut(QKeySequence(Qt.Key.Key_Space), self.lyrics_container)
+        sc.activated.connect(self.toggle_play_pause)
+        self._fs_shortcuts.append(sc)
         self.lyrics_container.showFullScreen()
         self.lyrics_container.setFocus()
 
@@ -764,6 +829,12 @@ class AudioPlayer(QMainWindow):
             sc.setEnabled(False)
             sc.deleteLater()
         self._fs_shortcuts = []
+        if self._fs_visualizer is not None:
+            analyzer = getattr(self, 'analyzer', None)
+            if analyzer is not None:
+                analyzer.bars_ready.disconnect(self._fs_visualizer.set_bars)
+            self._fs_visualizer.deleteLater()
+            self._fs_visualizer = None
         self.lyrics_container.setStyleSheet("")
         self.lyrics_font_size = self._fs_prev_font_size
         self.apply_lyrics_font()
@@ -1572,6 +1643,13 @@ class AudioPlayer(QMainWindow):
         next_html = next_html.replace('\n', '<br>')
         self.lyrics_current.setHtml(current_html)
         self.lyrics_next.setHtml(f'<center>{next_html}</center>')
+        # Altura según contenido: con la altura fija mínima, una línea de dos
+        # renglones (<br>) dejaba el segundo cortado. Sin textWidth el
+        # documento no calcula layout y size() devuelve 0.
+        doc = self.lyrics_next.document()
+        doc.setTextWidth(self.lyrics_next.viewport().width())
+        doc_h = int(doc.size().height())
+        self.lyrics_next.setFixedHeight(max(LYRICS_NEXT_MIN_HEIGHT, doc_h + 8))
 
     def update_lyrics_menu_state(self):
         enabled = (
@@ -1705,8 +1783,13 @@ class AudioPlayer(QMainWindow):
         self.apply_lyrics_font()
 
     def apply_lyrics_font(self):
+        # setStyleSheet REEMPLAZA la hoja del widget: conservar el fondo
+        # transparente y sin borde con los que se creó, o el marco default
+        # del QTextEdit se vuelve visible tras cambiar la fuente (p. ej. al
+        # entrar/salir del fullscreen de letras).
         self.lyrics_current.setStyleSheet(
-            f"QTextEdit {{ font-size: {self.lyrics_font_size}px; }}"
+            f"QTextEdit {{ font-size: {self.lyrics_font_size}px;"
+            " background: transparent; border: none; }"
         )
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2382,6 +2465,23 @@ class AudioPlayer(QMainWindow):
         self.show_visualizer_action.setChecked(True)
         self.show_visualizer_action.triggered.connect(self._toggle_visualizer)
         options_menu.addAction(self.show_visualizer_action)
+
+        # Estilo del visualizador circular del fullscreen de letras
+        # (también se cicla con V dentro del fullscreen).
+        fs_viz_menu = options_menu.addMenu("Visualizador en pantalla completa")
+        assert fs_viz_menu is not None
+        self._fs_viz_style_actions = []
+        for key, label in (("bars", "Barras circulares"),
+                           ("wave", "Onda"),
+                           ("electric", "Electricidad")):
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setData(key)
+            act.setChecked(key == self._fs_viz_style)
+            act.triggered.connect(
+                lambda _=False, k=key: self._set_fs_viz_style(k))
+            fs_viz_menu.addAction(act)
+            self._fs_viz_style_actions.append(act)
 
         self.search_action = QAction("Buscar canción...", self)
         self.search_action.setShortcut("Ctrl+Shift+F")
