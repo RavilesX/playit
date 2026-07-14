@@ -409,6 +409,31 @@ class TestDialogEditarTexto:
         dialog._edit_text(0)
         assert capturado["wrap"] == QPlainTextEdit.LineWrapMode.WidgetWidth
 
+    def test_enter_inserta_salto_dentro_de_la_linea(self, dialog, monkeypatch):
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        def fake_exec(self):
+            editor = self.findChild(QPlainTextEdit)
+            cur = editor.textCursor()
+            cur.movePosition(cur.MoveOperation.End)
+            editor.setTextCursor(cur)
+            editor.insertPlainText("\nsegunda")  # Enter + texto
+            return 1
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", fake_exec)
+        dialog._edit_text(0)
+        # El salto queda dentro de la misma línea (no crea otra LyricLine).
+        assert dialog.lines[0].text == "<center>uno\nsegunda</center>"
+        assert len(dialog.lines) == 3
+
+    def test_salto_de_linea_roundtrip_lrc(self, dialog, tmp_path):
+        # El \n se guarda como línea de continuación y se re-parsea igual.
+        dialog.lines[0].text = wrap_lyric("uno\nsegunda")
+        p = tmp_path / "out.lrc"
+        write_lrc(p, dialog.lines)
+        reparsed = parse_lrc(p)
+        assert reparsed[0].text == "<center>uno\nsegunda</center>"
+
     def test_separar_linea_divide_en_el_cursor(self, dialog, monkeypatch):
         from PyQt6.QtWidgets import QDialogButtonBox, QPlainTextEdit
 
@@ -713,3 +738,9 @@ class TestDialogBuscador:
         dialog.search_box.setText("   ")
         dialog._search_next()
         assert dialog.search_box.styleSheet() == dialog._SEARCH_NORMAL
+
+    def test_busqueda_atraviesa_saltos_de_linea(self, dialog):
+        self._set_lines(dialog, ["hola\nmundo", "otra"])
+        dialog.search_box.setText("hola mundo")
+        dialog._search_next()
+        assert dialog._search_index == 0

@@ -1105,7 +1105,7 @@ class LyricsSyncDialog(BaseDialog):
             return
         for offset in range(1, n + 1):
             i = (self._search_index + offset) % n
-            if term in fold_text(strip_tags(self.lines[i].text)):
+            if term in fold_text(strip_tags(self.lines[i].text).replace('\n', ' ')):
                 self._search_index = i
                 self.search_box.setStyleSheet(self._SEARCH_NORMAL)
                 self._goto_line(i)
@@ -1124,7 +1124,7 @@ class LyricsSyncDialog(BaseDialog):
         base = self._search_index if self._search_index >= 0 else 0
         for offset in range(1, n + 1):
             i = (base - offset) % n
-            if term in fold_text(strip_tags(self.lines[i].text)):
+            if term in fold_text(strip_tags(self.lines[i].text).replace('\n', ' ')):
                 self._search_index = i
                 self.search_box.setStyleSheet(self._SEARCH_NORMAL)
                 self._goto_line(i)

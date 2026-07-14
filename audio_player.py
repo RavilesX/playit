@@ -1565,6 +1565,11 @@ class AudioPlayer(QMainWindow):
                 next_html = self.lyrics[i + 1][1] if i + 1 < len(self.lyrics) else ""
             else:
                 break
+        # Los bloques multilínea del .lrc (líneas de continuación) llegan con
+        # '\n', que setHtml colapsa en un espacio: convertir a <br> al
+        # renderizar para que el salto de línea sí se muestre.
+        current_html = current_html.replace('\n', '<br>')
+        next_html = next_html.replace('\n', '<br>')
         self.lyrics_current.setHtml(current_html)
         self.lyrics_next.setHtml(f'<center>{next_html}</center>')
 
