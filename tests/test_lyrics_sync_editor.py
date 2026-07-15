@@ -23,9 +23,11 @@ from lyrics_sync_editor import (
     WaveformWidget,
     extract_color,
     fold_text,
+    join_rows,
     load_vocals,
     parse_lrc,
     seconds_to_lrc_ts,
+    split_rows,
     strip_tags,
     wrap_lyric,
     write_lrc,
@@ -378,16 +380,25 @@ class TestDialogUnir:
 
 class TestDialogEditarTexto:
     def test_edit_muestra_limpio_y_guarda_envuelto(self, dialog, monkeypatch):
-        capturado = {}
+        from PyQt6.QtWidgets import QPlainTextEdit
 
-        # El editor se construye por instancia (para forzar el autowrap),
-        # así que parcheamos los métodos del QInputDialog en vez del estático.
-        monkeypatch.setattr(
-            lse.QInputDialog, "setTextValue",
-            lambda self, t: capturado.__setitem__("default", t),
-        )
-        monkeypatch.setattr(lse.QInputDialog, "exec", lambda self: 1)
-        monkeypatch.setattr(lse.QInputDialog, "textValue", lambda self: "editado")
+        capturado = {}
+        original = lse.QInputDialog.setTextValue
+
+        # Espía que captura el default SIN bloquearlo: el guardado ahora lee
+        # el documento del editor (colores por renglón), no textValue().
+        def spy(dlg_self, t):
+            capturado["default"] = t
+            original(dlg_self, t)
+
+        monkeypatch.setattr(lse.QInputDialog, "setTextValue", spy)
+
+        def fake_exec(dlg_self):
+            editor = dlg_self.findChild(QPlainTextEdit)
+            editor.setPlainText("editado")
+            return 1
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", fake_exec)
 
         dialog._edit_text(0)
         # El default mostrado al usuario va sin tags...
@@ -650,6 +661,86 @@ class TestDialogRehacer:
         dialog._redo()
         dialog._undo()
         assert round(dialog.lines[0].start, 2) == 1.0
+
+
+class TestRenglonesColoreados:
+    AZUL = '<center>uno\n<font color="#3AABEF">dos</font></center>'
+
+    def test_split_rows_formato_clasico_hereda_color(self):
+        t = wrap_lyric("uno\ndos", "azul")
+        assert split_rows(t) == [("uno", "azul"), ("dos", "azul")]
+
+    def test_split_rows_sin_color(self):
+        assert split_rows("<center>uno\ndos</center>") == [
+            ("uno", None), ("dos", None)]
+
+    def test_split_rows_color_por_renglon(self):
+        assert split_rows(self.AZUL) == [("uno", None), ("dos", "azul")]
+
+    def test_join_rows_homogeneo_usa_formato_clasico(self):
+        assert join_rows([("uno", None), ("dos", None)]) == \
+            "<center>uno\ndos</center>"
+        assert join_rows([("uno", "azul"), ("dos", "azul")]) == \
+            wrap_lyric("uno\ndos", "azul")
+
+    def test_join_rows_mixto_etiqueta_por_renglon(self):
+        assert join_rows([("uno", None), ("dos", "azul")]) == self.AZUL
+
+    def test_roundtrip_mixto(self):
+        assert join_rows(split_rows(self.AZUL)) == self.AZUL
+
+    def test_roundtrip_lrc_en_disco(self, tmp_path):
+        p = tmp_path / "out.lrc"
+        write_lrc(p, [LyricLine(1.0, self.AZUL)])
+        assert parse_lrc(p)[0].text == self.AZUL
+
+    def test_extract_color_devuelve_primer_color(self):
+        assert extract_color(self.AZUL) == "azul"
+
+    def _edit(self, dialog, monkeypatch, manipulate):
+        from PyQt6.QtWidgets import QDialogButtonBox, QPlainTextEdit
+
+        def fake_exec(dlg_self):
+            editor = dlg_self.findChild(QPlainTextEdit)
+            bbox = dlg_self.findChild(QDialogButtonBox)
+            manipulate(editor, bbox)
+            return 1
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", fake_exec)
+        dialog._edit_text(0)
+
+    def test_dialogo_colorea_solo_renglon_del_cursor(self, dialog, monkeypatch):
+        dialog.lines[0].text = wrap_lyric("uno\ndos")
+
+        def manipulate(editor, bbox):
+            cur = editor.textCursor()
+            cur.movePosition(cur.MoveOperation.End)  # renglón 2
+            editor.setTextCursor(cur)
+            azul = next(b for b in bbox.buttons()
+                        if b.toolTip().startswith("Azul"))
+            azul.click()
+
+        self._edit(dialog, monkeypatch, manipulate)
+        assert dialog.lines[0].text == self.AZUL
+
+    def test_dialogo_toggle_regresa_a_default(self, dialog, monkeypatch):
+        dialog.lines[0].text = self.AZUL
+
+        def manipulate(editor, bbox):
+            cur = editor.textCursor()
+            cur.movePosition(cur.MoveOperation.End)  # renglón 2 (azul)
+            editor.setTextCursor(cur)
+            azul = next(b for b in bbox.buttons()
+                        if b.toolTip().startswith("Azul"))
+            azul.click()  # ya era azul → vuelve a default
+
+        self._edit(dialog, monkeypatch, manipulate)
+        assert dialog.lines[0].text == "<center>uno\ndos</center>"
+
+    def test_dialogo_conserva_colores_existentes(self, dialog, monkeypatch):
+        dialog.lines[0].text = self.AZUL
+        self._edit(dialog, monkeypatch, lambda editor, bbox: None)
+        assert dialog.lines[0].text == self.AZUL
 
 
 class TestFoldText:

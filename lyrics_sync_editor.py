@@ -40,7 +40,8 @@ import sounddevice as sd
 import soundfile as sf
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
-    QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut, QTextOption,
+    QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut,
+    QTextCharFormat, QTextCursor, QTextOption,
 )
 from PyQt6.QtWidgets import (
     QBoxLayout,
@@ -101,6 +102,9 @@ LYRIC_COLOR_TIPS = {
     "rojo": "Rojo: deja oír esa parte de la voz con el auto-unmute",
 }
 _FONT_COLOR = re.compile(r'<font\s+color="([^"]+)"', re.IGNORECASE)
+# Color por defecto de la letra (el rosa de la app) para pintar los renglones
+# sin color propio dentro del editor de texto.
+DEFAULT_LYRIC_HEX = "#F88FFF"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -203,16 +207,61 @@ def wrap_lyric(text: str, color: str | None = None) -> str:
     return f'<center>{text}</center>'
 
 
-def extract_color(text: str) -> str | None:
-    """Devuelve el nombre del color de la línea, o None si usa el de por defecto."""
-    m = _FONT_COLOR.search(text)
-    if not m:
-        return None
-    hexv = m.group(1).lower()
+def _hex_to_color_name(hexv: str) -> str | None:
+    """Nombre en LYRIC_COLORS para un hex, o None si no coincide."""
+    hexv = hexv.lower()
     for name, value in LYRIC_COLORS.items():
         if value.lower() == hexv:
             return name
     return None
+
+
+def extract_color(text: str) -> str | None:
+    """Devuelve el nombre del color de la línea, o None si usa el de por defecto.
+
+    Con colores por renglón devuelve el del primer renglón coloreado (se usa
+    como tinte del bloque en la onda y para detectar el rojo de auto-unmute).
+    """
+    m = _FONT_COLOR.search(text)
+    return _hex_to_color_name(m.group(1)) if m else None
+
+
+def split_rows(text: str) -> list[tuple[str, str | None]]:
+    """Descompone el texto de una línea en [(renglón limpio, color)].
+
+    Soporta ambos formatos: el clásico (una sola etiqueta <font> que envuelve
+    toda la línea → todos los renglones heredan ese color) y el formato por
+    renglón (cada renglón con su propia etiqueta <font>).
+    """
+    inner = text.strip()
+    m = re.fullmatch(r'<center>(.*)</center>', inner, re.S)
+    if m:
+        inner = m.group(1)
+    line_color = None
+    m = re.fullmatch(r'<font\s+color="([^"]+)">(.*)</font>',
+                     inner.strip(), re.S | re.IGNORECASE)
+    if m:
+        line_color = _hex_to_color_name(m.group(1))
+        inner = m.group(2)
+    return [(strip_tags(row), extract_color(row) or line_color)
+            for row in inner.split('\n')]
+
+
+def join_rows(rows: list[tuple[str, str | None]]) -> str:
+    """Inverso de split_rows: rearma el texto de la línea para el .lrc.
+
+    Si todos los renglones comparten color, produce el formato clásico
+    (etiqueta única) — así los .lrc existentes no cambian de forma salvo que
+    de verdad haya colores mezclados.
+    """
+    colors = {c for _, c in rows}
+    if len(colors) == 1:
+        return wrap_lyric('\n'.join(t for t, _ in rows), next(iter(colors)))
+    parts = [
+        f'<font color="{LYRIC_COLORS[c]}">{t}</font>' if c in LYRIC_COLORS else t
+        for t, c in rows
+    ]
+    return '<center>' + '\n'.join(parts) + '</center>'
 
 
 def _color_btn_css(hexv: str, active: bool) -> str:
@@ -464,18 +513,30 @@ class WaveformWidget(QWidget):
             # Borde de inicio (lo que se arrastra)
             p.setPen(QPen(self._C_EDGE, 2))
             p.drawLine(int(x0), 0, int(x0), h)
-            # Etiqueta: #índice tiempo + texto. El texto se pinta con el color
-            # de la línea (azul/blanco) si lo tiene; el encabezado va siempre
-            # en el color por defecto.
+            # Etiqueta: #índice tiempo + texto. Cada renglón del texto se
+            # pinta con SU color (una línea puede mezclarlos); el encabezado
+            # va siempre en el color por defecto.
             p.setFont(font)
-            color = extract_color(line.text)
-            text_pen = QColor(LYRIC_COLORS[color]) if color else self._C_LYRIC_DEFAULT
             head = f"#{i + 1}  {line.start:.3f}"
-            preview = strip_tags(line.text).replace('\n', ' ')
             avail = max(10, int(x1 - x0) - 8)
-            elided = fm.elidedText(preview, Qt.TextElideMode.ElideRight, avail)
-            p.setPen(QPen(text_pen, 1))
-            p.drawText(int(x0) + 4, 14, elided)
+            tx = int(x0) + 4
+            remaining = avail
+            rows = split_rows(line.text)
+            for j, (txt, cname) in enumerate(rows):
+                seg = txt if j == len(rows) - 1 else txt + ' '
+                pen = (QColor(LYRIC_COLORS[cname]) if cname
+                       else self._C_LYRIC_DEFAULT)
+                elided = fm.elidedText(
+                    seg, Qt.TextElideMode.ElideRight, remaining)
+                p.setPen(QPen(pen, 1))
+                p.drawText(tx, 14, elided)
+                if elided != seg:      # se truncó: ya no cabe más texto
+                    break
+                w_seg = fm.horizontalAdvance(elided)
+                tx += w_seg
+                remaining -= w_seg
+                if remaining <= 10:
+                    break
             p.setPen(QPen(self._C_TEXT, 1))
             p.drawText(int(x0) + 4, h - 16, head)
 
@@ -1187,7 +1248,8 @@ class LyricsSyncDialog(BaseDialog):
             self.player.stop()
             self.play_btn.setText("▶")
         # Mostrar texto limpio (sin tags); reenvolver con tags al confirmar.
-        clean = strip_tags(self.lines[index].text)
+        rows = split_rows(self.lines[index].text)
+        clean = '\n'.join(t for t, _ in rows)
 
         # Diálogo multilínea propio para poder forzar el autowrap: el texto
         # largo se ajusta al ancho de la caja en vez de salirse en una sola
@@ -1202,33 +1264,71 @@ class LyricsSyncDialog(BaseDialog):
             editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
             editor.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
             editor.setMinimumWidth(360)
+            editor.setStyleSheet(
+                "QPlainTextEdit { background:#2a2a3d;"
+                " border:1px solid #7d73e8; border-radius:4px; padding:3px;"
+                f" font-size:16px; color:{DEFAULT_LYRIC_HEX}; }}"
+            )
 
         bbox = dlg.findChild(QDialogButtonBox)
 
-        # Botones de color (azul/blanco): añaden una etiqueta invisible que
-        # pinta la línea para distinguir cantantes. Funcionan como toggle:
-        # volver a pulsar el color activo regresa al color por defecto.
-        color_state = {"color": extract_color(self.lines[index].text)}
+        # Botones de color (azul/blanco/rojo): colorean EL RENGLÓN donde está
+        # el cursor (o los renglones de la selección), como toggle — repetir
+        # el color activo regresa al color por defecto. El color se guarda
+        # como formato del bloque en el documento y se lee al aceptar; una
+        # línea de un solo renglón se comporta igual que antes.
         color_btns: dict[str, QPushButton] = {}
+        # Lector del color de un bloque; se asigna adentro del if para que el
+        # guardado (y el checker) sepan si la sección de colores se construyó.
+        block_color_fn = None
         if bbox is not None and editor is not None:
+            doc = editor.document()
+            assert doc is not None
 
-            def _refresh_color():
-                name = color_state["color"]
-                hexv = LYRIC_COLORS[name] if name else None
-                editor.setStyleSheet(
-                    "QPlainTextEdit { background:#2a2a3d;"
-                    " border:1px solid #7d73e8; border-radius:4px; padding:3px;"
-                    " font-size:16px;"
-                    f" color:{hexv or '#F88FFF'}; }}"
-                )
+            def _apply_block_color(block_number: int, cname: str | None):
+                block = doc.findBlockByNumber(block_number)
+                if not block.isValid():
+                    return
+                fmt = QTextCharFormat()
+                fmt.setForeground(QColor(
+                    LYRIC_COLORS[cname] if cname else DEFAULT_LYRIC_HEX))
+                cur = QTextCursor(block)
+                cur.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                                 QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeCharFormat(fmt)
+                # También el formato del bloque: lo que se teclee en un
+                # renglón vacío sale ya con su color.
+                cur.mergeBlockCharFormat(fmt)
+
+            def _block_color(block) -> str | None:
+                cur = QTextCursor(block)
+                if block.length() > 1:
+                    cur.movePosition(QTextCursor.MoveOperation.NextCharacter,
+                                     QTextCursor.MoveMode.KeepAnchor)
+                hexv = cur.charFormat().foreground().color().name()
+                return _hex_to_color_name(hexv)
+
+            block_color_fn = _block_color
+
+            def _btn_states():
+                active = _block_color(editor.textCursor().block())
                 for cname, btn in color_btns.items():
                     btn.setStyleSheet(
-                        _color_btn_css(LYRIC_COLORS[cname], cname == name)
+                        _color_btn_css(LYRIC_COLORS[cname], cname == active)
                     )
 
             def _toggle(c):
-                color_state["color"] = None if color_state["color"] == c else c
-                _refresh_color()
+                cur = editor.textCursor()
+                first = doc.findBlock(cur.selectionStart()).blockNumber()
+                last = doc.findBlock(cur.selectionEnd()).blockNumber()
+                nums = range(first, last + 1)
+                # Toggle: si todos los renglones ya tienen ese color → default.
+                all_c = all(
+                    _block_color(doc.findBlockByNumber(b)) == c for b in nums
+                )
+                for b in nums:
+                    _apply_block_color(b, None if all_c else c)
+                _btn_states()
 
             for cname in ("azul", "blanco", "rojo"):
                 b = bbox.addButton("", QDialogButtonBox.ButtonRole.ActionRole)
@@ -1238,7 +1338,14 @@ class LyricsSyncDialog(BaseDialog):
                     b.setToolTip(LYRIC_COLOR_TIPS[cname])
                     b.clicked.connect(lambda _=False, c=cname: _toggle(c))
                     color_btns[cname] = b
-            _refresh_color()
+
+            # Pintar los colores existentes por renglón y reflejar el del
+            # cursor en los botones al moverse.
+            for i, (_, cname) in enumerate(rows):
+                if cname is not None:
+                    _apply_block_color(i, cname)
+            editor.cursorPositionChanged.connect(_btn_states)
+            _btn_states()
 
         # Botón "Separar línea": parte el texto en el cursor. Lo de antes
         # queda en la línea actual; lo de después forma una línea nueva con
@@ -1251,6 +1358,9 @@ class LyricsSyncDialog(BaseDialog):
 
             def _do_split():
                 pos = editor.textCursor().position()
+                # La línea nueva hereda el color del renglón donde se corta
+                # (los colores por renglón del resto no viajan al split).
+                split["color"] = _block_color(editor.textCursor().block())
                 full = editor.toPlainText()
                 # Trim de espacios sobrantes en ambos lados del corte.
                 split["after"] = full[pos:].strip()
@@ -1286,12 +1396,22 @@ class LyricsSyncDialog(BaseDialog):
 
         if dlg.exec():
             self._push_undo()
-            color = color_state["color"]
-            self.lines[index].text = wrap_lyric(dlg.textValue(), color)
+            if editor is not None and block_color_fn is not None:
+                # Releer texto y color renglón por renglón del documento.
+                doc = editor.document()
+                assert doc is not None
+                new_rows = []
+                block = doc.firstBlock()
+                while block.isValid():
+                    new_rows.append((block.text(), block_color_fn(block)))
+                    block = block.next()
+                self.lines[index].text = join_rows(new_rows)
+            else:
+                self.lines[index].text = wrap_lyric(dlg.textValue())
             if split["do"]:
                 self.lines.append(
                     LyricLine(self.waveform.playback_pos,
-                              wrap_lyric(split["after"], color))
+                              wrap_lyric(split["after"], split.get("color")))
                 )
                 self.lines.sort(key=lambda ln: ln.start)
             self.waveform.update()
