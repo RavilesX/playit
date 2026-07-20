@@ -187,6 +187,7 @@ class PlaylistItemDelegate(QStyledItemDelegate):
     """
 
     DURATION_ROLE = Qt.ItemDataRole.UserRole + 1
+    PATH_ROLE = Qt.ItemDataRole.UserRole + 2
     MARGIN = 6
 
     def paint(self, painter, option, index):

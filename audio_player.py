@@ -21,15 +21,15 @@ from pathlib import Path
 import json
 from datetime import datetime
 import time
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QThread, QPoint, QEvent
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QThread, QPoint, QEvent, QUrl
 from PyQt6.QtGui import (QAction, QPixmap, QKeySequence, QColor, QPainter,
-                         QIcon, QImage, QShortcut)
+                         QIcon, QImage, QShortcut, QDesktopServices)
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
     QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
     QPushButton, QSlider, QStatusBar, QMessageBox,
     QFrame, QListWidgetItem, QWidget, QFileDialog,
-    QAbstractItemView, QCheckBox,
+    QAbstractItemView, QCheckBox, QMenu,
 )
 import requests
 from urllib.parse import quote
@@ -531,6 +531,33 @@ class AudioPlayer(QMainWindow):
 
     def _connect_playlist_events(self):
         self.playlist_widget.itemActivated.connect(self.play_selected)
+        self.playlist_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.playlist_widget.customContextMenuRequested.connect(
+            self._show_playlist_context_menu
+        )
+
+    def _show_playlist_context_menu(self, pos: QPoint):
+        item = self.playlist_widget.itemAt(pos)
+        if item is None:
+            return
+
+        menu = QMenu(self.playlist_widget)
+        open_folder_action = menu.addAction("Ir a la carpeta")
+        action = menu.exec(self.playlist_widget.mapToGlobal(pos))
+
+        if action == open_folder_action:
+            self._open_song_folder(item)
+
+    def _open_song_folder(self, item: QListWidgetItem):
+        folder = item.data(PlaylistItemDelegate.PATH_ROLE)
+        if not folder or not Path(folder).is_dir():
+            styled_message_box(
+                self, "Carpeta no encontrada",
+                "No se encontró la carpeta de esta canción.",
+                QMessageBox.Icon.Warning,
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
     def _connect_dock_events(self):
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
@@ -609,6 +636,7 @@ class AudioPlayer(QMainWindow):
         item = QListWidgetItem(f"{song_data['artist']} - {song_data['song']}")
         item.setIcon(self._audio_icon)
         item.setData(PlaylistItemDelegate.DURATION_ROLE, song_data.get('duration', ''))
+        item.setData(PlaylistItemDelegate.PATH_ROLE, str(song_data.get('path', '')))
         return item
 
     def _on_songs_loaded(self, batch: list):
@@ -2473,7 +2501,9 @@ class AudioPlayer(QMainWindow):
         self._fs_viz_style_actions = []
         for key, label in (("bars", "Barras circulares"),
                            ("wave", "Onda"),
-                           ("electric", "Electricidad")):
+                           ("electric", "Electricidad"),
+                           ("hbars", "Barras horizontales"),
+                           ("none", "Ninguno")):
             act = QAction(label, self)
             act.setCheckable(True)
             act.setData(key)

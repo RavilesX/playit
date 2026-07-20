@@ -210,13 +210,14 @@ class CircularVisualizerWidget(QWidget):
     """Espectro radial para el fullscreen de letras.
 
     Mismo contrato que VisualizerWidget (recibe ``bars_ready`` del
-    ``AudioAnalyzer``), pero pinta alrededor de un anillo interior, al
-    centro y semitransparente: no roba clics ni fondo. Tres estilos
-    (``set_style``): "bars" (barras radiales), "wave" (curva suave cerrada)
-    y "electric" (anillo dentado con glow y jitter por frame).
+    ``AudioAnalyzer``), pero pinta al centro y semitransparente: no roba
+    clics ni fondo. Estilos (``set_style``): "bars" (barras radiales),
+    "wave" (curva suave cerrada), "electric" (anillo dentado con glow y
+    jitter por frame), "hbars" (barras horizontales espejadas: crecen hacia
+    arriba y hacia abajo desde la línea media) y "none" (no pinta nada).
     """
 
-    STYLES = ("bars", "wave", "electric")
+    STYLES = ("bars", "wave", "electric", "hbars", "none")
 
     def __init__(self, parent=None, style: str = "bars"):
         super().__init__(parent)
@@ -226,6 +227,8 @@ class CircularVisualizerWidget(QWidget):
         self._bars = np.zeros(0, dtype=np.float32)
         self._gradient = None
         self._gradient_r = -1.0
+        self._hgrad = None
+        self._hgrad_h = -1.0
         self._style = style if style in self.STYLES else "bars"
         self._rng = np.random.default_rng()
 
@@ -281,7 +284,7 @@ class CircularVisualizerWidget(QWidget):
 
     def paintEvent(self, event):
         n = self._bars.size
-        if n == 0:
+        if n == 0 or self._style == "none":
             return
         w = self.width()
         h = self.height()
@@ -301,6 +304,8 @@ class CircularVisualizerWidget(QWidget):
             self._paint_wave(painter, r0, span, rmax)
         elif self._style == "electric":
             self._paint_electric(painter, r0, span)
+        elif self._style == "hbars":
+            self._paint_hbars(painter, w, h)
         else:
             self._paint_bars(painter, r0, span, rmax)
 
@@ -327,6 +332,42 @@ class CircularVisualizerWidget(QWidget):
             rect = QRectF(-bar_w / 2.0, -(r0 + length), bar_w, length)
             painter.drawRoundedRect(rect, radius, radius)
             painter.restore()
+
+    def _paint_hbars(self, painter: QPainter, w: float, h: float):
+        """Barras espejadas: mismo look que la ventana principal, pero cada
+        barra crece desde la línea media hacia arriba Y hacia abajo, ocupando
+        a tope la misma altura que los demás efectos."""
+        n = self._bars.size
+        half = h / 2.0
+        if self._hgrad is None or self._hgrad_h != h:
+            # Simétrico y dominado por azules: banda rosa angosta al centro,
+            # luego violeta → cian → azul profundo hacia las puntas. Como las
+            # barras cortas viven cerca del centro, la banda rosa se mantiene
+            # angosta para que el conjunto se vea azul.
+            grad = QLinearGradient(0, -half, 0, half)
+            grad.setColorAt(0.0, QColor(60, 120, 255, 140))    # azul profundo
+            grad.setColorAt(0.30, QColor(90, 200, 255, 135))   # cian
+            grad.setColorAt(0.44, QColor(150, 110, 245, 140))  # violeta
+            grad.setColorAt(0.5, QColor(248, 143, 255, 150))   # rosa (centro)
+            grad.setColorAt(0.56, QColor(150, 110, 245, 140))  # violeta
+            grad.setColorAt(0.70, QColor(90, 200, 255, 135))   # cian
+            grad.setColorAt(1.0, QColor(60, 120, 255, 140))    # azul profundo
+            self._hgrad = QBrush(grad)
+            self._hgrad_h = h
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._hgrad)
+
+        slot = w / n
+        gap = max(1.0, slot * 0.25)
+        bar_w = slot - gap
+        radius = bar_w * 0.4
+        for i in range(n):
+            bh = float(self._bars[i]) * half
+            if bh < 1.0:
+                continue
+            x = -w / 2.0 + i * slot + gap / 2.0
+            rect = QRectF(x, -bh, bar_w, 2.0 * bh)
+            painter.drawRoundedRect(rect, radius, radius)
 
     def _paint_wave(self, painter: QPainter, r0: float, span: float,
                     rmax: float):
