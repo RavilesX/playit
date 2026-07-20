@@ -78,6 +78,32 @@ open PlayIt.app
 
 (o clic derecho sobre `PlayIt.app` → Abrir → Abrir).
 
+#### Crear y anclar un lanzador al panel (Linux Mint)
+
+1. Crea un archivo `PlayIt.desktop` en el escritorio con este contenido:
+
+```ini
+[Desktop Entry]
+Version=1.0
+Name=PlayIt
+Comment=Reproductor de Audio con Demucs Integrado
+Exec=/ruta/completa/hacia/PlayIt
+Path=/ruta/completa/hacia/la/carpeta/donde/esta/PlayIt
+Icon=/ruta/completa/hacia/el/main_icon.png
+Type=Application
+Terminal=false
+StartupWMClass=PlayIt
+```
+
+2. Ejecuta:
+
+```bash
+mv ~/Escritorio/PlayIt.desktop ~/.local/share/applications/
+```
+
+3. Abre PlayIt desde el menú principal de Linux.
+4. Clic derecho sobre el icono en el panel de tareas → "Añadir/Agregar/Anclar al panel".
+
 ### Dependencias externas
 
 La app las detecta y ofrece instalarlas desde **Opciones → Dependencias**:
@@ -214,6 +240,32 @@ open PlayIt.app
 ```
 
 (or right-click `PlayIt.app` → Open → Open).
+
+#### Create and pin a launcher to the panel (Linux Mint)
+
+1. Create a `PlayIt.desktop` file on the desktop with this content:
+
+```ini
+[Desktop Entry]
+Version=1.0
+Name=PlayIt
+Comment=Audio Player with Integrated Demucs
+Exec=/full/path/to/PlayIt
+Path=/full/path/to/the/folder/containing/PlayIt
+Icon=/full/path/to/main_icon.png
+Type=Application
+Terminal=false
+StartupWMClass=PlayIt
+```
+
+2. Run:
+
+```bash
+mv ~/Desktop/PlayIt.desktop ~/.local/share/applications/
+```
+
+3. Open PlayIt from the Linux main menu.
+4. Right-click the icon in the taskbar panel → "Add/Pin to panel".
 
 ### External dependencies
 
