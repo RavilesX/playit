@@ -418,6 +418,7 @@ class AudioPlayer(QMainWindow):
         self.playlist_dock = QDockWidget(self)
         self.playlist_widget = QListWidget()
         self.playlist_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.playlist_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.playlist_widget.setFixedWidth(500)
         self.playlist_widget.setUniformItemSizes(True)
         self.playlist_widget.setItemDelegate(PlaylistItemDelegate(self.playlist_widget))
