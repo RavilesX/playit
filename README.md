@@ -163,7 +163,7 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 
 ## Versión actual
 
-**v1.2.1** — primera versión con soporte completo de macOS (Apple Silicon), aceleración MPS automática, cronómetro de separación con reporte de dispositivo (CPU/CUDA/MPS) y binario Linux empaquetado en tar.gz. Historial completo en [Releases](https://github.com/RavilesX/playit/releases).
+**v1.2.5** — visualizador circular en modo fullscreen de letras, colores por intérprete en una misma línea, selección múltiple y opciones de copiado en la playlist, navegación por teclado en el editor de sincronización (waveform) y atajos Alt+1..4 para mutear/activar pistas individuales (con aviso en pantalla al usarlos en fullscreen). Historial completo en [Releases](https://github.com/RavilesX/playit/releases).
 
 ## Contacto
 
@@ -326,7 +326,7 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 
 ## Current version
 
-**v1.2.1** — first version with full macOS (Apple Silicon) support, automatic MPS acceleration, a separation stopwatch reporting the device used (CPU/CUDA/MPS), and the Linux binary packaged as tar.gz. Full history in [Releases](https://github.com/RavilesX/playit/releases).
+**v1.2.5** — circular visualizer in fullscreen lyrics mode, per-singer colors on a single line, multi-select and copy options in the playlist, keyboard navigation in the waveform sync editor, and Alt+1..4 shortcuts to mute/unmute individual stems (with an on-screen toast when used in fullscreen). Full history in [Releases](https://github.com/RavilesX/playit/releases).
 
 ## Contact
 
