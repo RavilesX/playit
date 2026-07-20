@@ -544,10 +544,37 @@ class AudioPlayer(QMainWindow):
 
         menu = QMenu(self.playlist_widget)
         open_folder_action = menu.addAction("Ir a la carpeta")
+
+        copy_menu = menu.addMenu("Copiar")
+        copy_artist_action = copy_menu.addAction("Artista")
+        copy_song_action = copy_menu.addAction("Canción")
+        copy_artist_song_action = copy_menu.addAction("Artista - Canción")
+        copy_path_action = copy_menu.addAction("Ruta")
+
         action = menu.exec(self.playlist_widget.mapToGlobal(pos))
 
         if action == open_folder_action:
             self._open_song_folder(item)
+        elif action == copy_artist_action:
+            self._copy_song_info(item, 'artist')
+        elif action == copy_song_action:
+            self._copy_song_info(item, 'song')
+        elif action == copy_artist_song_action:
+            self._copy_song_info(item, 'artist_song')
+        elif action == copy_path_action:
+            self._copy_song_info(item, 'path')
+
+    def _copy_song_info(self, item: QListWidgetItem, kind: str):
+        artist, _, song = item.text().partition(" - ")
+        if kind == 'artist':
+            text = artist
+        elif kind == 'song':
+            text = song
+        elif kind == 'artist_song':
+            text = item.text()
+        else:
+            text = item.data(PlaylistItemDelegate.PATH_ROLE) or ''
+        QApplication.clipboard().setText(text)
 
     def _open_song_folder(self, item: QListWidgetItem):
         folder = item.data(PlaylistItemDelegate.PATH_ROLE)
@@ -1733,20 +1760,25 @@ class AudioPlayer(QMainWindow):
         dialog = LyricsSyncDialog(
             self, path / "separated" / "vocals.mp3", path / "lyrics.lrc",
         )
-        # El editor usa Ctrl+F (enfocar su buscador) y Ctrl+D (separar línea):
-        # deshabilitar las acciones globales con esos atajos (pantalla completa
-        # de letras y dividir) y la búsqueda global, para que no se disparen
-        # encima del editor.
+        # El editor usa Ctrl+F (enfocar su buscador), Ctrl+D (separar línea) y
+        # Ctrl+Shift+←/→ (extender selección de registros): deshabilitar las
+        # acciones globales con esos atajos (pantalla completa de letras,
+        # dividir, avanzar/retrasar timing) y la búsqueda global, para que no
+        # se disparen encima del editor.
         split_was_enabled = self.split_action.isEnabled()
         self.search_action.setEnabled(False)
         self.split_action.setEnabled(False)
         self.lyrics_fullscreen_action.setEnabled(False)
+        self.advance_action.setEnabled(False)
+        self.delay_action.setEnabled(False)
         try:
             dialog.exec()
         finally:
             self.search_action.setEnabled(True)
             self.split_action.setEnabled(split_was_enabled)
             self.lyrics_fullscreen_action.setEnabled(True)
+            self.advance_action.setEnabled(True)
+            self.delay_action.setEnabled(True)
 
         if dialog.saved:
             # Invalidar cache y recargar letras editadas.

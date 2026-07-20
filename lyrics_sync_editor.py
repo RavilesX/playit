@@ -977,6 +977,12 @@ class LyricsSyncDialog(BaseDialog):
         self._add_shortcut("Ctrl+Left", self._search_prev)
         self._add_shortcut("Ctrl+Right", self._search_next)
         self._add_shortcut("Ctrl+End", self._goto_end)
+        self._add_shortcut("Ctrl+Shift+Left", lambda: self._nav_select(-1))
+        self._add_shortcut("Ctrl+Shift+Right", lambda: self._nav_select(1))
+        self._add_shortcut("Ctrl+Shift+Home", lambda: self._nav_select_edge(0))
+        self._add_shortcut(
+            "Ctrl+Shift+End", lambda: self._nav_select_edge(len(self.lines) - 1)
+        )
         self.scrollbar.valueChanged.connect(self._on_scroll)
         self.waveform.view_changed.connect(self._sync_scroll_from_view)
         self.waveform.seek_requested.connect(self._on_seek)
@@ -1159,10 +1165,11 @@ class LyricsSyncDialog(BaseDialog):
         """
         term = fold_text(self.search_box.text().strip())
         n = len(self.lines)
-        if not term or n == 0:
-            self.search_box.setStyleSheet(
-                self._SEARCH_RED if term else self._SEARCH_NORMAL
-            )
+        if not term:
+            self._nav_line(1)
+            return
+        if n == 0:
+            self.search_box.setStyleSheet(self._SEARCH_RED)
             return
         for offset in range(1, n + 1):
             i = (self._search_index + offset) % n
@@ -1177,10 +1184,11 @@ class LyricsSyncDialog(BaseDialog):
         """Salta al registro coincidente anterior, en bucle. Sin texto: nada."""
         term = fold_text(self.search_box.text().strip())
         n = len(self.lines)
-        if not term or n == 0:
-            self.search_box.setStyleSheet(
-                self._SEARCH_RED if term else self._SEARCH_NORMAL
-            )
+        if not term:
+            self._nav_line(-1)
+            return
+        if n == 0:
+            self.search_box.setStyleSheet(self._SEARCH_RED)
             return
         base = self._search_index if self._search_index >= 0 else 0
         for offset in range(1, n + 1):
@@ -1191,6 +1199,52 @@ class LyricsSyncDialog(BaseDialog):
                 self._goto_line(i)
                 return
         self.search_box.setStyleSheet(self._SEARCH_RED)
+
+    def _nav_line(self, step: int):
+        """Sin texto en buscador: Ctrl+←/→ mueve a la línea anterior/siguiente."""
+        n = len(self.lines)
+        if n == 0:
+            return
+        cur = self.waveform.selected
+        i = 0 if cur < 0 else (cur + step) % n
+        self._goto_line(i)
+
+    def _nav_select(self, step: int):
+        """Ctrl+Shift+←/→: extiende/reduce la selección desde el ancla."""
+        n = len(self.lines)
+        if n == 0:
+            return
+        wf = self.waveform
+        if wf._anchor < 0:
+            wf._anchor = wf.selected if wf.selected >= 0 else 0
+        cur = wf.selected if wf.selected >= 0 else wf._anchor
+        i = max(0, min(n - 1, cur + step))
+        self._select_to(i)
+
+    def _nav_select_edge(self, index: int):
+        """Ctrl+Shift+Home/End: extiende/reduce la selección hasta el borde."""
+        if not self.lines:
+            return
+        wf = self.waveform
+        if wf._anchor < 0:
+            wf._anchor = wf.selected if wf.selected >= 0 else 0
+        self._select_to(index)
+
+    def _select_to(self, i: int):
+        """Fija la selección como rango [ancla, i] y mueve el cursor a `i`."""
+        wf = self.waveform
+        lo, hi = sorted((wf._anchor, i))
+        wf.selection = set(range(lo, hi + 1))
+        wf.selected = i
+        wf.line_selected.emit(i)
+        wf.selection_changed.emit()
+        line = self.lines[i]
+        wf.playback_pos = line.start
+        wf.set_start_pos(line.start - wf.visible_seconds / 2)
+        if self.player.playing:
+            self.player.play(line.start)
+        wf.update()
+        wf.setFocus()
 
     def _goto_start(self):
         """Mueve el cursor de reproducción al inicio de la pista."""
