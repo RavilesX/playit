@@ -295,7 +295,7 @@ class AudioPlayer(QMainWindow):
         if hasattr(self, 'visualizer'):
             self.visualizer.clear()
             self.visualizer.setVisible(enabled)
-        if getattr(self, '_fs_visualizer', None) is not None:
+        if self._fs_visualizer is not None:
             self._fs_visualizer.clear()
             self._fs_visualizer.setVisible(enabled)
 
@@ -378,7 +378,8 @@ class AudioPlayer(QMainWindow):
             (self.lyrics_header, self.lyrics_current, self.lyrics_next)
         ) + (self.lyrics_container,)
         for w in self._lyrics_click_areas:
-            w.installEventFilter(self)
+            if w is not None:
+                w.installEventFilter(self)
 
         self.tabs.addTab(self.lyrics_container, "Letras")
         self.tabs.addTab(self.cover_label, "Portada")
@@ -1675,7 +1676,9 @@ class AudioPlayer(QMainWindow):
         # renglones (<br>) dejaba el segundo cortado. Sin textWidth el
         # documento no calcula layout y size() devuelve 0.
         doc = self.lyrics_next.document()
-        doc.setTextWidth(self.lyrics_next.viewport().width())
+        viewport = self.lyrics_next.viewport()
+        if viewport is not None:
+            doc.setTextWidth(viewport.width())
         doc_h = int(doc.size().height())
         self.lyrics_next.setFixedHeight(max(LYRICS_NEXT_MIN_HEIGHT, doc_h + 8))
 
