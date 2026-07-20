@@ -370,6 +370,8 @@ class AudioPlayer(QMainWindow):
         self._lyrics_fullscreen = False
         self._fs_visualizer = None
         self._fs_viz_style = "wave"
+        self._fs_toast = None
+        self._fs_toast_timer = None
         esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.lyrics_container)
         esc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         esc.activated.connect(self._exit_lyrics_fullscreen)
@@ -862,6 +864,10 @@ class AudioPlayer(QMainWindow):
             ("Ctrl+Shift+Down", self.decrease_font_action),
             ("Ctrl+Shift+Right", self.advance_action),
             ("Ctrl+Shift+Left", self.delay_action),
+            ("Alt+1", self.track_toggle_actions[0]),
+            ("Alt+2", self.track_toggle_actions[1]),
+            ("Alt+3", self.track_toggle_actions[2]),
+            ("Alt+4", self.track_toggle_actions[3]),
         ):
             sc = QShortcut(QKeySequence(seq), self.lyrics_container)
             sc.activated.connect(action.trigger)
@@ -886,6 +892,9 @@ class AudioPlayer(QMainWindow):
             sc.setEnabled(False)
             sc.deleteLater()
         self._fs_shortcuts = []
+        if self._fs_toast is not None:
+            self._fs_toast_timer.stop()
+            self._fs_toast.hide()
         if self._fs_visualizer is not None:
             analyzer = getattr(self, 'analyzer', None)
             if analyzer is not None:
@@ -1175,6 +1184,35 @@ class AudioPlayer(QMainWindow):
         muted = self.mute_states[track_name]
         icon_name = f"no_{track_name}" if muted else track_name
         sender.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
+        if self._lyrics_fullscreen:
+            self._show_fs_track_toast(track_name, muted)
+
+    _TRACK_LABELS = {"drums": "Batería", "vocals": "Vocal", "bass": "Bajo", "other": "Otros"}
+
+    def _show_fs_track_toast(self, track_name: str, muted: bool):
+        """Mensaje momentáneo (esquina superior derecha) al togglear una pista
+        en fullscreen, donde los botones de mute no son visibles."""
+        if self._fs_toast is None:
+            self._fs_toast = QLabel(self.lyrics_container)
+            self._fs_toast.setStyleSheet(
+                "QLabel { background-color: rgba(20, 16, 28, 210); color: white; "
+                "padding: 8px 14px; border-radius: 6px; font-size: 16px; }"
+            )
+            self._fs_toast.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self._fs_toast_timer = QTimer(self)
+            self._fs_toast_timer.setSingleShot(True)
+            self._fs_toast_timer.timeout.connect(self._fs_toast.hide)
+        label = self._TRACK_LABELS.get(track_name, track_name)
+        state = "Silenciada" if muted else "Activada"
+        self._fs_toast.setText(f"{label}: {state}")
+        self._fs_toast.adjustSize()
+        margin = 24
+        self._fs_toast.move(
+            self.lyrics_container.width() - self._fs_toast.width() - margin, margin
+        )
+        self._fs_toast.show()
+        self._fs_toast.raise_()
+        self._fs_toast_timer.start(1500)
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Auto-unmute de voz en secciones sin letra ────────────────────────
@@ -2585,6 +2623,22 @@ class AudioPlayer(QMainWindow):
         self.sync_editor_action.triggered.connect(self.open_lyrics_sync_editor)
         self.sync_editor_action.setEnabled(False)
         lyrics_menu.addAction(self.sync_editor_action)
+
+        tracks_menu = options_menu.addMenu("Pistas")
+        assert tracks_menu is not None
+        track_shortcuts = [
+            ("Batería (mute/unmute)", "Alt+1", self.drums_btn),
+            ("Vocal (mute/unmute)", "Alt+2", self.vocals_btn),
+            ("Bajo (mute/unmute)", "Alt+3", self.bass_btn),
+            ("Otros (mute/unmute)", "Alt+4", self.other_btn),
+        ]
+        self.track_toggle_actions = []
+        for label, shortcut, btn in track_shortcuts:
+            action = QAction(label, self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(btn.click)
+            tracks_menu.addAction(action)
+            self.track_toggle_actions.append(action)
 
         cleanup_action = QAction("Limpiar Cache", self)
         cleanup_action.triggered.connect(self.cleanup_resources_manual)
