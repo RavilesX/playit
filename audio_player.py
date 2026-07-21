@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QDockWidget, QTabWidget, QLabel, QTextEdit,
     QPushButton, QSlider, QStatusBar, QMessageBox,
     QFrame, QListWidgetItem, QWidget, QFileDialog,
-    QAbstractItemView, QCheckBox, QMenu,
+    QAbstractItemView, QCheckBox, QMenu, QDialog,
 )
 import requests
 from urllib.parse import quote
@@ -54,7 +54,7 @@ from update_check_worker import UpdateCheckWorker
 from version import __version__
 from resources import styled_message_box, bg_image, resource_path, style_url
 from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
-from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog
+from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog, UpdateDialog
 from lazy_resources import (LazyAudioManager, LazyImageManager, LazyLyricsManager,
                             LazyPlaylistLoader, get_song_duration)
 from audio_visualizer import (AudioAnalyzer, CircularVisualizerWidget,
@@ -2850,41 +2850,38 @@ class AudioPlayer(QMainWindow):
             "Buscando actualizaciones...",
         )
 
+    def _show_update_dialog(self, message: str, show_cancel: bool = False) -> int:
+        dialog = UpdateDialog(self, message, show_cancel)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        return dialog.exec()
+
     def _on_update_check_success(self, latest_version: str, html_url: str):
         self.check_updates_action.setEnabled(True)
         self.status_label.setText("Búsqueda de actualizaciones completa.")
 
         if __version__ == "dev":
-            styled_message_box(
-                self, "Buscar actualizaciones",
+            self._show_update_dialog(
                 f"Estás usando una build de desarrollo.\n"
-                f"Última versión publicada: {latest_version}",
+                f"Última versión publicada: {latest_version}"
             )
             return
 
         if self._parse_version(latest_version) > self._parse_version(__version__):
-            respuesta = styled_message_box(
-                self, "Actualización disponible",
+            respuesta = self._show_update_dialog(
                 f"Hay una nueva versión disponible: {latest_version}\n"
                 f"Versión actual: {__version__}\n\n"
                 f"¿Abrir la página de descarga?",
-                QMessageBox.Icon.Information,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                show_cancel=True,
             )
-            if respuesta == QMessageBox.StandardButton.Yes and html_url:
+            if respuesta == QDialog.DialogCode.Accepted and html_url:
                 QDesktopServices.openUrl(QUrl(html_url))
         else:
-            styled_message_box(
-                self, "Buscar actualizaciones",
-                f"Ya tienes la última versión instalada ({__version__}).",
-            )
+            self._show_update_dialog(f"Ya tienes la última versión instalada ({__version__}).")
 
     def _on_update_check_error(self, msg: str):
         self.check_updates_action.setEnabled(True)
         self.status_label.setText("Error buscando actualizaciones.")
-        styled_message_box(
-            self, "Error", msg, QMessageBox.Icon.Warning,
-        )
+        self._show_update_dialog(msg)
 
     def show_search_dialog(self):
         self._search_query = ""

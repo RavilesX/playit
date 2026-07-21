@@ -186,6 +186,45 @@ class SearchDialog(BaseDialog):
         if text:
             self.search_requested.emit(text)
 
+class UpdateDialog(BaseDialog):
+    def __init__(self, parent=None, message: str = "", show_cancel: bool = False):
+        super().__init__(parent, "Buscar actualizaciones", (320, 180))
+        self._setup_update_ui(message, show_cancel)
+
+    def _setup_update_ui(self, message: str, show_cancel: bool):
+        self.message_label = QLabel(message)
+        self.message_label.setWordWrap(True)
+        self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.message_label.setStyleSheet("color: white; font-weight: bold;")
+
+        btn_layout = QHBoxLayout()
+
+        self.accept_btn = self._create_action_button(
+            "aceptar_btn", "images/split_dialog/aceptar_btn.png", self.accept
+        )
+        self.accept_btn.setAutoDefault(False)
+
+        if show_cancel:
+            self.cancel_btn = self._create_action_button(
+                "cancelar_btn", "images/split_dialog/cancelar_btn.png", self.reject
+            )
+            self.cancel_btn.setAutoDefault(False)
+            btn_layout.addWidget(self.cancel_btn)
+
+        btn_layout.addWidget(self.accept_btn)
+
+        self.main_layout.addWidget(self.message_label)
+        self.main_layout.addLayout(btn_layout)
+
+    def _create_action_button(self, obj_name: str, image_path: str, callback) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName(obj_name)
+        btn.setFixedSize(70, 70)
+        bg_image(btn, image_path)
+        btn.clicked.connect(callback)
+        return btn
+
+
 class QueueDialog(BaseDialog):
     def __init__(self, audio_player, parent=None):
         super().__init__(parent, "Canciones en Cola", (400, 550))
