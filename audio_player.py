@@ -50,6 +50,8 @@ from ffmpeg_worker import FFmpegWorker
 from cuda_worker import CudaInstallWorker
 from ytdlp_download_worker import YTDLPDownloadWorker
 from demucs_install_worker import DemucsInstallWorker
+from update_check_worker import UpdateCheckWorker
+from version import __version__
 from resources import styled_message_box, bg_image, resource_path, style_url
 from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
 from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog
@@ -576,7 +578,8 @@ class AudioPlayer(QMainWindow):
         elif kind == 'artist_song':
             text = item.text()
         else:
-            text = item.data(PlaylistItemDelegate.PATH_ROLE) or ''
+            raw = item.data(PlaylistItemDelegate.PATH_ROLE)
+            text = str(Path(raw).resolve()) if raw else ''
         QApplication.clipboard().setText(text)
 
     def _open_song_folder(self, item: QListWidgetItem):
@@ -588,7 +591,16 @@ class AudioPlayer(QMainWindow):
                 QMessageBox.Icon.Warning,
             )
             return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+        # PATH_ROLE puede quedar relativo al cwd (get_data_dir() en
+        # Windows/Linux devuelve Path('.')): resolver a absoluto, si no
+        # QDesktopServices arma un file: URI inválido (sin "/" inicial) y
+        # no hace nada en binarios empaquetados.
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(folder).resolve()))):
+            styled_message_box(
+                self, "Error",
+                "No se pudo abrir la carpeta con el explorador de archivos.",
+                QMessageBox.Icon.Warning,
+            )
 
     def _connect_dock_events(self):
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
@@ -2695,6 +2707,9 @@ class AudioPlayer(QMainWindow):
         queue_action = QAction("Mostrar Queue", self)
         queue_action.triggered.connect(self.show_queue_dialog)
         help_menu.addAction(queue_action)
+        self.check_updates_action = QAction("Buscar actualizaciones...", self)
+        self.check_updates_action.triggered.connect(self.check_for_updates)
+        help_menu.addAction(self.check_updates_action)
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Actualizaciones de menú ──────────────────────────────────────────
@@ -2814,6 +2829,62 @@ class AudioPlayer(QMainWindow):
         dialog = QueueDialog(self, parent=self)
         bg_image(dialog, 'images/split_dialog/split.png')
         dialog.exec()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # ── Buscar actualizaciones ───────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _parse_version(version: str) -> tuple:
+        parts = []
+        for chunk in version.split('.'):
+            digits = ''.join(c for c in chunk if c.isdigit())
+            parts.append(int(digits) if digits else 0)
+        return tuple(parts)
+
+    def check_for_updates(self):
+        self.check_updates_action.setEnabled(False)
+        self._start_worker_thread(
+            UpdateCheckWorker(), 'update_check_thread', 'update_check_worker',
+            self._on_update_check_success,
+            self._on_update_check_error,
+            "Buscando actualizaciones...",
+        )
+
+    def _on_update_check_success(self, latest_version: str, html_url: str):
+        self.check_updates_action.setEnabled(True)
+        self.status_label.setText("Búsqueda de actualizaciones completa.")
+
+        if __version__ == "dev":
+            styled_message_box(
+                self, "Buscar actualizaciones",
+                f"Estás usando una build de desarrollo.\n"
+                f"Última versión publicada: {latest_version}",
+            )
+            return
+
+        if self._parse_version(latest_version) > self._parse_version(__version__):
+            respuesta = styled_message_box(
+                self, "Actualización disponible",
+                f"Hay una nueva versión disponible: {latest_version}\n"
+                f"Versión actual: {__version__}\n\n"
+                f"¿Abrir la página de descarga?",
+                QMessageBox.Icon.Information,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if respuesta == QMessageBox.StandardButton.Yes and html_url:
+                QDesktopServices.openUrl(QUrl(html_url))
+        else:
+            styled_message_box(
+                self, "Buscar actualizaciones",
+                f"Ya tienes la última versión instalada ({__version__}).",
+            )
+
+    def _on_update_check_error(self, msg: str):
+        self.check_updates_action.setEnabled(True)
+        self.status_label.setText("Error buscando actualizaciones.")
+        styled_message_box(
+            self, "Error", msg, QMessageBox.Icon.Warning,
+        )
 
     def show_search_dialog(self):
         self._search_query = ""
