@@ -20,9 +20,12 @@ from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton
 from resources import resource_path, bg_image, styled_message_box, style_url
 from ui_components import DialogTitleBar, StyledButtons
 from version import __version__
+import logging
 import os
 import string
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class BaseDialog(QDialog):
@@ -109,7 +112,7 @@ class AboutDialog(BaseDialog):
         if url.isValid():
             QDesktopServices.openUrl(url)
         else:
-            print("Invalid PayPal URL!")
+            logger.warning("Invalid PayPal URL!")
 
     def _get_about_text(self, version_path: str) -> str:
         return f"""

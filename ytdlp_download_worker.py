@@ -54,7 +54,7 @@ class YTDLPDownloadWorker(QObject):
             download_dir.mkdir(exist_ok=True)
 
             cmd = [
-                "yt-dlp", "-x",
+                "yt-dlp", "-x", "--no-playlist",
                 "--audio-format", "mp3",
                 "--audio-quality", "0",
                 "-o", str(download_dir / "%(title)s.%(ext)s"),

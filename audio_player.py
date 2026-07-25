@@ -16,6 +16,7 @@
 
 import threading
 import queue
+import logging
 import re
 from pathlib import Path
 import json
@@ -60,6 +61,8 @@ from lazy_resources import (LazyAudioManager, LazyImageManager, LazyLyricsManage
 from audio_visualizer import (AudioAnalyzer, CircularVisualizerWidget,
                               VisualizerWidget)
 from lyrics_sync_editor import AUTO_UNMUTE_COLOR, LYRIC_COLORS, LyricsSyncDialog
+
+logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -2009,7 +2012,7 @@ class AudioPlayer(QMainWindow):
                         self.lazy_images.load_cover_lazy(path, (500, 500))
                     )
                 except Exception as e:
-                    print(f"Error cargando portada: {e}")
+                    logger.error("Error cargando portada: %s", e)
 
             def load_lyrics():
                 try:
@@ -2024,7 +2027,7 @@ class AudioPlayer(QMainWindow):
             threading.Thread(target=load_lyrics, daemon=True).start()
             self._preload_adjacent_resources()
         except Exception as e:
-            print(f"Error actualizando metadatos: {e}")
+            logger.error("Error actualizando metadatos: %s", e)
 
     def _preload_adjacent_resources(self):
         if not self.playlist:
@@ -2040,7 +2043,7 @@ class AudioPlayer(QMainWindow):
                     if key not in self.lazy_images.cache._cache:
                         self.lazy_images.load_cover_lazy(song_path, (500, 500))
             except Exception as e:
-                print(f"Error en precarga: {e}")
+                logger.error("Error en precarga: %s", e)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2243,17 +2246,66 @@ class AudioPlayer(QMainWindow):
         )
         return reply == QMessageBox.StandardButton.Yes
 
-    def _check_brew(self) -> bool:
+    # Guards: cada uno devuelve None (sin bloqueo) o (título, mensaje, icono)
+    # para que _run_install muestre el diálogo y aborte la instalación.
+    def _guard_brew(self):
         """En macOS los instaladores dependen de Homebrew; avisa si falta."""
         if not IS_MAC or check_command_exists('brew'):
-            return True
-        styled_message_box(
-            self, "Homebrew no encontrado",
+            return None
+        return (
+            "Homebrew no encontrado",
             "Esta instalación requiere Homebrew y no está instalado.\n"
             "Instálelo desde https://brew.sh y vuelva a intentarlo.",
             QMessageBox.Icon.Warning,
         )
-        return False
+
+    def _guard_python_required(self, msg: str = "Instale Python primero."):
+        if self.python_available:
+            return None
+        return ("Python requerido", msg, QMessageBox.Icon.Warning)
+
+    def _guard_gpu(self):
+        if self.gpu_available:
+            return None
+        return ("Sin GPU NVIDIA", "No se detectó tarjeta NVIDIA compatible.",
+                QMessageBox.Icon.Warning)
+
+    def _guard_in_progress(self, progress_attr: str, label: str):
+        if not getattr(self, progress_attr):
+            return None
+        return ("Instalación en curso",
+                f"Ya hay una instalación de {label} en progreso.",
+                QMessageBox.Icon.Information)
+
+    def _run_install(self, *, name: str, already_available_attr: str, already_msg: str,
+                     package_desc: str, guards: tuple, worker_factory,
+                     thread_attr: str, worker_attr: str, success_msg: str,
+                     menu_updates: tuple = (), progress_attr: str | None = None,
+                     after=None):
+        """Flujo común a los 6 instaladores: check de ya-instalado, guards
+        específicos (Homebrew/Python/GPU/instalación en curso), confirmación
+        y arranque del worker en thread."""
+        if getattr(self, already_available_attr):
+            return styled_message_box(
+                self, f"{name} ya instalado", already_msg, QMessageBox.Icon.Information,
+            )
+        for guard in guards:
+            blocked = guard()
+            if blocked:
+                return styled_message_box(self, *blocked)
+        if not self._confirm_install(package_desc):
+            return
+        if progress_attr:
+            setattr(self, progress_attr, True)
+        self._start_worker_thread(
+            worker_factory(), thread_attr, worker_attr,
+            lambda: self._on_install_success(
+                name, already_available_attr, success_msg,
+                menu_updates=menu_updates, progress_attr=progress_attr, after=after,
+            ),
+            lambda msg: self._on_install_error(name, msg, progress_attr=progress_attr),
+            f"Instalando {name}...",
+        )
 
     def _start_worker_thread(self, worker, thread_attr: str, worker_attr: str,
                              on_finished, on_error, status_msg: str):
@@ -2295,171 +2347,88 @@ class AudioPlayer(QMainWindow):
         styled_message_box(self, "Error de instalación", msg, QMessageBox.Icon.Critical)
 
     def install_python(self):
-        if self.python_available:
-            return styled_message_box(
-                self, "Python ya instalado", "Python ya está instalado.",
-                QMessageBox.Icon.Information,
-            )
-        if not self._check_brew():
-            return
         pkg = ("Python mediante winget" if IS_WINDOWS
                else "Python mediante Homebrew" if IS_MAC else "Python")
-        if not self._confirm_install(pkg):
-            return
-        self._start_worker_thread(
-            PythonInstallWorker(), 'install_thread', 'install_worker',
-            lambda: self._on_install_success(
-                "Python", 'python_available',
-                "Python se instaló correctamente.\n"
-                "Es posible que necesite reiniciar la aplicación.",
-                menu_updates=(self._update_python_menu_action,
-                              self._update_cuda_menu_action),
-            ),
-            lambda msg: self._on_install_error("Python", msg),
-            "Instalando Python...",
+        self._run_install(
+            name="Python", already_available_attr='python_available',
+            already_msg="Python ya está instalado.", package_desc=pkg,
+            guards=(self._guard_brew,), worker_factory=PythonInstallWorker,
+            thread_attr='install_thread', worker_attr='install_worker',
+            success_msg="Python se instaló correctamente.\n"
+                        "Es posible que necesite reiniciar la aplicación.",
+            menu_updates=(self._update_python_menu_action,
+                          self._update_cuda_menu_action),
         )
 
     def install_vc(self):
-        if self.vc_available:
-            return styled_message_box(
-                self, "Visual C++ ya instalado",
-                "Visual C++ Redistributable ya está instalado.",
-                QMessageBox.Icon.Information,
-            )
-        if not self._confirm_install("Microsoft Visual C++ Redistributable (x64) mediante winget"):
-            return
-        self._start_worker_thread(
-            VisualCWorker(), 'vc_thread', 'vc_worker',
-            lambda: self._on_install_success(
-                "Visual C++", 'vc_available',
-                "Visual C++ Redistributable se instaló correctamente.",
-                menu_updates=(self._update_vc_menu_action,
-                              self._update_demucs_menu_actions,
-                              self._update_cuda_menu_action),
-            ),
-            lambda msg: self._on_install_error("Visual C++", msg),
-            "Instalando Visual C++...",
+        self._run_install(
+            name="Visual C++", already_available_attr='vc_available',
+            already_msg="Visual C++ Redistributable ya está instalado.",
+            package_desc="Microsoft Visual C++ Redistributable (x64) mediante winget",
+            guards=(), worker_factory=VisualCWorker,
+            thread_attr='vc_thread', worker_attr='vc_worker',
+            success_msg="Visual C++ Redistributable se instaló correctamente.",
+            menu_updates=(self._update_vc_menu_action,
+                          self._update_demucs_menu_actions,
+                          self._update_cuda_menu_action),
         )
 
     def install_ffmpeg(self):
-        if self.ffmpeg_available:
-            return styled_message_box(
-                self, "FFmpeg ya instalado", "FFmpeg ya está instalado.",
-                QMessageBox.Icon.Information,
-            )
-        if not self._check_brew():
-            return
         pkg = ("FFmpeg mediante winget" if IS_WINDOWS
                else "FFmpeg mediante Homebrew" if IS_MAC else "FFmpeg")
-        if not self._confirm_install(pkg):
-            return
-        self._start_worker_thread(
-            FFmpegWorker(), 'ffmpeg_thread', 'ffmpeg_worker',
-            lambda: self._on_install_success(
-                "FFmpeg", 'ffmpeg_available',
-                "FFmpeg se instaló correctamente.",
-                menu_updates=(self._update_ffmpeg_menu_action,),
-            ),
-            lambda msg: self._on_install_error("FFmpeg", msg),
-            "Instalando FFmpeg...",
+        self._run_install(
+            name="FFmpeg", already_available_attr='ffmpeg_available',
+            already_msg="FFmpeg ya está instalado.", package_desc=pkg,
+            guards=(self._guard_brew,), worker_factory=FFmpegWorker,
+            thread_attr='ffmpeg_thread', worker_attr='ffmpeg_worker',
+            success_msg="FFmpeg se instaló correctamente.",
+            menu_updates=(self._update_ffmpeg_menu_action,),
         )
 
     def install_demucs(self):
-        if self.demucs_available:
-            return styled_message_box(
-                self, "Demucs ya instalado", "Demucs ya está instalado.",
-                QMessageBox.Icon.Information,
-            )
-        if not self.python_available:
-            return styled_message_box(
-                self, "Python requerido",
-                "Debe instalar Python antes de instalar Demucs.",
-                QMessageBox.Icon.Warning,
-            )
-        if self.demucs_install_in_progress:
-            return styled_message_box(
-                self, "Instalación en curso",
-                "Ya hay una instalación de Demucs en progreso.",
-                QMessageBox.Icon.Information,
-            )
-        if not self._confirm_install(
-            "Demucs y el modelo htdemucs_ft (requiere internet)"
-        ):
-            return
-        self.demucs_install_in_progress = True
-        self._start_worker_thread(
-            DemucsInstallWorker(), 'demucs_install_thread', 'demucs_install_worker',
-            lambda: self._on_install_success(
-                "Demucs", 'demucs_available',
-                "Demucs se instaló y el modelo htdemucs_ft está listo.",
-                menu_updates=(self._update_demucs_menu_actions,),
-                progress_attr='demucs_install_in_progress',
-                after=self._check_demucs_installation,
+        self._run_install(
+            name="Demucs", already_available_attr='demucs_available',
+            already_msg="Demucs ya está instalado.",
+            package_desc="Demucs y el modelo htdemucs_ft (requiere internet)",
+            guards=(
+                lambda: self._guard_python_required(
+                    "Debe instalar Python antes de instalar Demucs."),
+                lambda: self._guard_in_progress('demucs_install_in_progress', "Demucs"),
             ),
-            lambda msg: self._on_install_error(
-                "Demucs", msg, progress_attr='demucs_install_in_progress'
-            ),
-            "Instalando Demucs...",
+            worker_factory=DemucsInstallWorker,
+            thread_attr='demucs_install_thread', worker_attr='demucs_install_worker',
+            success_msg="Demucs se instaló y el modelo htdemucs_ft está listo.",
+            menu_updates=(self._update_demucs_menu_actions,),
+            progress_attr='demucs_install_in_progress',
+            after=self._check_demucs_installation,
         )
 
     def install_cuda(self):
-        if self.pytorch_cuda_available:
-            return styled_message_box(
-                self, "CUDA ya instalado", "PyTorch+CUDA ya está instalado.",
-                QMessageBox.Icon.Information,
-            )
-        if not self.python_available:
-            return styled_message_box(
-                self, "Python requerido", "Instale Python primero.",
-                QMessageBox.Icon.Warning,
-            )
-        if not self.gpu_available:
-            return styled_message_box(
-                self, "Sin GPU NVIDIA",
-                "No se detectó tarjeta NVIDIA compatible.",
-                QMessageBox.Icon.Warning,
-            )
-        if self.cuda_install_in_progress:
-            return styled_message_box(
-                self, "Instalación en curso",
-                "Ya hay una instalación de CUDA en progreso.",
-                QMessageBox.Icon.Information,
-            )
-        if not self._confirm_install("PyTorch 2.6.0 con soporte CUDA 11.8"):
-            return
-        self.cuda_install_in_progress = True
-        self._start_worker_thread(
-            CudaInstallWorker(), 'cuda_thread', 'cuda_worker',
-            lambda: self._on_install_success(
-                "CUDA", 'pytorch_cuda_available',
-                "PyTorch con CUDA se instaló correctamente.",
-                menu_updates=(self._update_cuda_menu_action,),
-                progress_attr='cuda_install_in_progress',
+        self._run_install(
+            name="CUDA", already_available_attr='pytorch_cuda_available',
+            already_msg="PyTorch+CUDA ya está instalado.",
+            package_desc="PyTorch 2.6.0 con soporte CUDA 11.8",
+            guards=(
+                self._guard_python_required,
+                self._guard_gpu,
+                lambda: self._guard_in_progress('cuda_install_in_progress', "CUDA"),
             ),
-            lambda msg: self._on_install_error(
-                "CUDA", msg, progress_attr='cuda_install_in_progress'
-            ),
-            "Instalando CUDA (PyTorch)...",
+            worker_factory=CudaInstallWorker,
+            thread_attr='cuda_thread', worker_attr='cuda_worker',
+            success_msg="PyTorch con CUDA se instaló correctamente.",
+            menu_updates=(self._update_cuda_menu_action,),
+            progress_attr='cuda_install_in_progress',
         )
 
     def install_ytdlp(self):
-        if self.ytdlp_available:
-            return styled_message_box(
-                self, "yt-dlp ya instalado", "yt-dlp ya está instalado.",
-                QMessageBox.Icon.Information,
-            )
-        if not self._confirm_install("yt-dlp"):
-            return
-        self._start_worker_thread(
-            YTDLPWorker(), 'ytdlp_thread', 'ytdlp_worker',
-            lambda: self._on_install_success(
-                "yt-dlp", 'ytdlp_available',
-                "yt-dlp se instaló correctamente.\n"
-                "Ahora puede usar 'Descargar MP3...'.",
-                menu_updates=(self._update_ytdlp_menu_actions,),
-            ),
-            lambda msg: self._on_install_error("yt-dlp", msg),
-            "Instalando yt-dlp...",
+        self._run_install(
+            name="yt-dlp", already_available_attr='ytdlp_available',
+            already_msg="yt-dlp ya está instalado.", package_desc="yt-dlp",
+            guards=(), worker_factory=YTDLPWorker,
+            thread_attr='ytdlp_thread', worker_attr='ytdlp_worker',
+            success_msg="yt-dlp se instaló correctamente.\n"
+                        "Ahora puede usar 'Descargar MP3...'.",
+            menu_updates=(self._update_ytdlp_menu_actions,),
         )
 
     # ──────────────────────────────────────────────────────────────────────

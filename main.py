@@ -22,6 +22,9 @@ from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QPixmap
 from audio_player import AudioPlayer
 from resources import resource_path
+from platform_utils import configure_logging
+
+configure_logging()
 
 
 def create_player():

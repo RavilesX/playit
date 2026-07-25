@@ -14,11 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import logging
 import sys
 from pathlib import Path
 from PyQt6.QtCore import QDir
 from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QAbstractButton, QMessageBox
 from typing import Union
+
+logger = logging.getLogger(__name__)
 
 
 def resource_path(relative_path: str) -> str:
@@ -28,11 +31,11 @@ def resource_path(relative_path: str) -> str:
         path = base_path / relative_path
 
         if not path.exists():
-            print(f"⚠️ Recurso no encontrado: {path}")
+            logger.warning("Recurso no encontrado: %s", path)
 
         return str(path)
     except Exception as e:
-        print(f"Error en resource_path: {e}")
+        logger.error("Error en resource_path: %s", e)
         return str(Path.cwd() / relative_path)
 
 
@@ -104,5 +107,5 @@ def bg_image(
 
         return True
     except Exception as e:
-        print(f"Error al asignar imagen a {widget}: {e}")
+        logger.error("Error al asignar imagen a %s: %s", widget, e)
         return False

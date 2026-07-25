@@ -15,7 +15,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import json
+import logging
 import os
+import re
 import shutil
 import io
 from pathlib import Path
@@ -26,6 +28,19 @@ from platform_utils import (
     run_silent, get_python_cmd, get_data_dir,
     check_pytorch_mps, check_pytorch_cuda,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _sanitize_path_component(name: str) -> str:
+    """Vuelve `name` seguro como componente de ruta en cualquier SO.
+
+    artist/song vienen de un QLineEdit sin restricciones: sin esto, "AC/DC"
+    crea una subcarpeta anidada (y falla en Windows), ':', '*', '?', '"'
+    rompen mkdir en Windows, y ".." escaparía de music_library/.
+    """
+    sanitized = re.sub(r'[\\/:*?"<>|]', '_', name).strip('. ')
+    return sanitized or '_'
 
 
 class DemucsWorker(QObject):
@@ -38,7 +53,10 @@ class DemucsWorker(QObject):
         self.artist = artist
         self.song = song
         self.src_path = Path(src_path)
-        self.base_path = get_data_dir() / "music_library" / artist / song
+        self.base_path = (
+            get_data_dir() / "music_library"
+            / _sanitize_path_component(artist) / _sanitize_path_component(song)
+        )
         self.device_used = "CPU"  # dispositivo con el que realmente corrió demucs
 
     def run(self):
@@ -145,7 +163,7 @@ class DemucsWorker(QObject):
                     im_resized.save(self.base_path / "cover.png")
                     break
         except Exception as e:
-            print(f"No se pudo extraer portada: {e}")
+            logger.error("No se pudo extraer portada: %s", e)
 
     def _create_json(self):
         # Track repetido: conservar el JSON existente, solo reemplazar stems.

@@ -16,6 +16,7 @@
 
 from pathlib import Path
 from typing import Dict, Optional, Any, Callable
+import logging
 import threading
 import time
 import json
@@ -25,6 +26,8 @@ from PIL import Image
 import io
 from mutagen.mp3 import MP3
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def get_song_duration(song_folder: Path) -> str:
@@ -100,7 +103,8 @@ class ResourceCache:
                             self._schedule_cleanup()
 
                 return resource
-            except Exception:
+            except Exception as e:
+                logger.error("Error cargando recurso '%s': %s", key, e)
                 return None
 
     def _schedule_cleanup(self):
@@ -113,7 +117,7 @@ class ResourceCache:
             try:
                 self._cleanup_if_needed()
             except Exception as e:
-                print(f"❌ Error en limpieza: {e}")
+                logger.error("Error en limpieza: %s", e)
             finally:
                 self._cleanup_in_progress = False
 
@@ -207,38 +211,6 @@ class LazyAudioManager:
                     return None
 
         return self.cache.get(cache_key, loader)
-
-    def cleanup_old_audio(self, current_path: Path, keep_count: int = 3):
-        """Limpia audio manteniendo los elementos más relevantes"""
-        try:
-            current_key = f"audio_{current_path}"
-
-            with self.cache._lock:
-                audio_keys = [k for k in self.cache._cache.keys() if k.startswith("audio_")]
-
-                if len(audio_keys) <= keep_count:
-                    return  # No necesita limpieza
-
-                # Mantener la actual + las más recientes
-                keys_to_keep = {current_key}
-                recent_keys = sorted(
-                    [k for k in audio_keys if k != current_key],
-                    key=lambda k: self.cache._access_times.get(k, 0),
-                    reverse=True
-                )[:keep_count - 1]
-                keys_to_keep.update(recent_keys)
-
-                # Eliminar el resto
-                removed_count = 0
-                for key in audio_keys:
-                    if key not in keys_to_keep:
-                        self.cache.remove(key)
-                        removed_count += 1
-
-                # if removed_count > 0:
-
-        except Exception as e:
-            print(f"❌ Error limpiando cache de audio: {e}")
 
 
 class LazyImageManager:
@@ -366,7 +338,7 @@ class LazyImageManager:
                     continue
 
         except Exception as e:
-            print(f"Error extrayendo portada de {mp3_path}: {e}")
+            logger.error("Error extrayendo portada de %s: %s", mp3_path, e)
 
         return self.get_default_cover()
 
@@ -438,7 +410,7 @@ class LazyLyricsManager:
                         self.load_lyrics_lazy(song_path)
 
             except Exception as e:
-                print(f"Error precargando letras: {e}")
+                logger.error("Error precargando letras: %s", e)
 
         thread = threading.Thread(target=preload_worker, daemon=True)
         thread.start()
@@ -542,7 +514,7 @@ class LazyPlaylistLoader(QObject):
 
 
             except Exception as e:
-                print(f"❌ Error fatal en carga de playlist: {e}")
+                logger.error("Error fatal en carga de playlist: %s", e)
             finally:
                 self.loading_finished.emit()
 
@@ -557,12 +529,4 @@ class LazyPlaylistLoader(QObject):
     def is_loading(self) -> bool:
         """Verifica si está cargando actualmente"""
         return self.loading_thread is not None and self.loading_thread.is_alive()
-
-    def get_loading_stats(self) -> dict:
-        """Obtiene estadísticas de la carga"""
-        return {
-            'is_loading': self.is_loading(),
-            'cache_size': len(self.cache._cache) if self.cache else 0,
-            'should_stop': self._should_stop
-        }
 

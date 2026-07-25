@@ -14,9 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import logging
 import os
 import sys
 import subprocess
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -44,6 +46,34 @@ def get_data_dir() -> Path:
         data_dir.mkdir(parents=True, exist_ok=True)
         return data_dir
     return Path('.')
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ── Logging ────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+def configure_logging(level: int = logging.INFO) -> None:
+    """Logging global: consola (dev) + archivo rotado en get_data_dir().
+
+    El binario empaquetado no tiene consola visible, así que sin el archivo
+    cualquier error solo reportado por logging se perdería en producción.
+    Llamar una sola vez, al arrancar la app (main.py).
+    """
+    root = logging.getLogger()
+    if root.handlers:
+        return  # ya configurado
+    root.setLevel(level)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    file_handler = RotatingFileHandler(
+        get_data_dir() / "playit.log", maxBytes=1_000_000, backupCount=2,
+        encoding='utf-8',
+    )
+    file_handler.setFormatter(fmt)
+    root.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(fmt)
+    root.addHandler(console_handler)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -290,10 +320,6 @@ def get_visualcpp_install_cmd() -> list:
             '--accept-source-agreements', '--accept-package-agreements',
         ]
     return []  # No aplica en Linux/Mac
-
-
-def get_demucs_install_cmd() -> list:
-    return [*get_pip_cmd(), 'install', 'demucs']
 
 
 def get_cuda_pytorch_install_cmd() -> list:
