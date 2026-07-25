@@ -453,6 +453,83 @@ class SplitDialog(BaseDialog):
             self.artist.setText(artist)
             self.song.setText(song)
 
+class CorrectSongDialog(BaseDialog):
+    def __init__(self, parent=None, artist: str = "", song: str = ""):
+        super().__init__(parent, "Corregir Artista/Canción", (360, 260))
+        self._setup_correct_ui(artist, song)
+
+    def _setup_correct_ui(self, artist: str, song: str):
+        self.artist = QLineEdit(artist)
+        self.song = QLineEdit(song)
+        self.song.setObjectName("SongText")
+
+        btn_layout = self._create_action_buttons()
+
+        self.main_layout.addWidget(QLabel("Artista*"))
+        self.main_layout.addWidget(self.artist)
+        self.main_layout.addWidget(QLabel("Canción*"))
+        self.main_layout.addWidget(self.song)
+        self.main_layout.addStretch()
+        self.main_layout.addLayout(btn_layout)
+
+        self._setup_validation()
+
+    def _create_action_buttons(self) -> QHBoxLayout:
+        layout = QHBoxLayout()
+
+        self.accept_btn = self._create_accept_button()
+        cancel_btn = self._create_cancel_button()
+
+        layout.addWidget(cancel_btn)
+        layout.addWidget(self.accept_btn)
+        return layout
+
+    def _create_accept_button(self) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName("aceptar_btn")
+        btn.setFixedSize(70, 70)
+
+        enabled_path = QDir.toNativeSeparators(
+            resource_path('images/split_dialog/aceptar_btn.png')
+        ).replace('\\', '/')
+        disabled_path = QDir.toNativeSeparators(
+            resource_path('images/split_dialog/aceptar_btn_disabled.png')
+        ).replace('\\', '/')
+
+        btn.setStyleSheet(f"""
+            QPushButton#aceptar_btn{{
+                image: url({enabled_path});
+            }}
+            QPushButton#aceptar_btn:disabled{{
+                image: url({disabled_path});
+            }}
+        """)
+
+        btn.clicked.connect(self.accept)
+        return btn
+
+    def _create_cancel_button(self) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName("cancelar_btn")
+        btn.setFixedSize(70, 70)
+        bg_image(btn, "images/split_dialog/cancelar_btn.png")
+        btn.clicked.connect(self.reject)
+        return btn
+
+    def _setup_validation(self):
+        for field in (self.artist, self.song):
+            field.textChanged.connect(self._update_accept_button_state)
+        self._update_accept_button_state()
+
+    def _update_accept_button_state(self):
+        self.accept_btn.setEnabled(
+            bool(self.artist.text().strip() and self.song.text().strip())
+        )
+
+    def get_values(self) -> tuple[str, str]:
+        return self.artist.text().strip(), self.song.text().strip()
+
+
 class DownloadDialog(BaseDialog):
     download_requested = pyqtSignal(str)
 

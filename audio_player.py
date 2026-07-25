@@ -43,7 +43,8 @@ from platform_utils import (
     run_silent, check_command_exists, get_python_cmd, get_data_dir,
     detect_nvidia_gpu, check_visual_cpp, check_pytorch_cuda,
 )
-from demucs_worker import DemucsWorker
+from demucs_worker import DemucsWorker, _sanitize_path_component
+import shutil
 from python_worker import PythonInstallWorker
 from visualc_worker import VisualCWorker
 from ytdlp_worker import YTDLPWorker
@@ -55,7 +56,10 @@ from update_check_worker import UpdateCheckWorker
 from version import __version__
 from resources import styled_message_box, bg_image, resource_path, style_url
 from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
-from dialogs import AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog, UpdateDialog
+from dialogs import (
+    AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog,
+    UpdateDialog, CorrectSongDialog,
+)
 from lazy_resources import (LazyAudioManager, LazyImageManager, LazyLyricsManager,
                             LazyPlaylistLoader, get_song_duration)
 from audio_visualizer import (AudioAnalyzer, CircularVisualizerWidget,
@@ -552,6 +556,7 @@ class AudioPlayer(QMainWindow):
 
         menu = QMenu(self.playlist_widget)
         open_folder_action = menu.addAction("Ir a la carpeta")
+        correct_action = menu.addAction("Corregir")
 
         copy_menu = menu.addMenu("Copiar")
         copy_artist_action = copy_menu.addAction("Artista")
@@ -563,6 +568,8 @@ class AudioPlayer(QMainWindow):
 
         if action == open_folder_action:
             self._open_song_folder(item)
+        elif action == correct_action:
+            self._correct_song(item)
         elif action == copy_artist_action:
             self._copy_song_info(item, 'artist')
         elif action == copy_song_action:
@@ -604,6 +611,116 @@ class AudioPlayer(QMainWindow):
                 "No se pudo abrir la carpeta con el explorador de archivos.",
                 QMessageBox.Icon.Warning,
             )
+
+    def _correct_song(self, item: QListWidgetItem):
+        row = self.playlist_widget.row(item)
+        if not (0 <= row < len(self.playlist)):
+            return
+        song_data = self.playlist[row]
+        old_path = Path(song_data['path'])
+        if not old_path.is_dir():
+            styled_message_box(
+                self, "Carpeta no encontrada",
+                "No se encontró la carpeta de esta canción.",
+                QMessageBox.Icon.Warning,
+            )
+            return
+
+        dialog = CorrectSongDialog(self, song_data['artist'], song_data['song'])
+        bg_image(dialog, 'images/split_dialog/split.png')
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_artist, new_song = dialog.get_values()
+        if new_artist == song_data['artist'] and new_song == song_data['song']:
+            return
+
+        # La canción puede vivir en una librería distinta a DEFAULT_LIBRARY
+        # (playlist cargada desde otra carpeta/disco): la nueva ruta se arma
+        # sobre la raíz real (<libreria>/<artista>/<canción>), si no el move
+        # cruzaría dispositivos y fallaría.
+        library_root = old_path.parent.parent
+        new_path = (
+            library_root
+            / _sanitize_path_component(new_artist) / _sanitize_path_component(new_song)
+        )
+
+        if new_path != old_path and new_path.exists():
+            reply = styled_message_box(
+                self, "Carpeta existente",
+                f'Ya existe una carpeta para "{new_artist} - {new_song}".\n'
+                "¿Combinar y sobrescribir los archivos con el mismo nombre?",
+                QMessageBox.Icon.Question,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        # Cerrar streams antes de mover archivos: en Windows un stream con el
+        # archivo abierto bloquea el move/rename.
+        if row == self.current_index and self.playback_state != "Detenido":
+            self.stop_playback()
+
+        try:
+            if new_path != old_path:
+                self._move_song_folder(old_path, new_path)
+            self._write_song_metadata(new_path, new_artist, new_song)
+        except Exception as e:
+            styled_message_box(
+                self, "Error", f"No se pudo corregir la canción:\n{e}",
+                QMessageBox.Icon.Critical,
+            )
+            return
+
+        self._playlist_keys.discard((song_data['artist'], song_data['song']))
+        self._playlist_keys.add((new_artist, new_song))
+        song_data['artist'] = new_artist
+        song_data['song'] = new_song
+        song_data['path'] = new_path
+        song_data['json_data'] = {"path": str(new_path)}
+
+        item.setText(f"{new_artist} - {new_song}")
+        item.setData(PlaylistItemDelegate.PATH_ROLE, str(new_path))
+
+        self.status_label.setText(f"Corregido: {new_artist} - {new_song}")
+
+    @staticmethod
+    def _move_song_folder(old_path: Path, new_path: Path):
+        """Mueve/combina la carpeta de la canción hacia new_path.
+
+        Si new_path ya existe (misma canción re-corregida a un nombre que
+        coincide con otra carpeta), combina archivo por archivo en vez de
+        sobrescribir el directorio entero.
+        """
+        if not new_path.exists():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            # shutil.move y no rename: soporta mover entre dispositivos
+            # (librería en un disco externo, carpeta destino en otro).
+            shutil.move(str(old_path), str(new_path))
+        else:
+            for entry in old_path.iterdir():
+                dest = new_path / entry.name
+                if entry.is_dir():
+                    shutil.copytree(entry, dest, dirs_exist_ok=True)
+                    shutil.rmtree(entry)
+                else:
+                    if dest.exists():
+                        dest.unlink()
+                    shutil.move(str(entry), str(dest))
+            old_path.rmdir()
+
+        # Limpiar la carpeta de artista anterior si quedó vacía.
+        old_artist_dir = old_path.parent
+        if old_artist_dir != new_path.parent and old_artist_dir.is_dir() \
+                and not any(old_artist_dir.iterdir()):
+            old_artist_dir.rmdir()
+
+    @staticmethod
+    def _write_song_metadata(path: Path, artist: str, song: str):
+        data = {artist: {song: {"path": str(path)}}}
+        (path / "data.json").write_text(
+            json.dumps(data, indent=4), encoding='utf-8'
+        )
 
     def _connect_dock_events(self):
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)
