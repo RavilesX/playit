@@ -6,7 +6,7 @@
 
 **Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-[![Versión](https://img.shields.io/badge/versión-1.2.5-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Versión](https://img.shields.io/badge/versión-1.2.6-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
 [![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
@@ -163,7 +163,7 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 
 ## Versión actual
 
-**v1.2.5** — visualizador circular en modo fullscreen de letras, colores por intérprete en una misma línea, selección múltiple y opciones de copiado en la playlist, navegación por teclado en el editor de sincronización (waveform) y atajos Alt+1..4 para mutear/activar pistas individuales (con aviso en pantalla al usarlos en fullscreen). Historial completo en [Releases](https://github.com/RavilesX/playit/releases).
+**v1.2.6** — opción "Buscar actualizaciones" en el menú de ayuda; en el menú contextual de la playlist: "Corregir" (F2) para arreglar el artista o la canción de un track ya separado —renombra la carpeta y actualiza el JSON, moviendo o combinando los archivos si la carpeta correcta ya existe— y "Buscar letras de nuevo" para forzar la descarga ignorando el `.lrc` actual. Además, registro a log de la aplicación y corrección del bug que dejaba sin duración las canciones recién separadas. Historial completo en [Releases](https://github.com/RavilesX/playit/releases).
 
 ## Contacto
 
@@ -326,7 +326,7 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 
 ## Current version
 
-**v1.2.5** — circular visualizer in fullscreen lyrics mode, per-singer colors on a single line, multi-select and copy options in the playlist, keyboard navigation in the waveform sync editor, and Alt+1..4 shortcuts to mute/unmute individual stems (with an on-screen toast when used in fullscreen). Full history in [Releases](https://github.com/RavilesX/playit/releases).
+**v1.2.6** — "Check for updates" entry in the help menu; in the playlist context menu: "Corregir" (F2) to fix a separated track's artist or title —it renames the folder and updates the JSON, moving or merging files when the correct folder already exists— and "Buscar letras de nuevo" to force a fresh lyrics download ignoring the current `.lrc`. Also application logging and a fix for the bug that left freshly separated songs without a duration. Full history in [Releases](https://github.com/RavilesX/playit/releases).
 
 ## Contact
 
