@@ -18,6 +18,36 @@ class TestOnSongsLoaded:
         assert len(player.playlist) == 2
         assert ("A", "1") in player._playlist_keys
 
+    def test_duplicado_completa_duracion_faltante(self, player):
+        """Una canción agregada mientras Demucs corría (data.json ya escrito,
+        stems todavía no) entra sin duración; el re-escaneo debe completarla
+        en vez de descartarse por duplicada."""
+        from ui_components import PlaylistItemDelegate
+
+        sin_duracion = make_song("A", "1")
+        sin_duracion["duration"] = ""
+        player._on_songs_loaded([sin_duracion])
+
+        con_duracion = make_song("A", "1")
+        con_duracion["duration"] = "3:21"
+        player._on_songs_loaded([con_duracion])
+
+        assert len(player.playlist) == 1
+        assert player.playlist[0]["duration"] == "3:21"
+        assert player.playlist_widget.item(0).data(
+            PlaylistItemDelegate.DURATION_ROLE) == "3:21"
+
+    def test_duplicado_no_pisa_duracion_existente(self, player):
+        con_duracion = make_song("A", "1")
+        con_duracion["duration"] = "3:21"
+        player._on_songs_loaded([con_duracion])
+
+        otra = make_song("A", "1")
+        otra["duration"] = "9:99"
+        player._on_songs_loaded([otra])
+
+        assert player.playlist[0]["duration"] == "3:21"
+
     def test_habilita_botones_con_primera_cancion(self, player):
         player._set_playback_buttons_enabled(False)
         player._on_songs_loaded([make_song("A", "1")])

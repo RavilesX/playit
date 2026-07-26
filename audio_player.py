@@ -93,6 +93,7 @@ class AudioPlayer(QMainWindow):
     lyrics_loaded = pyqtSignal(list)
     lyrics_error = pyqtSignal(str)
     lyrics_not_found = pyqtSignal()
+    lyrics_refetched = pyqtSignal(str, bool)  # ruta de la canción, encontradas
     dependencies_checked = pyqtSignal()
 
     # ──────────────────────────────────────────────────────────────────────
@@ -557,6 +558,11 @@ class AudioPlayer(QMainWindow):
         menu = QMenu(self.playlist_widget)
         open_folder_action = menu.addAction("Ir a la carpeta")
         correct_action = menu.addAction("Corregir")
+        # Solo para mostrar "F2" en el menú: el atajo real lo maneja
+        # keyPressEvent (el QMenu es temporal y muere con el exec()).
+        correct_action.setShortcut(QKeySequence("F2"))
+        correct_action.setShortcutVisibleInContextMenu(True)
+        refetch_lyrics_action = menu.addAction("Buscar letras de nuevo")
 
         copy_menu = menu.addMenu("Copiar")
         copy_artist_action = copy_menu.addAction("Artista")
@@ -570,6 +576,8 @@ class AudioPlayer(QMainWindow):
             self._open_song_folder(item)
         elif action == correct_action:
             self._correct_song(item)
+        elif action == refetch_lyrics_action:
+            self._force_fetch_lyrics(item)
         elif action == copy_artist_action:
             self._copy_song_info(item, 'artist')
         elif action == copy_song_action:
@@ -611,6 +619,12 @@ class AudioPlayer(QMainWindow):
                 "No se pudo abrir la carpeta con el explorador de archivos.",
                 QMessageBox.Icon.Warning,
             )
+
+    def _correct_selected(self):
+        """Corregir la canción seleccionada (F2)."""
+        item = self.playlist_widget.currentItem()
+        if item is not None and item.isSelected():
+            self._correct_song(item)
 
     def _correct_song(self, item: QListWidgetItem):
         row = self.playlist_widget.row(item)
@@ -684,6 +698,74 @@ class AudioPlayer(QMainWindow):
 
         self.status_label.setText(f"Corregido: {new_artist} - {new_song}")
 
+    def _force_fetch_lyrics(self, item: QListWidgetItem):
+        """Vuelve a buscar letras en la API ignorando el lyrics.lrc existente.
+
+        Útil tras corregir el artista/canción: la búsqueda automática solo
+        corre si el archivo no existe o dice "no encontradas", así que un
+        .lrc equivocado nunca se reemplazaría solo.
+        """
+        row = self.playlist_widget.row(item)
+        if not (0 <= row < len(self.playlist)):
+            return
+        song_data = self.playlist[row]
+        path = Path(song_data['path'])
+        if not path.is_dir():
+            styled_message_box(
+                self, "Carpeta no encontrada",
+                "No se encontró la carpeta de esta canción.",
+                QMessageBox.Icon.Warning,
+            )
+            return
+
+        # Confirmar: sobrescribe cualquier ajuste hecho en el editor de sync.
+        if (path / "lyrics.lrc").exists():
+            reply = styled_message_box(
+                self, "Sobrescribir letras",
+                f'Se reemplazarán las letras actuales de "{song_data["artist"]} - '
+                f'{song_data["song"]}" con las que devuelva la búsqueda.\n'
+                "Se perderán los ajustes de sincronización hechos a mano. ¿Continuar?",
+                QMessageBox.Icon.Question,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        artist, song = song_data['artist'], song_data['song']
+        self.status_label.setText(f"Buscando letras: {artist} - {song}...")
+
+        def worker():
+            found = False
+            try:
+                self._fetch_lyrics_from_api(artist, song, path)
+                found = LYRICS_NOT_FOUND_TEXT not in (
+                    path / "lyrics.lrc"
+                ).read_text(encoding="utf-8")
+            except Exception as e:
+                logger.error("Error buscando letras de %s - %s: %s", artist, song, e)
+            self.lyrics_refetched.emit(str(path), found)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _handle_lyrics_refetched(self, path_str: str, found: bool):
+        path = Path(path_str)
+        # El parse cacheado apunta al .lrc viejo: invalidarlo o la canción
+        # seguiría mostrando las letras anteriores.
+        self.lazy_lyrics.cache.remove(f"lyrics_{path}")
+
+        if (0 <= self.current_index < len(self.playlist)
+                and Path(self.playlist[self.current_index]['path']) == path):
+            if found:
+                self._handle_lyrics_loaded(self.lazy_lyrics.load_lyrics_lazy(path))
+            else:
+                self.lyrics = []
+                self._handle_lyrics_not_found()
+            self.update_lyrics_menu_state()
+
+        self.status_label.setText(
+            "Letras actualizadas" if found else "No se encontraron letras"
+        )
+
     @staticmethod
     def _move_song_folder(old_path: Path, new_path: Path):
         """Mueve/combina la carpeta de la canción hacia new_path.
@@ -732,6 +814,7 @@ class AudioPlayer(QMainWindow):
         self.lyrics_loaded.connect(self._handle_lyrics_loaded)
         self.lyrics_error.connect(self._handle_lyrics_error)
         self.lyrics_not_found.connect(self._handle_lyrics_not_found)
+        self.lyrics_refetched.connect(self._handle_lyrics_refetched)
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Timers ───────────────────────────────────────────────────────────
@@ -771,6 +854,8 @@ class AudioPlayer(QMainWindow):
             self.seek_to(new_val)
         elif key == Qt.Key.Key_Delete:
             self.remove_selected()
+        elif key == Qt.Key.Key_F2:
+            self._correct_selected()
         else:
             super().keyPressEvent(event)
 
@@ -808,6 +893,7 @@ class AudioPlayer(QMainWindow):
             for song_data in batch:
                 key = (song_data['artist'], song_data['song'])
                 if key in self._playlist_keys:
+                    self._refresh_song_duration(key, song_data)
                     continue
 
                 self._playlist_keys.add(key)
@@ -822,6 +908,31 @@ class AudioPlayer(QMainWindow):
 
         if self.playlist and not self.prev_btn.isEnabled():
             self._set_playback_buttons_enabled(True)
+
+    def _refresh_song_duration(self, key: tuple[str, str], song_data: dict):
+        """Completa la duración de una canción que entró a la playlist sin ella.
+
+        DemucsWorker escribe data.json al inicio del proceso, mucho antes de
+        los stems: un escaneo que caiga en esa ventana agrega la canción con
+        duración vacía (get_song_duration lee separated/other.mp3, que aún no
+        existe). El re-escaneo posterior sí trae la duración real, pero el
+        dedupe por (artista, canción) la descartaba y el renglón se quedaba
+        sin duración para siempre.
+        """
+        duration = song_data.get('duration', '')
+        if not duration:
+            return
+        for row, existing in enumerate(self.playlist):
+            if (existing['artist'], existing['song']) != key:
+                continue
+            if existing.get('duration'):
+                return
+            existing['duration'] = duration
+            existing['has_separated'] = song_data.get('has_separated', True)
+            item = self.playlist_widget.item(row)
+            if item is not None:
+                item.setData(PlaylistItemDelegate.DURATION_ROLE, duration)
+            return
 
     def _on_playlist_loaded(self):
         self.status_label.setText(f"Playlist cargada: {len(self.playlist)} canciones")
@@ -2306,8 +2417,13 @@ class AudioPlayer(QMainWindow):
             self._verification_attempts = 0
             return
 
-        base = (DEFAULT_LIBRARY / self.last_in_queue['artist']
-                / self.last_in_queue['song'] / "separated")
+        # Mismo saneado que usó DemucsWorker para crear la carpeta: con los
+        # nombres crudos, un artista tipo "AC/DC" nunca se verificaría y
+        # saldría el diálogo de Timeout aunque la separación fuera bien.
+        base = (DEFAULT_LIBRARY
+                / _sanitize_path_component(self.last_in_queue['artist'])
+                / _sanitize_path_component(self.last_in_queue['song'])
+                / "separated")
         required = ['drums.mp3', 'vocals.mp3', 'bass.mp3', 'other.mp3']
 
         if not base.exists() or not all((base / f).exists() for f in required):
