@@ -18,10 +18,14 @@ import logging
 import sys
 from pathlib import Path
 from PyQt6.QtCore import QDir
+from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QAbstractButton, QMessageBox
 from typing import Union
 
 logger = logging.getLogger(__name__)
+
+# Familias de las fuentes empaquetadas ya registradas, por ruta relativa.
+_font_families: dict[str, str] = {}
 
 
 def resource_path(relative_path: str) -> str:
@@ -37,6 +41,32 @@ def resource_path(relative_path: str) -> str:
     except Exception as e:
         logger.error("Error en resource_path: %s", e)
         return str(Path.cwd() / relative_path)
+
+
+def load_font_family(relative_path: str) -> str:
+    """Registra una fuente empaquetada (fonts/*.ttf) y devuelve su familia.
+
+    Devuelve '' si no se pudo cargar, para que quien la use pueda omitir el
+    font-family y caer en la fuente por defecto. El resultado se cachea:
+    addApplicationFont vuelve a registrar la fuente en cada llamada.
+    """
+    cached = _font_families.get(relative_path)
+    if cached is not None:
+        return cached
+
+    family = ''
+    try:
+        font_id = QFontDatabase.addApplicationFont(resource_path(relative_path))
+        families = QFontDatabase.applicationFontFamilies(font_id) if font_id != -1 else []
+        if families:
+            family = families[0]
+        else:
+            logger.warning("No se pudo registrar la fuente: %s", relative_path)
+    except Exception as e:
+        logger.error("Error al cargar la fuente %s: %s", relative_path, e)
+
+    _font_families[relative_path] = family
+    return family
 
 
 def style_url(relative_path: str) -> str:

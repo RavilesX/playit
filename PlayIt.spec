@@ -29,7 +29,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=qt_plugins,
-    datas=[('images', 'images'), ('estilos.css', '.')],
+    datas=[('images', 'images'), ('fonts', 'fonts'), ('estilos.css', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

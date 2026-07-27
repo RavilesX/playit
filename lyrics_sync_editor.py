@@ -60,7 +60,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dialogs import BaseDialog
-from resources import style_url, styled_message_box
+from resources import load_font_family, style_url, styled_message_box
 from ui_components import SizeGrip
 
 # Sin límite superior de tamaño (permite maximizar / agrandar libremente).
@@ -75,6 +75,11 @@ EDGE_GRAB_PX = 6            # margen en px para "agarrar" el inicio de una líne
 MIN_GAP = 0.05             # separación mínima en segundos entre líneas
 UNDO_MAX = 100             # tope de snapshots del historial de deshacer
 WHEEL_SCROLL_SECONDS = 0.6  # cuánto desplaza la rueda del mouse por muesca
+TOOLBAR_BTN_H = 28          # alto común de los botones de las barras del editor
+
+# Fuente decorativa (Google Fonts, OFL) para los botones de símbolos
+# |< < > >| « ». Si no se puede cargar se usa la fuente por defecto.
+SYMBOL_FONT = 'fonts/RubikDoodleTriangles-Regular.ttf'
 
 # Regex del timestamp LRC: [mm:ss.xx]
 _LRC_TS = re.compile(r'\[(\d+):(\d+\.\d+)\]')
@@ -760,6 +765,21 @@ class LyricsSyncDialog(BaseDialog):
         " border: 1px solid #e0455a; border-radius: 4px; padding: 3px; }"
     )
 
+    @staticmethod
+    def _symbol_btn_css() -> str:
+        """Estilo de los botones de símbolos (|< < > >| « »).
+
+        Fuente decorativa empaquetada; sin el padding: 0 el propio botón se
+        come el carácter.
+        """
+        family = load_font_family(SYMBOL_FONT)
+        font = f" font-family: '{family}';" if family else ""
+        return (
+            "QPushButton { color: #F88FFF; font-size: 17px; font-weight: bold;"
+            f" padding: 0;{font} }}"
+            "QPushButton:disabled { color: #6a4a6a; }"
+        )
+
     # ── Construcción de UI ─────────────────────────────────────────────
     def _build_content(self):
         self.setStyleSheet(self._STYLE)
@@ -781,7 +801,7 @@ class LyricsSyncDialog(BaseDialog):
         bar.setContentsMargins(6, 0, 6, 0)
         bar.setSpacing(6)
         self.play_btn = QPushButton("▶")
-        self.play_btn.setFixedSize(44, 28)
+        self.play_btn.setFixedSize(44, TOOLBAR_BTN_H)
         bar.addWidget(self.play_btn)
         self.add_btn = QPushButton("＋ Línea")
         self.add_btn.setToolTip(
@@ -795,6 +815,9 @@ class LyricsSyncDialog(BaseDialog):
         self.merge_btn = QPushButton("⨝ Unir")
         self.merge_btn.setEnabled(False)
         bar.addWidget(self.merge_btn)
+        # Mismo alto que el resto de la barra (los de color quedan a 22 px).
+        for b in (self.add_btn, self.del_btn, self.merge_btn):
+            b.setFixedHeight(TOOLBAR_BTN_H)
 
         # Muestras de color: aplican color (o lo quitan) a TODAS las líneas
         # seleccionadas (multiselección con Ctrl/Shift). Funcionan como toggle:
@@ -829,7 +852,8 @@ class LyricsSyncDialog(BaseDialog):
         self.offset_spin.setDecimals(1)
         self.offset_spin.setValue(0.5)
         self.offset_spin.setSuffix(" s")
-        self.offset_spin.setFixedWidth(70)
+        # Alto fijo de 28 px para igualar los botones vecinos de la barra.
+        self.offset_spin.setFixedSize(70, 28)
         bar2.addWidget(self.offset_spin)
         # Solo el símbolo, compactos: ahorran ancho en la fila
         self.back_btn = QPushButton("«")
@@ -837,18 +861,12 @@ class LyricsSyncDialog(BaseDialog):
         self.fwd_btn = QPushButton("»")
         self.fwd_btn.setToolTip("Mover líneas hacia después (suma el offset)")
         for b in (self.back_btn, self.fwd_btn):
-            b.setFixedSize(28, 28)
-            # Mismo estilo compacto que los botones de navegación: sin el
-            # padding: 0 el propio botón se come el carácter
-            b.setStyleSheet(
-                "QPushButton { color: #F88FFF; font-size: 15px; font-weight: bold;"
-                " padding: 0; }"
-                "QPushButton:disabled { color: #6a4a6a; }"
-            )
+            b.setFixedSize(TOOLBAR_BTN_H, TOOLBAR_BTN_H)
+            b.setStyleSheet(self._symbol_btn_css())
         bar2.addWidget(self.back_btn)
         bar2.addWidget(self.fwd_btn)
         # Si está marcado, el offset solo afecta líneas desde el cursor.
-        self.from_cursor_chk = QCheckBox("Solo desde el cursor")
+        self.from_cursor_chk = QCheckBox("Desde el cursor")
         self.from_cursor_chk.setChecked(True)
         # Indicador con los assets de checkbox de la app (incluyen la palomita);
         # el estilizado custom perdía la marca al activarse.
@@ -871,30 +889,28 @@ class LyricsSyncDialog(BaseDialog):
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Buscar")
         self.search_box.setToolTip("Buscar en la letra (Ctrl+F)")
-        self.search_box.setFixedWidth(160)
+        self.search_box.setFixedSize(160, 28)
         self.search_box.setClearButtonEnabled(True)
         self.search_box.setStyleSheet(self._SEARCH_NORMAL)
-        bar2.addWidget(self.search_box)
 
         # Navegación: inicio / resultado anterior / siguiente / final.
         # Anterior y Siguiente solo se activan cuando hay texto en el buscador.
-        self.goto_start_btn = QPushButton("|<")
+        self.goto_start_btn = QPushButton("l<")
         self.goto_start_btn.setToolTip("Ir al inicio de la pista (Ctrl+Inicio)")
         self.search_prev_btn = QPushButton("<")
         self.search_prev_btn.setToolTip("Resultado anterior (Ctrl+←)")
         self.search_next_btn = QPushButton(">")
         self.search_next_btn.setToolTip("Resultado siguiente (Ctrl+→)")
-        self.goto_end_btn = QPushButton(">|")
+        self.goto_end_btn = QPushButton(">l")
         self.goto_end_btn.setToolTip("Ir a la última línea de la letra (Ctrl+Fin)")
         for b in (self.goto_start_btn, self.search_prev_btn,
                   self.search_next_btn, self.goto_end_btn):
-            b.setFixedSize(28, 28)
-            b.setStyleSheet(
-                "QPushButton { color: #F88FFF; font-size: 15px; font-weight: bold;"
-                " padding: 0; }"
-                "QPushButton:disabled { color: #6a4a6a; }"
-            )
-            bar2.addWidget(b)
+            b.setFixedSize(TOOLBAR_BTN_H, TOOLBAR_BTN_H)
+            b.setStyleSheet(self._symbol_btn_css())
+        # El buscador va en medio: |< < [Buscar] > >|
+        for w in (self.goto_start_btn, self.search_prev_btn, self.search_box,
+                  self.search_next_btn, self.goto_end_btn):
+            bar2.addWidget(w)
         self.search_prev_btn.setEnabled(False)
         self.search_next_btn.setEnabled(False)
 
@@ -910,6 +926,8 @@ class LyricsSyncDialog(BaseDialog):
         actions.addStretch(1)
         self.save_btn = QPushButton("Guardar")
         self.cancel_btn = QPushButton("Cancelar")
+        for b in (self.save_btn, self.cancel_btn):
+            b.setFixedHeight(TOOLBAR_BTN_H)
         actions.addWidget(self.cancel_btn)
         actions.addWidget(self.save_btn)
         self.main_layout.addLayout(actions)
@@ -1128,7 +1146,7 @@ class LyricsSyncDialog(BaseDialog):
     def _shift_all(self, delta: float):
         """Adelanta (+) o retrasa (−) líneas el offset elegido.
 
-        Con "Solo desde el cursor" marcado, afecta únicamente las líneas
+        Con "Desde el cursor" marcado, afecta únicamente las líneas
         cuyo inicio es >= la posición del cursor de reproducción.
         """
         self._push_undo()
