@@ -267,29 +267,45 @@ class TestDialogShift:
 
 class TestDialogLineas:
     def test_add_line_envuelve_con_tags(self, dialog, monkeypatch):
-        monkeypatch.setattr(
-            lse.QInputDialog, "getMultiLineText",
-            staticmethod(lambda *a, **k: ("nueva linea", True)),
-        )
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        def fake_exec(dlg_self):
+            editor = dlg_self.findChild(QPlainTextEdit)
+            editor.setPlainText("nueva linea")
+            return 1
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", fake_exec)
         dialog.waveform.playback_pos = 3.0
         dialog._add_line_with_text()
         agregada = next(ln for ln in dialog.lines if round(ln.start, 2) == 3.0)
         assert agregada.text == "<center>nueva linea</center>"
 
     def test_add_line_cancelado_no_agrega(self, dialog, monkeypatch):
-        monkeypatch.setattr(
-            lse.QInputDialog, "getMultiLineText",
-            staticmethod(lambda *a, **k: ("", False)),
-        )
+        monkeypatch.setattr(lse.QInputDialog, "exec", lambda dlg_self: 0)
         antes = len(dialog.lines)
         dialog._add_line_with_text()
         assert len(dialog.lines) == antes
+
+    def test_add_line_usa_fuente_del_editor(self, dialog, monkeypatch):
+        # La caja de texto lleva la fuente del editor (Space Mono).
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        capturado = {}
+
+        def captura_exec(dlg_self):
+            editor = dlg_self.findChild(QPlainTextEdit)
+            capturado["css"] = editor.styleSheet() if editor else None
+            return 0
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", captura_exec)
+        dialog._add_line_with_text()
+        assert "Space Mono" in capturado["css"]
 
     def test_add_line_blank_no_abre_dialogo(self, dialog, monkeypatch):
         # No debe invocar el diálogo de texto; agrega una línea vacía.
         def _boom(*a, **k):
             raise AssertionError("no debe abrir diálogo")
-        monkeypatch.setattr(lse.QInputDialog, "getMultiLineText", staticmethod(_boom))
+        monkeypatch.setattr(lse.QInputDialog, "exec", _boom)
         dialog.waveform.playback_pos = 3.0
         antes = len(dialog.lines)
         dialog._add_line_blank()

@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QPixmap
 from audio_player import AudioPlayer
-from resources import resource_path
+from resources import load_app_fonts, resource_path
 from platform_utils import configure_logging
 
 configure_logging()
@@ -36,6 +36,8 @@ def create_player():
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    # Antes de cualquier QSS: estilos.css pide "Saira Stencil One" por nombre.
+    load_app_fonts()
 
     from PyQt6.QtWidgets import QSplashScreen
     splash = QSplashScreen(QPixmap(resource_path("images/main_window/splash.png")))

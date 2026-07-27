@@ -60,7 +60,13 @@ from PyQt6.QtWidgets import (
 )
 
 from dialogs import BaseDialog
-from resources import load_font_family, style_url, styled_message_box
+from resources import (
+    FONT_EDITOR,
+    FONT_SYMBOLS,
+    load_font_family,
+    style_url,
+    styled_message_box,
+)
 from ui_components import SizeGrip
 
 # Sin límite superior de tamaño (permite maximizar / agrandar libremente).
@@ -76,10 +82,7 @@ MIN_GAP = 0.05             # separación mínima en segundos entre líneas
 UNDO_MAX = 100             # tope de snapshots del historial de deshacer
 WHEEL_SCROLL_SECONDS = 0.6  # cuánto desplaza la rueda del mouse por muesca
 TOOLBAR_BTN_H = 28          # alto común de los botones de las barras del editor
-
-# Fuente decorativa (Google Fonts, OFL) para los botones de símbolos
-# |< < > >| « ». Si no se puede cargar se usa la fuente por defecto.
-SYMBOL_FONT = 'fonts/RubikDoodleTriangles-Regular.ttf'
+LYRIC_EDIT_FONT_PX = 18     # tamaño del texto en los diálogos de agregar/editar
 
 # Regex del timestamp LRC: [mm:ss.xx]
 _LRC_TS = re.compile(r'\[(\d+):(\d+\.\d+)\]')
@@ -430,6 +433,12 @@ class WaveformWidget(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
+        # Fuentes del dibujo: la letra en la monoespaciada del editor; el
+        # encabezado (#índice tiempo) y la rejilla en la de sistema.
+        self._head_font = QFont("Sans", 11)
+        self._lyric_font = QFont(load_font_family(FONT_EDITOR) or "Sans", 11)
+        self._lyric_fm = QFontMetrics(self._lyric_font)
+
     # ── Mapeo tiempo/pixel ─────────────────────────────────────────────
     def sec_to_x(self, t: float) -> float:
         return (t - self.start_pos) * self.px_per_sec
@@ -504,8 +513,7 @@ class WaveformWidget(QWidget):
 
     def _draw_blocks(self, p: QPainter):
         h = self.height()
-        fm = QFontMetrics(QFont("Sans", 11))
-        font = QFont("Sans", 11)
+        fm = self._lyric_fm
         for i, line in enumerate(self.lines):
             x0 = self.sec_to_x(line.start)
             end = self.lines[i + 1].start if i + 1 < len(self.lines) else self.audio.duration
@@ -521,7 +529,7 @@ class WaveformWidget(QWidget):
             # Etiqueta: #índice tiempo + texto. Cada renglón del texto se
             # pinta con SU color (una línea puede mezclarlos); el encabezado
             # va siempre en el color por defecto.
-            p.setFont(font)
+            p.setFont(self._lyric_font)
             head = f"#{i + 1}  {line.start:.3f}"
             avail = max(10, int(x1 - x0) - 8)
             tx = int(x0) + 4
@@ -543,6 +551,7 @@ class WaveformWidget(QWidget):
                 if remaining <= 10:
                     break
             p.setPen(QPen(self._C_TEXT, 1))
+            p.setFont(self._head_font)
             p.drawText(int(x0) + 4, h - 16, head)
 
     def _draw_cursor(self, p: QPainter):
@@ -772,12 +781,26 @@ class LyricsSyncDialog(BaseDialog):
         Fuente decorativa empaquetada; sin el padding: 0 el propio botón se
         come el carácter.
         """
-        family = load_font_family(SYMBOL_FONT)
+        family = load_font_family(FONT_SYMBOLS)
         font = f" font-family: '{family}';" if family else ""
         return (
             "QPushButton { color: #F88FFF; font-size: 17px; font-weight: bold;"
             f" padding: 0;{font} }}"
             "QPushButton:disabled { color: #6a4a6a; }"
+        )
+
+    @staticmethod
+    def _lyric_edit_css() -> str:
+        """Estilo de las cajas de texto de agregar/editar línea.
+
+        Misma fuente monoespaciada que la letra dibujada sobre la onda.
+        """
+        family = load_font_family(FONT_EDITOR)
+        font = f" font-family: '{family}';" if family else ""
+        return (
+            "QPlainTextEdit { background:#2a2a3d;"
+            " border:1px solid #7d73e8; border-radius:4px; padding:3px;"
+            f" font-size:{LYRIC_EDIT_FONT_PX}px; color:{DEFAULT_LYRIC_HEX};{font} }}"
         )
 
     # ── Construcción de UI ─────────────────────────────────────────────
@@ -1080,12 +1103,21 @@ class LyricsSyncDialog(BaseDialog):
     def _add_line_with_text(self):
         """Abre el diálogo de texto y agrega la línea en el cursor."""
         pos = self.waveform.playback_pos
-        text, ok = QInputDialog.getMultiLineText(
-            self, "Nueva línea", f"Texto (inicio en {pos:.3f}s)", "",
-        )
-        if not ok:
+        # Diálogo propio (no el estático) para poder darle la fuente de la
+        # letra y el autowrap, igual que el de editar.
+        dlg = QInputDialog(self)
+        dlg.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, True)
+        dlg.setWindowTitle("Nueva línea")
+        dlg.setLabelText(f"Texto (inicio en {pos:.3f}s)")
+        editor = dlg.findChild(QPlainTextEdit)
+        if editor is not None:
+            editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+            editor.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+            editor.setMinimumWidth(360)
+            editor.setStyleSheet(self._lyric_edit_css())
+        if dlg.exec() != QInputDialog.DialogCode.Accepted:
             return
-        self._insert_line(text)
+        self._insert_line(dlg.textValue())
 
     def _delete_line(self):
         """Elimina todas las líneas seleccionadas."""
@@ -1336,11 +1368,7 @@ class LyricsSyncDialog(BaseDialog):
             editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
             editor.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
             editor.setMinimumWidth(360)
-            editor.setStyleSheet(
-                "QPlainTextEdit { background:#2a2a3d;"
-                " border:1px solid #7d73e8; border-radius:4px; padding:3px;"
-                f" font-size:16px; color:{DEFAULT_LYRIC_HEX}; }}"
-            )
+            editor.setStyleSheet(self._lyric_edit_css())
 
         bbox = dlg.findChild(QDialogButtonBox)
 

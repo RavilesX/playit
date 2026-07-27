@@ -24,6 +24,13 @@ from typing import Union
 
 logger = logging.getLogger(__name__)
 
+# Fuentes empaquetadas (Google Fonts, OFL). Van dentro del bundle para no
+# depender de que estén instaladas en el sistema: estilos.css ya pedía
+# "Saira Stencil One" por nombre.
+FONT_LYRICS = 'fonts/SairaStencilOne-Regular.ttf'    # letra y tiempos (estilos.css)
+FONT_SYMBOLS = 'fonts/RubikDoodleTriangles-Regular.ttf'  # botones |< < > >| « »
+FONT_EDITOR = 'fonts/SpaceMono-Regular.ttf'          # texto del editor de letra
+
 # Familias de las fuentes empaquetadas ya registradas, por ruta relativa.
 _font_families: dict[str, str] = {}
 
@@ -67,6 +74,12 @@ def load_font_family(relative_path: str) -> str:
 
     _font_families[relative_path] = family
     return family
+
+
+def load_app_fonts() -> None:
+    """Registra todas las fuentes empaquetadas. Llamar tras crear QApplication."""
+    for path in (FONT_LYRICS, FONT_SYMBOLS, FONT_EDITOR):
+        load_font_family(path)
 
 
 def style_url(relative_path: str) -> str:
