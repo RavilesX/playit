@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # depender de que estén instaladas en el sistema: estilos.css ya pedía
 # "Saira Stencil One" por nombre.
 FONT_LYRICS = 'fonts/SairaStencilOne-Regular.ttf'    # letra y tiempos (estilos.css)
+FONT_LYRICS_CURRENT = 'fonts/Righteous-Regular.ttf'  # línea actual de la letra
 FONT_SYMBOLS = 'fonts/RubikDoodleTriangles-Regular.ttf'  # botones |< < > >| « »
 FONT_EDITOR = 'fonts/SpaceMono-Regular.ttf'          # texto del editor de letra
 
@@ -78,7 +79,7 @@ def load_font_family(relative_path: str) -> str:
 
 def load_app_fonts() -> None:
     """Registra todas las fuentes empaquetadas. Llamar tras crear QApplication."""
-    for path in (FONT_LYRICS, FONT_SYMBOLS, FONT_EDITOR):
+    for path in (FONT_LYRICS, FONT_LYRICS_CURRENT, FONT_SYMBOLS, FONT_EDITOR):
         load_font_family(path)
 
 

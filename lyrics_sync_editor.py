@@ -272,6 +272,26 @@ def join_rows(rows: list[tuple[str, str | None]]) -> str:
     return '<center>' + '\n'.join(parts) + '</center>'
 
 
+def sentence_case(text: str) -> str:
+    """Formatea cada renglón con la primera letra en mayúscula y el resto en
+    minúsculas.
+
+    Se aplica al confirmar cualquier edición de texto en el editor (agregar,
+    editar, unir, separar). La mayúscula va en la primera letra real, así que
+    un renglón que empieza con signos («¿», comillas) también queda bien.
+    """
+    rows = []
+    for row in text.split('\n'):
+        low = row.lower()
+        for i, ch in enumerate(low):
+            if ch.isalpha():
+                rows.append(low[:i] + ch.upper() + low[i + 1:])
+                break
+        else:
+            rows.append(low)      # sin letras (vacío, solo signos)
+    return '\n'.join(rows)
+
+
 def _color_btn_css(hexv: str, active: bool) -> str:
     """Estilo de un botón-muestra de color en el editor de texto."""
     border = "#F88FFF" if active else "#555569"
@@ -715,6 +735,10 @@ class LyricsSyncDialog(BaseDialog):
         # mutación; el redo se llena al deshacer y se vacía con cada mutación.
         self._undo_stack: list[list[LyricLine]] = []
         self._redo_stack: list[list[LyricLine]] = []
+        # Formato automático del texto (mayúscula inicial por renglón). Activo
+        # por defecto; el checkbox de los diálogos de texto lo cambia y el
+        # estado se mantiene mientras el editor esté abierto.
+        self._auto_format = True
 
         self._build_content()
         self._wire()
@@ -788,6 +812,25 @@ class LyricsSyncDialog(BaseDialog):
             f" padding: 0;{font} }}"
             "QPushButton:disabled { color: #6a4a6a; }"
         )
+
+    @staticmethod
+    def _checkbox_css() -> str:
+        """Estilo de los checkbox del editor.
+
+        Indicador con los assets de checkbox de la app (incluyen la palomita);
+        el estilizado custom perdía la marca al activarse.
+        """
+        unchecked = style_url('images/split_dialog/checkbox_unchecked.png')
+        checked = style_url('images/split_dialog/checkbox_checked.png')
+        hover = style_url('images/split_dialog/checkbox_hover01.png')
+        hover_checked = style_url('images/split_dialog/checkbox_hover02.png')
+        return f"""
+            QCheckBox {{ color: #cfcfe0; spacing: 8px; background: transparent; }}
+            QCheckBox::indicator {{ width: 18px; height: 18px; image: url({unchecked}); }}
+            QCheckBox::indicator:checked {{ image: url({checked}); }}
+            QCheckBox::indicator:unchecked:hover {{ image: url({hover}); }}
+            QCheckBox::indicator:checked:hover {{ image: url({hover_checked}); }}
+        """
 
     @staticmethod
     def _lyric_edit_css() -> str:
@@ -891,19 +934,7 @@ class LyricsSyncDialog(BaseDialog):
         # Si está marcado, el offset solo afecta líneas desde el cursor.
         self.from_cursor_chk = QCheckBox("Desde el cursor")
         self.from_cursor_chk.setChecked(True)
-        # Indicador con los assets de checkbox de la app (incluyen la palomita);
-        # el estilizado custom perdía la marca al activarse.
-        unchecked = style_url('images/split_dialog/checkbox_unchecked.png')
-        checked = style_url('images/split_dialog/checkbox_checked.png')
-        hover = style_url('images/split_dialog/checkbox_hover01.png')
-        hover_checked = style_url('images/split_dialog/checkbox_hover02.png')
-        self.from_cursor_chk.setStyleSheet(f"""
-            QCheckBox {{ color: #cfcfe0; spacing: 8px; }}
-            QCheckBox::indicator {{ width: 18px; height: 18px; image: url({unchecked}); }}
-            QCheckBox::indicator:checked {{ image: url({checked}); }}
-            QCheckBox::indicator:unchecked:hover {{ image: url({hover}); }}
-            QCheckBox::indicator:checked:hover {{ image: url({hover_checked}); }}
-        """)
+        self.from_cursor_chk.setStyleSheet(self._checkbox_css())
         bar2.addWidget(self.from_cursor_chk)
         bar2.addStretch(1)
 
@@ -1086,11 +1117,43 @@ class LyricsSyncDialog(BaseDialog):
         self._add_hold_fired = True
         self._add_line_with_text()
 
+    def _add_auto_format_chk(self, dlg: QInputDialog) -> QCheckBox:
+        """Agrega el checkbox "Formato automático" a un diálogo de texto.
+
+        Refleja y actualiza `self._auto_format`, así que la elección se
+        mantiene entre diálogos mientras el editor esté abierto.
+        """
+        chk = QCheckBox("Formato automático", dlg)
+        chk.setToolTip(
+            "Al guardar, deja la primera letra de cada renglón en mayúscula\n"
+            "y el resto en minúsculas. Desactívalo para conservar nombres\n"
+            "propios y siglas tal como los escribiste."
+        )
+        chk.setChecked(self._auto_format)
+        chk.setStyleSheet(self._checkbox_css())
+        chk.toggled.connect(lambda on: setattr(self, '_auto_format', on))
+        # Va en el button box (a la izquierda de todo) porque el layout del
+        # QInputDialog no admite filas extra sin desarmar su contenido.
+        bbox = dlg.findChild(QDialogButtonBox)
+        lay = bbox.layout() if bbox is not None else None
+        if isinstance(lay, QBoxLayout):
+            lay.insertWidget(0, chk)
+            lay.insertSpacing(1, 24)
+        return chk
+
+    def _format_text(self, text: str) -> str:
+        """Aplica el formato de oración salvo que el usuario lo haya desactivado.
+
+        Desactivado sirve para letras con nombres propios o siglas, que el
+        formato automático pasaría a minúsculas.
+        """
+        return sentence_case(text) if self._auto_format else text
+
     def _insert_line(self, text: str):
         """Inserta una línea con `text` en la posición del cursor y la selecciona."""
         self._push_undo()
         pos = self.waveform.playback_pos
-        new_line = LyricLine(pos, wrap_lyric(text))
+        new_line = LyricLine(pos, wrap_lyric(self._format_text(text)))
         self.lines.append(new_line)
         self.lines.sort(key=lambda ln: ln.start)
         index = next(i for i, ln in enumerate(self.lines) if ln is new_line)
@@ -1115,6 +1178,7 @@ class LyricsSyncDialog(BaseDialog):
             editor.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
             editor.setMinimumWidth(360)
             editor.setStyleSheet(self._lyric_edit_css())
+        self._add_auto_format_chk(dlg)
         if dlg.exec() != QInputDialog.DialogCode.Accepted:
             return
         self._insert_line(dlg.textValue())
@@ -1148,7 +1212,8 @@ class LyricsSyncDialog(BaseDialog):
         color = extract_color(self.lines[sel[0]].text)
         textos = [strip_tags(self.lines[i].text).strip() for i in sel]
         merged = ' '.join(t for t in textos if t)
-        self.lines[sel[0]] = LyricLine(start, wrap_lyric(merged, color))
+        self.lines[sel[0]] = LyricLine(
+            start, wrap_lyric(self._format_text(merged), color))
         for i in reversed(sel[1:]):
             del self.lines[i]
         self.waveform.select_single(sel[0])
@@ -1477,9 +1542,11 @@ class LyricsSyncDialog(BaseDialog):
             # con el Ctrl+D de la ventana principal (abrir diálogo de split).
             QShortcut(QKeySequence("Ctrl+D"), dlg).activated.connect(_do_split)
 
-        # Cosmética del button box: label "Color:" antes de las muestras y un
-        # espacio que separe la sección de color de "Separar línea". Se hace al
-        # final porque cada addButton re-arma el layout y borraría los insertos.
+        # Cosmética del button box: checkbox de formato, label "Color:" antes de
+        # las muestras y un espacio que separe la sección de color de "Separar
+        # línea". Se hace al final porque cada addButton re-arma el layout y
+        # borraría los insertos.
+        self._add_auto_format_chk(dlg)
         if bbox is not None and color_btns:
             lay = bbox.layout()
             # El layout del button box es un QBoxLayout; el isinstance además
@@ -1503,15 +1570,18 @@ class LyricsSyncDialog(BaseDialog):
                 new_rows = []
                 block = doc.firstBlock()
                 while block.isValid():
-                    new_rows.append((block.text(), block_color_fn(block)))
+                    new_rows.append((self._format_text(block.text()),
+                                     block_color_fn(block)))
                     block = block.next()
                 self.lines[index].text = join_rows(new_rows)
             else:
-                self.lines[index].text = wrap_lyric(dlg.textValue())
+                self.lines[index].text = wrap_lyric(
+                    self._format_text(dlg.textValue()))
             if split["do"]:
                 self.lines.append(
                     LyricLine(self.waveform.playback_pos,
-                              wrap_lyric(split["after"], split.get("color")))
+                              wrap_lyric(self._format_text(split["after"]),
+                                         split.get("color")))
                 )
                 self.lines.sort(key=lambda ln: ln.start)
             self.waveform.update()

@@ -27,6 +27,7 @@ from lyrics_sync_editor import (
     load_vocals,
     parse_lrc,
     seconds_to_lrc_ts,
+    sentence_case,
     split_rows,
     strip_tags,
     wrap_lyric,
@@ -265,6 +266,100 @@ class TestDialogShift:
         assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 5.5, 9.5]
 
 
+class TestSentenceCase:
+    def test_primera_mayuscula_resto_minusculas(self):
+        assert sentence_case("HOLA MUNDO cruel") == "Hola mundo cruel"
+
+    def test_cada_renglon_por_separado(self):
+        assert sentence_case("uno\nDOS") == "Uno\nDos"
+
+    def test_salta_signos_iniciales(self):
+        assert sentence_case("¿DÓNDE estás?") == "¿Dónde estás?"
+
+    def test_texto_sin_letras_no_falla(self):
+        assert sentence_case("") == ""
+        assert sentence_case("...") == "..."
+
+    def test_acentos(self):
+        assert sentence_case("ÁNGEL de la noche") == "Ángel de la noche"
+
+
+class TestFormatoAutomatico:
+    """El checkbox "Formato automático" de los diálogos de texto."""
+
+    def _chk(self, dlg):
+        from PyQt6.QtWidgets import QCheckBox
+        return next(c for c in dlg.findChildren(QCheckBox)
+                    if c.text() == "Formato automático")
+
+    def test_activo_por_defecto(self, dialog, monkeypatch):
+        capturado = {}
+
+        def captura_exec(dlg_self):
+            capturado["on"] = self._chk(dlg_self).isChecked()
+            return 0
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", captura_exec)
+        dialog._edit_text(0)
+        assert capturado["on"] is True
+
+    def test_desactivado_conserva_mayusculas(self, dialog, monkeypatch):
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        def fake_exec(dlg_self):
+            self._chk(dlg_self).setChecked(False)
+            dlg_self.findChild(QPlainTextEdit).setPlainText("hola MARÍA José")
+            return 1
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", fake_exec)
+        dialog._edit_text(0)
+        assert strip_tags(dialog.lines[0].text) == "hola MARÍA José"
+
+    def test_activado_formatea(self, dialog, monkeypatch):
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        def fake_exec(dlg_self):
+            dlg_self.findChild(QPlainTextEdit).setPlainText("hola MARÍA José")
+            return 1
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", fake_exec)
+        dialog._edit_text(0)
+        assert strip_tags(dialog.lines[0].text) == "Hola maría josé"
+
+    def test_eleccion_persiste_entre_dialogos(self, dialog, monkeypatch):
+        # Desactivarlo en un diálogo lo deja desactivado en el siguiente y
+        # también afecta a unir líneas (que no tiene diálogo).
+        monkeypatch.setattr(
+            lse.QInputDialog, "exec",
+            lambda dlg_self: (self._chk(dlg_self).setChecked(False), 0)[1],
+        )
+        dialog._edit_text(0)
+        assert dialog._auto_format is False
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", lambda dlg_self: 0)
+        dialog._edit_text(0)  # se reabre ya desmarcado
+        assert dialog._auto_format is False
+
+        dialog.lines[0].text = wrap_lyric("HOLA")
+        dialog.waveform.selection = {0, 1}
+        dialog._merge_lines()
+        assert strip_tags(dialog.lines[0].text) == "HOLA dos"
+
+    def test_checkbox_tambien_en_nueva_linea(self, dialog, monkeypatch):
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        def fake_exec(dlg_self):
+            self._chk(dlg_self).setChecked(False)
+            dlg_self.findChild(QPlainTextEdit).setPlainText("DJ Snake")
+            return 1
+
+        monkeypatch.setattr(lse.QInputDialog, "exec", fake_exec)
+        dialog.waveform.playback_pos = 3.0
+        dialog._add_line_with_text()
+        agregada = next(ln for ln in dialog.lines if round(ln.start, 2) == 3.0)
+        assert strip_tags(agregada.text) == "DJ Snake"
+
+
 class TestDialogLineas:
     def test_add_line_envuelve_con_tags(self, dialog, monkeypatch):
         from PyQt6.QtWidgets import QPlainTextEdit
@@ -278,7 +373,8 @@ class TestDialogLineas:
         dialog.waveform.playback_pos = 3.0
         dialog._add_line_with_text()
         agregada = next(ln for ln in dialog.lines if round(ln.start, 2) == 3.0)
-        assert agregada.text == "<center>nueva linea</center>"
+        # El texto se guarda con formato de oración (primera letra mayúscula).
+        assert agregada.text == "<center>Nueva linea</center>"
 
     def test_add_line_cancelado_no_agrega(self, dialog, monkeypatch):
         monkeypatch.setattr(lse.QInputDialog, "exec", lambda dlg_self: 0)
@@ -378,7 +474,7 @@ class TestDialogUnir:
         dialog.waveform.selection = {0, 1}
         dialog._merge_lines()
         assert [round(ln.start, 2) for ln in dialog.lines] == [1.0, 9.0]
-        assert strip_tags(dialog.lines[0].text) == "uno dos"
+        assert strip_tags(dialog.lines[0].text) == "Uno dos"
 
     def test_merge_no_contiguo_no_hace_nada(self, dialog):
         dialog.waveform.selection = {0, 2}
@@ -419,8 +515,8 @@ class TestDialogEditarTexto:
         dialog._edit_text(0)
         # El default mostrado al usuario va sin tags...
         assert capturado["default"] == "uno"
-        # ...pero lo guardado las re-incluye.
-        assert dialog.lines[0].text == "<center>editado</center>"
+        # ...pero lo guardado las re-incluye (y con formato de oración).
+        assert dialog.lines[0].text == "<center>Editado</center>"
 
     def test_edit_fuerza_autowrap(self, dialog, monkeypatch):
         from PyQt6.QtWidgets import QPlainTextEdit
@@ -449,8 +545,9 @@ class TestDialogEditarTexto:
 
         monkeypatch.setattr(lse.QInputDialog, "exec", fake_exec)
         dialog._edit_text(0)
-        # El salto queda dentro de la misma línea (no crea otra LyricLine).
-        assert dialog.lines[0].text == "<center>uno\nsegunda</center>"
+        # El salto queda dentro de la misma línea (no crea otra LyricLine);
+        # cada renglón lleva su propia mayúscula inicial.
+        assert dialog.lines[0].text == "<center>Uno\nSegunda</center>"
         assert len(dialog.lines) == 3
 
     def test_salto_de_linea_roundtrip_lrc(self, dialog, tmp_path):
@@ -489,10 +586,10 @@ class TestDialogEditarTexto:
         assert len(dialog.lines) == n_antes + 1
         # Línea actual conserva lo de antes del cursor (con trim).
         actual = next(ln for ln in dialog.lines if ln.start == 1.0)
-        assert strip_tags(actual.text) == "hola"
+        assert strip_tags(actual.text) == "Hola"
         # Nueva línea: texto tras el cursor, timestamp en el cursor de play.
         nueva = next(ln for ln in dialog.lines if ln.start == 2.5)
-        assert strip_tags(nueva.text) == "mundo"
+        assert strip_tags(nueva.text) == "Mundo"
 
 
 def _patch_confirm(monkeypatch, respuesta):
@@ -681,6 +778,8 @@ class TestDialogRehacer:
 
 class TestRenglonesColoreados:
     AZUL = '<center>uno\n<font color="#3AABEF">dos</font></center>'
+    # Igual, pero como queda tras pasar por el diálogo (formato de oración).
+    AZUL_CAP = '<center>Uno\n<font color="#3AABEF">Dos</font></center>'
 
     def test_split_rows_formato_clasico_hereda_color(self):
         t = wrap_lyric("uno\ndos", "azul")
@@ -737,7 +836,7 @@ class TestRenglonesColoreados:
             azul.click()
 
         self._edit(dialog, monkeypatch, manipulate)
-        assert dialog.lines[0].text == self.AZUL
+        assert dialog.lines[0].text == self.AZUL_CAP
 
     def test_dialogo_toggle_regresa_a_default(self, dialog, monkeypatch):
         dialog.lines[0].text = self.AZUL
@@ -751,12 +850,12 @@ class TestRenglonesColoreados:
             azul.click()  # ya era azul → vuelve a default
 
         self._edit(dialog, monkeypatch, manipulate)
-        assert dialog.lines[0].text == "<center>uno\ndos</center>"
+        assert dialog.lines[0].text == "<center>Uno\nDos</center>"
 
     def test_dialogo_conserva_colores_existentes(self, dialog, monkeypatch):
         dialog.lines[0].text = self.AZUL
         self._edit(dialog, monkeypatch, lambda editor, bbox: None)
-        assert dialog.lines[0].text == self.AZUL
+        assert dialog.lines[0].text == self.AZUL_CAP
 
 
 class TestFoldText:
