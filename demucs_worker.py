@@ -109,21 +109,25 @@ def _tag_value(tags, key: str) -> str:
 
 
 def read_source_metadata(src) -> dict:
-    """Metadata del archivo de origen: artista, canción, álbum, año, género, kbps.
+    """Metadata del origen: artista, canción, álbum, año, género, formato, kbps.
 
     Solo se incluyen las claves que el archivo realmente trae; la UI muestra
     "Desconocido" para las que falten. Nunca lanza: un archivo sin tags (o que
-    mutagen no sepa leer) simplemente devuelve {}.
+    mutagen no sepa leer) devuelve solo el formato.
     """
+    # De la extensión y no del tipo de mutagen: los stems ya son mp3, así que
+    # esta es la única forma de saber después con qué llegó el archivo.
+    ext = Path(src).suffix.lstrip(".").upper()
+    meta = {"formato": ext} if ext else {}
+
     try:
         audio = mutagen.File(src)
     except Exception as e:
         logger.error("No se pudo leer metadata de %s: %s", src, e)
-        return {}
+        return meta
     if audio is None:
-        return {}
+        return meta
 
-    meta = {}
     tags = audio.tags
     if tags:
         for field, keys in _META_TAGS.items():

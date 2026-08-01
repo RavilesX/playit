@@ -27,7 +27,7 @@ class TestReadSourceMetadata:
         assert read_source_metadata("x.mp3") == {
             "artista": "Soda Stereo", "cancion": "De Música Ligera",
             "album": "Canción Animal", "anio": "1990", "genero": "Rock",
-            "kbps": 320,
+            "formato": "MP3", "kbps": 320,
         }
 
     def test_tags_vorbis_y_mp4(self, monkeypatch):
@@ -36,22 +36,27 @@ class TestReadSourceMetadata:
             lambda *a, **k: FakeAudio({"artist": ["A"], "\xa9nam": ["B"]}, 128000),
         )
         meta = read_source_metadata("x.flac")
-        assert meta == {"artista": "A", "cancion": "B", "kbps": 128}
+        assert meta == {"artista": "A", "cancion": "B",
+                        "formato": "FLAC", "kbps": 128}
 
-    def test_archivo_sin_tags(self, monkeypatch):
+    def test_archivo_sin_tags_conserva_formato(self, monkeypatch):
         monkeypatch.setattr("mutagen.File", lambda *a, **k: FakeAudio(None, 0))
-        assert read_source_metadata("x.wav") == {}
+        assert read_source_metadata("x.wav") == {"formato": "WAV"}
 
     def test_formato_no_reconocido(self, monkeypatch):
         monkeypatch.setattr("mutagen.File", lambda *a, **k: None)
-        assert read_source_metadata("x.bin") == {}
+        assert read_source_metadata("x.bin") == {"formato": "BIN"}
+
+    def test_sin_extension(self, monkeypatch):
+        monkeypatch.setattr("mutagen.File", lambda *a, **k: None)
+        assert read_source_metadata("cancion") == {}
 
     def test_mutagen_lanza(self, monkeypatch):
         def boom(*a, **k):
             raise OSError("archivo corrupto")
 
         monkeypatch.setattr("mutagen.File", boom)
-        assert read_source_metadata("x.mp3") == {}
+        assert read_source_metadata("x.mp3") == {"formato": "MP3"}
 
 
 class TestReadSongMetadata:

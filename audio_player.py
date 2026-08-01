@@ -17,6 +17,7 @@
 import threading
 import queue
 import logging
+import random
 import re
 from pathlib import Path
 import json
@@ -425,6 +426,7 @@ class AudioPlayer(QMainWindow):
         ("artist", True, "Artista Z-A"),
         ("song", False, "Título A-Z"),
         ("song", True, "Título Z-A"),
+        ("random", False, "Aleatorio"),
     )
 
     def _create_playlist_dock(self):
@@ -1813,8 +1815,9 @@ class AudioPlayer(QMainWindow):
         self.update_status()
 
     def sort_playlist(self, key: str = "artist", reverse: bool = False):
-        """Ordena la playlist por artista o título, preserva la canción en
-        reproducción y rehace los ítems del widget en el nuevo orden."""
+        """Ordena la playlist por artista, título o al azar ("random"),
+        preserva la canción en reproducción y rehace los ítems del widget
+        en el nuevo orden."""
         if not self.playlist:
             return
 
@@ -1830,13 +1833,16 @@ class AudioPlayer(QMainWindow):
         if 0 <= self.current_index < len(self.playlist):
             current_song = self.playlist[self.current_index]
 
-        if key == "song":
-            def sort_key(s):
-                return (s['song'].lower(), s['artist'].lower())
+        if key == "random":
+            random.shuffle(self.playlist)
         else:
-            def sort_key(s):
-                return (s['artist'].lower(), s['song'].lower())
-        self.playlist.sort(key=sort_key, reverse=reverse)
+            if key == "song":
+                def sort_key(s):
+                    return (s['song'].lower(), s['artist'].lower())
+            else:
+                def sort_key(s):
+                    return (s['artist'].lower(), s['song'].lower())
+            self.playlist.sort(key=sort_key, reverse=reverse)
 
         # Rehacer los ítems del widget en el nuevo orden
         self.playlist_widget.setUpdatesEnabled(False)
@@ -2780,6 +2786,9 @@ class AudioPlayer(QMainWindow):
             lambda: self.sort_playlist("song", reverse=True)
         )
         sort_menu.addAction(sort_song_desc_action)
+        sort_random_action = QAction("Aleatorio", self)
+        sort_random_action.triggered.connect(lambda: self.sort_playlist("random"))
+        sort_menu.addAction(sort_random_action)
 
         file_menu.addSeparator()
 

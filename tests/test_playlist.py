@@ -123,3 +123,42 @@ class TestBusqueda:
         before = player.playlist_widget.currentRow()
         player._search_playlist("zzzz")
         assert player.playlist_widget.currentRow() == before
+
+
+class TestOrdenamiento:
+    def setup_playlist(self, player):
+        player._on_songs_loaded([
+            make_song("Cielo", "Zapato"),
+            make_song("Alfa", "Mango"),
+            make_song("Beta", "Arbol"),
+        ])
+
+    def test_orden_por_artista(self, player):
+        self.setup_playlist(player)
+        player.sort_playlist("artist")
+        assert [s['artist'] for s in player.playlist] == ["Alfa", "Beta", "Cielo"]
+        assert player.sort_label.text() == "Artista A-Z"
+
+    def test_orden_aleatorio_conserva_las_canciones(self, player, monkeypatch):
+        self.setup_playlist(player)
+        monkeypatch.setattr("random.shuffle", lambda seq: seq.reverse())
+        player.sort_playlist("random")
+        assert [s['song'] for s in player.playlist] == ["Arbol", "Mango", "Zapato"]
+        assert player.playlist_widget.count() == 3
+        assert player.sort_label.text() == "Aleatorio"
+
+    def test_orden_aleatorio_preserva_la_cancion_actual(self, player, monkeypatch):
+        self.setup_playlist(player)
+        player.current_index = 0
+        actual = player.playlist[0]
+        monkeypatch.setattr("random.shuffle", lambda seq: seq.reverse())
+        player.sort_playlist("random")
+        assert player.playlist[player.current_index] is actual
+
+    def test_boton_cicla_hasta_aleatorio(self, player):
+        self.setup_playlist(player)
+        for _ in range(len(player._SORT_MODES)):
+            player._cycle_sort()
+        assert player.sort_label.text() == player._SORT_MODES[-1][2]
+        player._cycle_sort()
+        assert player.sort_label.text() == "Artista A-Z"

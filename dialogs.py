@@ -547,12 +547,13 @@ class SongInfoDialog(BaseDialog):
         ("Álbum", "album"),
         ("Año", "anio"),
         ("Género", "genero"),
+        ("Formato", "formato"),
         ("Kbps", "kbps"),
     )
 
     def __init__(self, parent=None, metadata: dict | None = None):
         self._metadata = metadata or {}
-        super().__init__(parent, "Información", (400, 360))
+        super().__init__(parent, "Información", (400, 390))
         self._setup_info_ui()
 
     def _setup_info_ui(self):
