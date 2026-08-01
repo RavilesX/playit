@@ -58,10 +58,11 @@ from resources import styled_message_box, bg_image, resource_path, style_url
 from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
 from dialogs import (
     AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog,
-    UpdateDialog, CorrectSongDialog,
+    UpdateDialog, CorrectSongDialog, SongInfoDialog,
 )
 from lazy_resources import (LazyAudioManager, LazyImageManager, LazyLyricsManager,
-                            LazyPlaylistLoader, get_song_duration)
+                            LazyPlaylistLoader, get_song_duration,
+                            read_song_metadata)
 from audio_visualizer import (AudioAnalyzer, CircularVisualizerWidget,
                               VisualizerWidget)
 from lyrics_sync_editor import AUTO_UNMUTE_COLOR, LYRIC_COLORS, LyricsSyncDialog
@@ -563,6 +564,7 @@ class AudioPlayer(QMainWindow):
         correct_action.setShortcut(QKeySequence("F2"))
         correct_action.setShortcutVisibleInContextMenu(True)
         refetch_lyrics_action = menu.addAction("Buscar letras de nuevo")
+        info_action = menu.addAction("Información")
 
         copy_menu = menu.addMenu("Copiar")
         copy_artist_action = copy_menu.addAction("Artista")
@@ -578,6 +580,8 @@ class AudioPlayer(QMainWindow):
             self._correct_song(item)
         elif action == refetch_lyrics_action:
             self._force_fetch_lyrics(item)
+        elif action == info_action:
+            self._show_song_info(item)
         elif action == copy_artist_action:
             self._copy_song_info(item, 'artist')
         elif action == copy_song_action:
@@ -599,6 +603,14 @@ class AudioPlayer(QMainWindow):
             raw = item.data(PlaylistItemDelegate.PATH_ROLE)
             text = str(Path(raw).resolve()) if raw else ''
         QApplication.clipboard().setText(text)
+
+    def _show_song_info(self, item: QListWidgetItem):
+        """Metadata del archivo de origen, leída del data.json de la canción."""
+        folder = item.data(PlaylistItemDelegate.PATH_ROLE)
+        metadata = read_song_metadata(Path(folder)) if folder else {}
+        dialog = SongInfoDialog(self, metadata)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        dialog.exec()
 
     def _open_song_folder(self, item: QListWidgetItem):
         folder = item.data(PlaylistItemDelegate.PATH_ROLE)
@@ -678,7 +690,7 @@ class AudioPlayer(QMainWindow):
         try:
             if new_path != old_path:
                 self._move_song_folder(old_path, new_path)
-            self._write_song_metadata(new_path, new_artist, new_song)
+            json_data = self._write_song_metadata(new_path, new_artist, new_song)
         except Exception as e:
             styled_message_box(
                 self, "Error", f"No se pudo corregir la canción:\n{e}",
@@ -691,7 +703,7 @@ class AudioPlayer(QMainWindow):
         song_data['artist'] = new_artist
         song_data['song'] = new_song
         song_data['path'] = new_path
-        song_data['json_data'] = {"path": str(new_path)}
+        song_data['json_data'] = json_data
 
         item.setText(f"{new_artist} - {new_song}")
         item.setData(PlaylistItemDelegate.PATH_ROLE, str(new_path))
@@ -798,11 +810,18 @@ class AudioPlayer(QMainWindow):
             old_artist_dir.rmdir()
 
     @staticmethod
-    def _write_song_metadata(path: Path, artist: str, song: str):
-        data = {artist: {song: {"path": str(path)}}}
+    def _write_song_metadata(path: Path, artist: str, song: str) -> dict:
+        """Reescribe data.json con el artista/canción nuevos.
+
+        La metadata del archivo de origen (si la hay) se conserva tal cual:
+        describe el archivo que se separó, no cómo se llame la carpeta.
+        Devuelve el bloque de la canción ya escrito.
+        """
+        entry = {"path": str(path), "metadata": read_song_metadata(path)}
         (path / "data.json").write_text(
-            json.dumps(data, indent=4), encoding='utf-8'
+            json.dumps({artist: {song: entry}}, indent=4), encoding='utf-8'
         )
+        return entry
 
     def _connect_dock_events(self):
         self.playlist_dock.visibilityChanged.connect(self._update_playlist_menu_state)

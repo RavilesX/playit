@@ -82,6 +82,65 @@ def _cover_bytes(src) -> bytes | None:
     return None
 
 
+# Etiquetas por familia de contenedor para cada campo de metadata que se
+# guarda en data.json. mutagen expone nombres distintos según el formato:
+# ID3 (mp3/wav/aiff) usa frames de 4 letras, MP4/M4A átomos con '©' y
+# Vorbis/FLAC/Opus claves en texto plano.
+_META_TAGS = {
+    "artista": ("TPE1", "\xa9ART", "artist", "author"),
+    "cancion": ("TIT2", "\xa9nam", "title"),
+    "album": ("TALB", "\xa9alb", "album"),
+    "anio": ("TDRC", "TYER", "\xa9day", "date", "year", "originaldate"),
+    "genero": ("TCON", "\xa9gen", "genre"),
+}
+
+
+def _tag_value(tags, key: str) -> str:
+    """Primer valor de `key` como texto, o '' si no existe."""
+    try:
+        value = tags.get(key)
+    except Exception:
+        return ""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    return str(value).strip()
+
+
+def read_source_metadata(src) -> dict:
+    """Metadata del archivo de origen: artista, canción, álbum, año, género, kbps.
+
+    Solo se incluyen las claves que el archivo realmente trae; la UI muestra
+    "Desconocido" para las que falten. Nunca lanza: un archivo sin tags (o que
+    mutagen no sepa leer) simplemente devuelve {}.
+    """
+    try:
+        audio = mutagen.File(src)
+    except Exception as e:
+        logger.error("No se pudo leer metadata de %s: %s", src, e)
+        return {}
+    if audio is None:
+        return {}
+
+    meta = {}
+    tags = audio.tags
+    if tags:
+        for field, keys in _META_TAGS.items():
+            for key in keys:
+                value = _tag_value(tags, key)
+                if value:
+                    # El año puede venir como fecha completa ("1991-09-24")
+                    meta[field] = value[:4] if field == "anio" else value
+                    break
+
+    bitrate = getattr(getattr(audio, "info", None), "bitrate", 0)
+    if bitrate:
+        meta["kbps"] = round(bitrate / 1000)
+
+    return meta
+
+
 def _sanitize_path_component(name: str) -> str:
     """Vuelve `name` seguro como componente de ruta en cualquier SO.
 
@@ -212,12 +271,14 @@ class DemucsWorker(QObject):
             logger.error("No se pudo extraer portada: %s", e)
 
     def _create_json(self):
-        # Track repetido: conservar el JSON existente, solo reemplazar stems.
-        if (self.base_path / "data.json").exists():
-            return
+        # Track repetido: el JSON se reescribe con la metadata del archivo
+        # nuevo (el anterior ya no existe, se destruye tras separarlo).
         data = {
             self.artist: {
-                self.song: {"path": str(self.base_path)}
+                self.song: {
+                    "path": str(self.base_path),
+                    "metadata": read_source_metadata(self.src_path),
+                }
             }
         }
         (self.base_path / "data.json").write_text(

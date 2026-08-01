@@ -21,6 +21,7 @@ from demucs_worker import AUDIO_INPUT_FILTER
 from resources import resource_path, bg_image, styled_message_box, style_url
 from ui_components import DialogTitleBar, StyledButtons
 from version import __version__
+import html
 import logging
 import os
 import string
@@ -529,6 +530,74 @@ class CorrectSongDialog(BaseDialog):
 
     def get_values(self) -> tuple[str, str]:
         return self.artist.text().strip(), self.song.text().strip()
+
+
+class SongInfoDialog(BaseDialog):
+    """Metadata del archivo de origen que se usó para separar la canción.
+
+    Los campos vienen del bloque "metadata" del data.json (lo escribe
+    DemucsWorker al separar). Las canciones separadas antes de que eso
+    existiera no lo tienen: se muestran como "Desconocido".
+    """
+
+    UNKNOWN = "Desconocido"
+    FIELDS = (
+        ("Artista", "artista"),
+        ("Canción", "cancion"),
+        ("Álbum", "album"),
+        ("Año", "anio"),
+        ("Género", "genero"),
+        ("Kbps", "kbps"),
+    )
+
+    def __init__(self, parent=None, metadata: dict | None = None):
+        self._metadata = metadata or {}
+        super().__init__(parent, "Información", (400, 360))
+        self._setup_info_ui()
+
+    def _setup_info_ui(self):
+        # QLabel y no QTextEdit: son 6 campos fijos que siempre caben, y el
+        # QTextEdit dibujaba una barra de desplazamiento inútil al lado.
+        info = QLabel(self._build_html())
+        info.setTextFormat(Qt.TextFormat.RichText)
+        info.setWordWrap(True)
+        info.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        info.setStyleSheet("""
+            QLabel {
+                color: #cfcfe0;
+                background-color: rgba(0, 0, 0, 0.55);
+                border: 0px;
+                padding: 8px;
+                font-size: 14px;
+            }
+        """)
+
+        close_btn = QPushButton()
+        close_btn.setObjectName("cancelar_btn")
+        close_btn.setFixedSize(70, 70)
+        bg_image(close_btn, "images/split_dialog/cancelar_btn.png")
+        close_btn.clicked.connect(self.accept)
+
+        self.main_layout.addWidget(info)
+        self.main_layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def _build_html(self) -> str:
+        # Ambas celdas llevan el mismo padding vertical: con padding solo en la
+        # etiqueta, su línea base quedaba unos píxeles más abajo que el valor.
+        cell = "padding:4px 0;"
+        rows = "".join(
+            f'<tr><td style="color:#F88FFF;{cell}padding-right:12px;">{label}</td>'
+            f'<td style="{cell}">{self._value(key)}</td></tr>'
+            for label, key in self.FIELDS
+        )
+        return f'<table cellspacing="0" cellpadding="0">{rows}</table>'
+
+    def _value(self, key: str) -> str:
+        """Valor escapado: los tags del archivo son texto libre ('AT&T', '<sic>')
+        y el QTextEdit los renderiza como HTML."""
+        value = str(self._metadata.get(key, "")).strip()
+        return html.escape(value) if value else self.UNKNOWN
 
 
 class DownloadDialog(BaseDialog):

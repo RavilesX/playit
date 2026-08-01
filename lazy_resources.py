@@ -40,6 +40,24 @@ def get_song_duration(song_folder: Path) -> str:
         return ""
 
 
+def read_song_metadata(song_folder: Path) -> dict:
+    """Bloque "metadata" del data.json de la canción ({} si no hay).
+
+    Las canciones separadas antes de que se guardara la metadata del archivo
+    de origen no lo tienen; la UI muestra "Desconocido" en ese caso.
+    """
+    try:
+        data = json.loads((song_folder / "data.json").read_text(encoding='utf-8'))
+        for songs in data.values():
+            for song_data in songs.values():
+                meta = song_data.get("metadata")
+                if isinstance(meta, dict):
+                    return meta
+    except Exception:
+        pass
+    return {}
+
+
 class ResourceCache:
     """Cache inteligente con lazy loading y gestión automática de memoria"""
 
