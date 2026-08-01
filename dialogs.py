@@ -17,6 +17,7 @@
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPoint,QDir
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox, QCheckBox
+from demucs_worker import AUDIO_INPUT_FILTER
 from resources import resource_path, bg_image, styled_message_box, style_url
 from ui_components import DialogTitleBar, StyledButtons
 from version import __version__
@@ -393,7 +394,7 @@ class SplitDialog(BaseDialog):
 
     def _select_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Seleccionar MP3", "", "MP3 Files (*.mp3)"
+            self, "Seleccionar archivo de audio", "", AUDIO_INPUT_FILTER
         )
         if file_path:
             self.file_path.setText(file_path)

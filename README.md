@@ -24,7 +24,7 @@ PlayIt es un reproductor de audio de escritorio que separa canciones en cuatro p
 
 ### Características
 
-- **Separación de pistas** con Demucs (modelo `htdemucs_ft`), con aceleración GPU (CUDA en NVIDIA, MPS en Apple Silicon) y cola de procesamiento.
+- **Separación de pistas** con Demucs (modelo `htdemucs_ft`), con aceleración GPU (CUDA en NVIDIA, MPS en Apple Silicon) y cola de procesamiento. Acepta entrada en mp3, wav, flac, ogg, opus, m4a, aac, aiff, wma y wv; la salida siempre es mp3.
 - **Reproducción multi-pista**: 4 stems sincronizados con control de volumen/mute individual.
 - **Letras sincronizadas (LRC)**: descarga automática, offset ajustable, colores por intérprete y editor visual de sincronización sobre la forma de onda de la voz.
 - **Auto-unmute**: reactiva la voz con fundido en las secciones sin letra (modo karaoke inteligente).
@@ -187,7 +187,7 @@ PlayIt is a desktop audio player that splits songs into four independent stems (
 
 ### Features
 
-- **Stem separation** with Demucs (`htdemucs_ft` model), GPU-accelerated (CUDA on NVIDIA, MPS on Apple Silicon), with a processing queue.
+- **Stem separation** with Demucs (`htdemucs_ft` model), GPU-accelerated (CUDA on NVIDIA, MPS on Apple Silicon), with a processing queue. Input can be mp3, wav, flac, ogg, opus, m4a, aac, aiff, wma or wv; output is always mp3.
 - **Multi-stem playback**: 4 synchronized stems with individual volume/mute.
 - **Synced lyrics (LRC)**: automatic fetching, adjustable offset, per-singer colors, and a visual sync editor over the vocals waveform.
 - **Auto-unmute**: fades vocals back in during sections without lyrics (smart karaoke mode).

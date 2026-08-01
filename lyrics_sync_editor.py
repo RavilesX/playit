@@ -879,6 +879,7 @@ class LyricsSyncDialog(BaseDialog):
         bar.addWidget(self.del_btn)
         # Unir: solo activo con 2+ líneas contiguas seleccionadas.
         self.merge_btn = QPushButton("⨝ Unir")
+        self.merge_btn.setToolTip("Une las líneas contiguas seleccionadas (Ctrl+A)")
         self.merge_btn.setEnabled(False)
         bar.addWidget(self.merge_btn)
         # Mismo alto que el resto de la barra (los de color quedan a 22 px).
@@ -1029,6 +1030,8 @@ class LyricsSyncDialog(BaseDialog):
         self.waveform.drag_started.connect(self._push_undo)
         self.del_btn.clicked.connect(self._delete_line)
         self.merge_btn.clicked.connect(self._merge_lines)
+        # Ctrl+A une las líneas seleccionadas (solo dentro del editor).
+        self._add_shortcut("Ctrl+A", self._merge_shortcut)
         self.waveform.selection_changed.connect(self._update_merge_state)
         self.back_btn.clicked.connect(lambda: self._shift_all(-self.offset_spin.value()))
         self.fwd_btn.clicked.connect(lambda: self._shift_all(self.offset_spin.value()))
@@ -1217,6 +1220,15 @@ class LyricsSyncDialog(BaseDialog):
         for i in reversed(sel[1:]):
             del self.lines[i]
         self.waveform.select_single(sel[0])
+
+    def _merge_shortcut(self):
+        """Ctrl+A. Con el foco en un campo de texto (buscador, spinbox)
+        delega en el "seleccionar todo" nativo del campo."""
+        w = self.focusWidget()
+        if isinstance(w, QLineEdit):
+            w.selectAll()
+            return
+        self._merge_lines()
 
     def _update_merge_state(self):
         self.merge_btn.setEnabled(self._can_merge())

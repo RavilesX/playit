@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import base64
 import json
 import logging
 import os
@@ -21,7 +22,8 @@ import re
 import shutil
 import io
 from pathlib import Path
-from mutagen.mp3 import MP3
+import mutagen
+from mutagen.flac import Picture
 from PIL import Image
 from PyQt6.QtCore import QObject, pyqtSignal
 from platform_utils import (
@@ -30,6 +32,54 @@ from platform_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Formatos de ENTRADA aceptados: demucs decodifica con torchaudio/ffmpeg, así
+# que lee cualquier contenedor que ffmpeg soporte. La salida siempre es mp3
+# (flag `--mp3` en `_exec_demucs`), sin importar el formato de origen.
+AUDIO_INPUT_EXTS = (
+    "mp3", "wav", "flac", "ogg", "oga", "opus", "m4a", "mp4",
+    "aac", "aiff", "aif", "wma", "wv", "alac",
+)
+AUDIO_INPUT_FILTER = (
+    "Audio (" + " ".join(f"*.{e}" for e in AUDIO_INPUT_EXTS) + ")"
+    ";;Todos los archivos (*)"
+)
+
+
+def _cover_bytes(src) -> bytes | None:
+    """Bytes de la portada embebida, sea cual sea el contenedor.
+
+    Cada familia de formatos la guarda distinto: FLAC en `pictures`, Ogg en el
+    tag `metadata_block_picture` (Picture en base64), ID3 (mp3/wav/aiff) en
+    frames APIC y MP4/M4A en el átomo 'covr'. WMA no se soporta (su WM/Picture
+    trae un blob binario propio); simplemente se queda sin portada.
+    """
+    audio = mutagen.File(src)
+    if audio is None:
+        return None
+
+    pics = getattr(audio, "pictures", None)  # FLAC
+    if pics:
+        return bytes(pics[0].data)
+
+    tags = audio.tags
+    if not tags:
+        return None
+
+    if hasattr(tags, "getall"):  # ID3
+        apic = tags.getall("APIC")
+        if apic:
+            return bytes(apic[0].data)
+
+    covr = tags.get("covr")  # MP4/M4A
+    if covr:
+        return bytes(covr[0])
+
+    block = tags.get("metadata_block_picture")  # Ogg Vorbis/Opus
+    if block:
+        return bytes(Picture(base64.b64decode(block[0])).data)
+
+    return None
 
 
 def _sanitize_path_component(name: str) -> str:
@@ -153,15 +203,11 @@ class DemucsWorker(QObject):
         if (self.base_path / "cover.png").exists():
             return
         try:
-            audio = MP3(self.src_path)
-            if not audio.tags:
+            data = _cover_bytes(self.src_path)
+            if not data:
                 return
-            for tag in audio.tags.values():
-                if tag.FrameID == 'APIC':
-                    im = Image.open(io.BytesIO(tag.data))
-                    im_resized = im.resize((500, 500))
-                    im_resized.save(self.base_path / "cover.png")
-                    break
+            im = Image.open(io.BytesIO(data))
+            im.resize((500, 500)).save(self.base_path / "cover.png")
         except Exception as e:
             logger.error("No se pudo extraer portada: %s", e)
 
