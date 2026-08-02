@@ -6,7 +6,7 @@
 
 **Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-[![Versión](https://img.shields.io/badge/versión-1.2.6-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Versión](https://img.shields.io/badge/versión-1.2.7-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
 [![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
@@ -30,7 +30,8 @@ PlayIt es un reproductor de audio de escritorio que separa canciones en cuatro p
 - **Auto-unmute**: reactiva la voz con fundido en las secciones sin letra (modo karaoke inteligente).
 - **Descarga desde YouTube** (yt-dlp) directa a MP3.
 - **Visualizador de audio** tipo CAVA renderizado en NumPy.
-- **Playlists** `.mlst` con ordenamiento por artista/título.
+- **Playlists** `.mlst` con ordenamiento por artista/título y modo aleatorio.
+- **Información del archivo original**: metadata (artista, álbum, año, género, formato, kbps) guardada al separar y consultable desde la playlist.
 - **Instalador de dependencias integrado**: la app detecta e instala lo que falta desde su propio menú.
 
 ## Sistemas soportados
@@ -163,7 +164,7 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 
 ## Versión actual
 
-**v1.2.6** — opción "Buscar actualizaciones" en el menú de ayuda; en el menú contextual de la playlist: "Corregir" (F2) para arreglar el artista o la canción de un track ya separado —renombra la carpeta y actualiza el JSON, moviendo o combinando los archivos si la carpeta correcta ya existe— y "Buscar letras de nuevo" para forzar la descarga ignorando el `.lrc` actual. Además, registro a log de la aplicación y corrección del bug que dejaba sin duración las canciones recién separadas. Historial completo en [Releases](https://github.com/RavilesX/playit/releases).
+**v1.2.7** — soporte de entrada para más formatos de audio (wav, flac, ogg, opus, m4a, aac, aiff, wma, wv…), con extracción de portada por formato; opción **"Información"** en el menú contextual de la playlist, que muestra la metadata del archivo usado al separar (artista, canción, álbum, año, género, formato y kbps) guardada ahora en el `data.json` —las canciones separadas antes aparecen como "Desconocido"—; orden **aleatorio** de la playlist (botón y menú); en el editor de sincronización: **formato automático** del texto (mayúscula inicial por renglón, desactivable), atajo **Ctrl+A** para unir líneas y nueva distribución de la barra de herramientas; y fuentes tipográficas empaquetadas con la app (Saira Stencil One, Righteous, Space Mono y Rubik Doodle Triangles, con sus licencias OFL). Historial completo en [Releases](https://github.com/RavilesX/playit/releases).
 
 ## Contacto
 
@@ -193,7 +194,8 @@ PlayIt is a desktop audio player that splits songs into four independent stems (
 - **Auto-unmute**: fades vocals back in during sections without lyrics (smart karaoke mode).
 - **YouTube download** (yt-dlp) straight to MP3.
 - **CAVA-style audio visualizer** rendered in NumPy.
-- **`.mlst` playlists** with artist/title sorting.
+- **`.mlst` playlists** with artist/title sorting and a random mode.
+- **Source file info**: metadata (artist, album, year, genre, format, kbps) saved at split time and viewable from the playlist.
 - **Built-in dependency installer**: the app detects and installs what's missing from its own menu.
 
 ## Supported systems
@@ -326,7 +328,7 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 
 ## Current version
 
-**v1.2.6** — "Check for updates" entry in the help menu; in the playlist context menu: "Corregir" (F2) to fix a separated track's artist or title —it renames the folder and updates the JSON, moving or merging files when the correct folder already exists— and "Buscar letras de nuevo" to force a fresh lyrics download ignoring the current `.lrc`. Also application logging and a fix for the bug that left freshly separated songs without a duration. Full history in [Releases](https://github.com/RavilesX/playit/releases).
+**v1.2.7** — input support for more audio formats (wav, flac, ogg, opus, m4a, aac, aiff, wma, wv…), with per-format cover art extraction; an **"Información"** entry in the playlist context menu showing the metadata of the file used for separation (artist, title, album, year, genre, format and kbps), now stored in `data.json` —songs separated earlier show as "Desconocido"—; **random** playlist ordering (button and menu); in the sync editor: **automatic text formatting** (sentence case per line, can be turned off), **Ctrl+A** to merge lines and a reworked toolbar layout; and typefaces bundled with the app (Saira Stencil One, Righteous, Space Mono and Rubik Doodle Triangles, with their OFL licenses). Full history in [Releases](https://github.com/RavilesX/playit/releases).
 
 ## Contact
 
