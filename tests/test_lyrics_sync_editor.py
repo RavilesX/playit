@@ -61,11 +61,11 @@ def _synthetic_audio(duration=10.0, sr=8000):
     )
 
 
-def _press(widget, x):
+def _press(widget, x, mods=Qt.KeyboardModifier.NoModifier):
     return QMouseEvent(
         QEvent.Type.MouseButtonPress, QPointF(x, 10),
         Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
+        mods,
     )
 
 
@@ -226,6 +226,92 @@ class TestWaveformArrastre:
         w.mousePressEvent(_press(w, 750))   # borde de línea 1 (5.0s -> x750)
         w.mouseMoveEvent(_move(w, 50))      # intenta ir antes de 1.0s
         assert lines[1].start == pytest.approx(1.0 + lse.MIN_GAP)
+
+
+CTRL = Qt.KeyboardModifier.ControlModifier
+
+
+class TestArrastreGrupal:
+    """Ctrl + arrastrar un borde mueve varias líneas la misma distancia."""
+
+    def _widget(self, from_line=True):
+        lines = [LyricLine(1.0, "a"), LyricLine(5.0, "b"), LyricLine(9.0, "c")]
+        w = WaveformWidget(_synthetic_audio(duration=20.0), lines)
+        w.px_per_sec = 150.0
+        w.start_pos = 0.0
+        w.group_drag_from_line = from_line
+        w.resize(3000, 240)
+        return w, lines
+
+    def test_desde_la_linea_agarrada_mueve_esa_y_las_siguientes(self, app):
+        w, lines = self._widget(from_line=True)
+        w.mousePressEvent(_press(w, 750, CTRL))   # borde de línea 1 (5.0s)
+        w.mouseMoveEvent(_move(w, 900))           # +150px = +1.0s
+        assert [round(ln.start, 2) for ln in lines] == [1.0, 6.0, 10.0]
+
+    def test_sin_desde_el_cursor_mueve_todas(self, app):
+        w, lines = self._widget(from_line=False)
+        w.mousePressEvent(_press(w, 750, CTRL))
+        w.mouseMoveEvent(_move(w, 900))
+        assert [round(ln.start, 2) for ln in lines] == [2.0, 6.0, 10.0]
+
+    def test_conserva_las_separaciones_internas(self, app):
+        w, lines = self._widget(from_line=True)
+        w.mousePressEvent(_press(w, 750, CTRL))
+        w.mouseMoveEvent(_move(w, 300))           # -3.0s
+        assert lines[2].start - lines[1].start == pytest.approx(4.0)
+
+    def test_tope_contra_la_linea_que_no_se_mueve(self, app):
+        w, lines = self._widget(from_line=True)
+        w.mousePressEvent(_press(w, 750, CTRL))
+        w.mouseMoveEvent(_move(w, 0))             # intenta pasar antes de 1.0s
+        assert lines[1].start == pytest.approx(1.0 + lse.MIN_GAP)
+        # El grupo se movió en bloque: la tercera conserva su distancia.
+        assert lines[2].start == pytest.approx(5.0 + lse.MIN_GAP)
+
+    def test_tope_en_cero_moviendo_todas(self, app):
+        w, lines = self._widget(from_line=False)
+        w.mousePressEvent(_press(w, 750, CTRL))
+        w.mouseMoveEvent(_move(w, 0))
+        assert lines[0].start == pytest.approx(0.0)
+        assert lines[1].start == pytest.approx(4.0)
+
+    def test_tope_al_final_de_la_pista(self, app):
+        w, lines = self._widget(from_line=True)
+        w.mousePressEvent(_press(w, 750, CTRL))
+        w.mouseMoveEvent(_move(w, 2900))          # muy a la derecha
+        assert lines[2].start == pytest.approx(w.audio.duration)
+        assert lines[1].start == pytest.approx(w.audio.duration - 4.0)
+
+    def test_ctrl_sobre_el_borde_no_toca_la_seleccion(self, app):
+        w, _ = self._widget()
+        w.selection = {0}
+        w.mousePressEvent(_press(w, 750, CTRL))
+        assert w.selection == {0}
+
+    def test_soltar_limpia_el_grupo(self, app):
+        w, _ = self._widget()
+        w.mousePressEvent(_press(w, 750, CTRL))
+        w.mouseMoveEvent(_move(w, 900))
+        w.mouseReleaseEvent(None)
+        assert w._drag_group == []
+        # Un arrastre normal posterior mueve solo su línea.
+        w.mousePressEvent(_press(w, 150))
+        w.mouseMoveEvent(_move(w, 300))
+        assert w.lines[0].start == pytest.approx(2.0)
+        assert w.lines[1].start == pytest.approx(6.0)
+
+    def test_arrastre_normal_no_agrupa(self, app):
+        w, lines = self._widget()
+        w.mousePressEvent(_press(w, 750))
+        w.mouseMoveEvent(_move(w, 900))
+        assert [round(ln.start, 2) for ln in lines] == [1.0, 6.0, 9.0]
+
+    def test_el_checkbox_del_dialogo_define_el_alcance(self, dialog):
+        dialog.from_cursor_chk.setChecked(False)
+        assert dialog.waveform.group_drag_from_line is False
+        dialog.from_cursor_chk.setChecked(True)
+        assert dialog.waveform.group_drag_from_line is True
 
 
 # ──────────────────────────────────────────────────────────────────────

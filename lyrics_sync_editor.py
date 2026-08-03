@@ -448,6 +448,13 @@ class WaveformWidget(QWidget):
         self._drag_index: int | None = None
         self._drag_orig = 0.0
         self._drag_start_x = 0
+        # Arrastre grupal (Ctrl + arrastrar un borde): índices que se mueven
+        # en bloque y sus tiempos originales, para aplicar el mismo delta.
+        self._drag_group: list[int] = []
+        self._drag_group_orig: list[float] = []
+        # Alcance del arrastre grupal, espejo del checkbox "Desde el cursor":
+        # True mueve de la línea agarrada en adelante, False mueve todas.
+        self.group_drag_from_line = True
 
         self.setMinimumHeight(240)
         self.setMouseTracking(True)
@@ -606,7 +613,12 @@ class WaveformWidget(QWidget):
             self._drag_index = edge
             self._drag_orig = self.lines[edge].start
             self._drag_start_x = x
-            self._apply_click_selection(edge, mods)
+            if mods & Qt.KeyboardModifier.ControlModifier:
+                # Ctrl: arrastre grupal. Prevalece sobre alternar la selección
+                # (para eso está el cuerpo del bloque, fuera del borde).
+                self._start_group_drag(edge)
+            else:
+                self._apply_click_selection(edge, mods)
             return
 
         block = self._block_at(x)
@@ -624,6 +636,10 @@ class WaveformWidget(QWidget):
                            else Qt.CursorShape.ArrowCursor)
             return
 
+        if self._drag_group:
+            self._move_group((x - self._drag_start_x) / self.px_per_sec)
+            return
+
         i = self._drag_index
         new_start = self._drag_orig + (x - self._drag_start_x) / self.px_per_sec
         # Topes: no cruzar la línea anterior ni la siguiente.
@@ -639,6 +655,43 @@ class WaveformWidget(QWidget):
         if self._drag_index is not None:
             self.line_changed.emit(self._drag_index)
             self._drag_index = None
+            self._drag_group = []
+            self._drag_group_orig = []
+
+    # ── Arrastre grupal (Ctrl) ─────────────────────────────────────────
+    def _start_group_drag(self, edge: int) -> None:
+        """Prepara el bloque de líneas que se moverán junto con `edge`.
+
+        Con "Desde el cursor" marcado son las de `edge` en adelante; sin
+        marcar, todas las de la letra (igual que el offset global).
+        """
+        first = edge if self.group_drag_from_line else 0
+        self._drag_group = list(range(first, len(self.lines)))
+        self._drag_group_orig = [self.lines[i].start for i in self._drag_group]
+
+    def _move_group(self, delta: float) -> None:
+        """Desplaza todo el grupo el mismo `delta`, ya recortado."""
+        delta = self._clamp_group_delta(delta)
+        for i, orig in zip(self._drag_group, self._drag_group_orig):
+            self.lines[i].start = orig + delta
+        self.update()
+
+    def _clamp_group_delta(self, delta: float) -> float:
+        """Recorta `delta` para que el grupo no se salga de la pista ni
+        invada la línea inmediatamente anterior (la primera que no se mueve).
+
+        El grupo se mueve en bloque, así que basta con revisar sus extremos:
+        las separaciones internas no cambian.
+        """
+        origs = self._drag_group_orig
+        if not origs:
+            return 0.0
+        lo = -origs[0]
+        hi = self.audio.duration - origs[-1]
+        first = self._drag_group[0]
+        if first > 0:
+            lo = max(lo, self.lines[first - 1].start + MIN_GAP - origs[0])
+        return max(lo, min(hi, delta))
 
     def mouseDoubleClickEvent(self, event):
         block = self._block_at(event.position().x())
@@ -934,6 +987,11 @@ class LyricsSyncDialog(BaseDialog):
         bar2.addWidget(self.fwd_btn)
         # Si está marcado, el offset solo afecta líneas desde el cursor.
         self.from_cursor_chk = QCheckBox("Desde el cursor")
+        self.from_cursor_chk.setToolTip(
+            "Marcado: « » mueven las líneas desde el cursor, y Ctrl+arrastrar un "
+            "borde mueve esa línea y las siguientes.\n"
+            "Sin marcar: ambos mueven todas las líneas de la letra."
+        )
         self.from_cursor_chk.setChecked(True)
         self.from_cursor_chk.setStyleSheet(self._checkbox_css())
         bar2.addWidget(self.from_cursor_chk)
@@ -975,7 +1033,7 @@ class LyricsSyncDialog(BaseDialog):
         actions = QHBoxLayout()
         actions.setContentsMargins(6, 4, 6, 6)
         actions.setSpacing(6)
-        self.hint = QLabel("Espacio: play/pausa · Supr: borrar · Ctrl+Z/Ctrl+Shift+Z: deshacer/rehacer · Ctrl/Shift: multi-selección · arrastra el borde · doble-click edita")
+        self.hint = QLabel("Espacio: play/pausa · Supr: borrar · Ctrl+Z/Ctrl+Shift+Z: deshacer/rehacer · Ctrl/Shift: multi-selección · arrastra el borde (Ctrl: en bloque) · doble-click edita")
         self.hint.setStyleSheet("color:#9aa; background: transparent; border: none;")
         actions.addWidget(self.hint)
         actions.addStretch(1)
@@ -1035,6 +1093,9 @@ class LyricsSyncDialog(BaseDialog):
         self.waveform.selection_changed.connect(self._update_merge_state)
         self.back_btn.clicked.connect(lambda: self._shift_all(-self.offset_spin.value()))
         self.fwd_btn.clicked.connect(lambda: self._shift_all(self.offset_spin.value()))
+        # El mismo checkbox define el alcance del arrastre grupal con Ctrl.
+        self.from_cursor_chk.toggled.connect(self._sync_group_drag_scope)
+        self._sync_group_drag_scope(self.from_cursor_chk.isChecked())
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn.clicked.connect(self.reject)
         self.search_box.returnPressed.connect(self._search_next)
@@ -1251,6 +1312,10 @@ class LyricsSyncDialog(BaseDialog):
             clean = strip_tags(self.lines[i].text)
             self.lines[i].text = wrap_lyric(clean, color)
         self.waveform.update()
+
+    def _sync_group_drag_scope(self, from_cursor: bool):
+        """Propaga el alcance del checkbox al arrastre grupal con Ctrl."""
+        self.waveform.group_drag_from_line = from_cursor
 
     def _shift_all(self, delta: float):
         """Adelanta (+) o retrasa (−) líneas el offset elegido.
