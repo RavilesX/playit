@@ -27,7 +27,7 @@ jobs:
       - name: Instalar dependencias de Python
         run: |
           python -m pip install --upgrade pip
-          pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics pyinstaller
+          pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode pyinstaller
 
       - name: Inyectar versión desde el tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -64,7 +64,7 @@ jobs:
       - name: Instalar dependencias de Python
         run: |
           python -m pip install --upgrade pip
-          pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics pyinstaller
+          pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode pyinstaller
 
       - name: Inyectar versión desde el tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -93,7 +93,7 @@ jobs:
       - name: Instalar dependencias de Python
         run: |
           python -m pip install --upgrade pip
-          pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics pyinstaller
+          pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode pyinstaller
 
       - name: Inyectar versión desde el tag
         if: startsWith(github.ref, 'refs/tags/v')
