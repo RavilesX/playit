@@ -24,8 +24,8 @@ class TestReadSourceMetadata:
             "TCON": ["Rock"],
         }
         monkeypatch.setattr("mutagen.File", lambda *a, **k: FakeAudio(tags))
+        # Artista y canción no se guardan: ya son las claves del data.json.
         assert read_source_metadata("x.mp3") == {
-            "artista": "Soda Stereo", "cancion": "De Música Ligera",
             "album": "Canción Animal", "anio": "1990", "genero": "Rock",
             "formato": "MP3", "kbps": 320,
         }
@@ -33,10 +33,10 @@ class TestReadSourceMetadata:
     def test_tags_vorbis_y_mp4(self, monkeypatch):
         monkeypatch.setattr(
             "mutagen.File",
-            lambda *a, **k: FakeAudio({"artist": ["A"], "\xa9nam": ["B"]}, 128000),
+            lambda *a, **k: FakeAudio({"album": ["A"], "\xa9gen": ["Pop"]}, 128000),
         )
         meta = read_source_metadata("x.flac")
-        assert meta == {"artista": "A", "cancion": "B",
+        assert meta == {"album": "A", "genero": "Pop",
                         "formato": "FLAC", "kbps": 128}
 
     def test_archivo_sin_tags_conserva_formato(self, monkeypatch):
@@ -61,7 +61,7 @@ class TestReadSourceMetadata:
 
 class TestReadSongMetadata:
     def test_lee_el_bloque_metadata(self, tmp_path):
-        meta = {"artista": "A", "kbps": 320}
+        meta = {"album": "Disco", "kbps": 320}
         (tmp_path / "data.json").write_text(
             json.dumps({"A": {"S": {"path": str(tmp_path), "metadata": meta}}}),
             encoding="utf-8",
@@ -76,3 +76,25 @@ class TestReadSongMetadata:
 
     def test_sin_json(self, tmp_path):
         assert read_song_metadata(tmp_path) == {}
+
+
+class TestSongInfoDialog:
+    """El diálogo toma artista/canción de la estructura del json, no del bloque."""
+
+    def _dialog(self, app, metadata):
+        from dialogs import SongInfoDialog
+        return SongInfoDialog(None, "Soda Stereo", "Persiana Americana", metadata)
+
+    def test_muestra_artista_y_cancion_recibidos(self, app):
+        html = self._dialog(app, {"album": "Signos"})._build_html()
+        assert "Soda Stereo" in html and "Persiana Americana" in html
+        assert "Signos" in html
+
+    def test_campos_faltantes_como_desconocido(self, app):
+        from dialogs import SongInfoDialog
+        html = self._dialog(app, {})._build_html()
+        assert html.count(SongInfoDialog.UNKNOWN) == len(SongInfoDialog.FIELDS)
+
+    def test_escapa_html_de_los_tags(self, app):
+        html = self._dialog(app, {"album": "AT&T <sic>"})._build_html()
+        assert "AT&amp;T &lt;sic&gt;" in html

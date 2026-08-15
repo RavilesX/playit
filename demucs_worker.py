@@ -86,9 +86,9 @@ def _cover_bytes(src) -> bytes | None:
 # guarda en data.json. mutagen expone nombres distintos según el formato:
 # ID3 (mp3/wav/aiff) usa frames de 4 letras, MP4/M4A átomos con '©' y
 # Vorbis/FLAC/Opus claves en texto plano.
+# El artista y la canción NO se guardan: ya son las claves del propio
+# data.json (y con ellas se arma la ruta de la carpeta).
 _META_TAGS = {
-    "artista": ("TPE1", "\xa9ART", "artist", "author"),
-    "cancion": ("TIT2", "\xa9nam", "title"),
     "album": ("TALB", "\xa9alb", "album"),
     "anio": ("TDRC", "TYER", "\xa9day", "date", "year", "originaldate"),
     "genero": ("TCON", "\xa9gen", "genre"),
@@ -109,7 +109,7 @@ def _tag_value(tags, key: str) -> str:
 
 
 def read_source_metadata(src) -> dict:
-    """Metadata del origen: artista, canción, álbum, año, género, formato, kbps.
+    """Metadata del archivo de origen: álbum, año, género, formato y kbps.
 
     Solo se incluyen las claves que el archivo realmente trae; la UI muestra
     "Desconocido" para las que falten. Nunca lanza: un archivo sin tags (o que

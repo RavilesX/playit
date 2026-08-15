@@ -607,10 +607,16 @@ class AudioPlayer(QMainWindow):
         QApplication.clipboard().setText(text)
 
     def _show_song_info(self, item: QListWidgetItem):
-        """Metadata del archivo de origen, leída del data.json de la canción."""
+        """Información de la canción: artista y canción salen de la estructura
+        del data.json (las claves con las que entró a la playlist), el resto de
+        su bloque "metadata"."""
+        row = self.playlist_widget.row(item)
+        song_data = self.playlist[row] if 0 <= row < len(self.playlist) else {}
         folder = item.data(PlaylistItemDelegate.PATH_ROLE)
         metadata = read_song_metadata(Path(folder)) if folder else {}
-        dialog = SongInfoDialog(self, metadata)
+        dialog = SongInfoDialog(
+            self, song_data.get('artist', ''), song_data.get('song', ''), metadata
+        )
         bg_image(dialog, 'images/split_dialog/split.png')
         dialog.exec()
 
