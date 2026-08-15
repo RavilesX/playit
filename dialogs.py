@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPoint,QDir
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QImage, QPixmap
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox, QCheckBox
 from demucs_worker import AUDIO_INPUT_FILTER
 from resources import resource_path, bg_image, styled_message_box, style_url
@@ -661,3 +661,125 @@ class DownloadDialog(BaseDialog):
         url = self.url_edit.text().strip()
         self.download_requested.emit(url)
         self.accept()
+
+
+def qr_pixmap(payload: str, size: int = 220) -> QPixmap | None:
+    """QR del payload de emparejamiento; None si `qrcode` no está instalado.
+
+    El import es perezoso a propósito: sin la librería el modo remoto sigue
+    funcionando con los datos manuales que muestra el diálogo.
+    """
+    try:
+        import qrcode
+    except ImportError:
+        return None
+    try:
+        img = qrcode.make(payload).convert("RGB")
+    except Exception as e:
+        logger.warning("No se pudo generar el QR: %s", e)
+        return None
+    data = img.tobytes("raw", "RGB")
+    qimg = QImage(data, img.width, img.height, img.width * 3,
+                  QImage.Format.Format_RGB888)
+    return QPixmap.fromImage(qimg).scaled(
+        size, size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.FastTransformation,
+    )
+
+
+class RemotePairDialog(BaseDialog):
+    """Datos para emparejar PlayIt Mobile: QR + host/puerto/token manuales."""
+
+    regenerate_requested = pyqtSignal()
+
+    AVISO = (
+        "Sólo funciona con el teléfono en la misma red Wi-Fi.\n"
+        "Si Windows pregunta por el firewall (puede preguntar dos veces, por "
+        "TCP y por UDP), hay que permitir el acceso en redes privadas.\n"
+        "El código se conserva entre reinicios para que el teléfono reconecte "
+        "solo; viaja sin cifrar por la red local, así que en una red pública "
+        "conviene generar uno nuevo al terminar."
+    )
+
+    def __init__(self, parent=None, ip: str = "", port: int = 0, token: str = "",
+                 name: str = ""):
+        # Alto ≤ 600: split.png mide 960x600 y el fondo se repetiría al pasarse
+        super().__init__(parent, "Modo remoto", (420, 600))
+        self._setup_pair_ui()
+        self.set_pairing(ip, port, token, name)
+
+    def _setup_pair_ui(self):
+        self.qr_label = QLabel()
+        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qr_label.setMinimumHeight(220)
+        self.qr_label.setStyleSheet("color: white;")
+
+        self.address_label = self._data_label()
+        self.token_label = self._data_label()
+        self.token_label.setStyleSheet(
+            self.token_label.styleSheet() + " font-family: monospace;"
+        )
+
+        aviso = QLabel(self.AVISO)
+        aviso.setWordWrap(True)
+        aviso.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        aviso.setStyleSheet("color: #F88FFF; font-size: 11px;")
+
+        self.regen_btn = QPushButton("Generar nuevo código")
+        self.regen_btn.setObjectName("playlistToolBtn")
+        self.regen_btn.setAutoDefault(False)
+        self.regen_btn.setToolTip(
+            "Reinicia el servidor con otro código: desempareja cualquier "
+            "teléfono ya conectado"
+        )
+        self.regen_btn.clicked.connect(self.regenerate_requested)
+
+        close_btn = QPushButton()
+        close_btn.setObjectName("aceptar_btn")
+        close_btn.setFixedSize(70, 70)
+        close_btn.setAutoDefault(False)
+        bg_image(close_btn, "images/split_dialog/aceptar_btn.png")
+        close_btn.clicked.connect(self.accept)
+
+        self.main_layout.addWidget(self.qr_label)
+        self.main_layout.addWidget(self._caption("Dirección"))
+        self.main_layout.addWidget(self.address_label)
+        self.main_layout.addWidget(self._caption("Código"))
+        self.main_layout.addWidget(self.token_label)
+        self.main_layout.addWidget(aviso)
+        self.main_layout.addStretch()
+        self.main_layout.addWidget(self.regen_btn,
+                                   alignment=Qt.AlignmentFlag.AlignCenter)
+        self.main_layout.addWidget(close_btn,
+                                   alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def _caption(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet("color: #e0e0e0; font-size: 11px;")
+        return label
+
+    def _data_label(self) -> QLabel:
+        label = QLabel()
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Seleccionable para copiar y teclear en el móvil sin equivocarse
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setStyleSheet("color: white; font-weight: bold; font-size: 14px;")
+        return label
+
+    def set_pairing(self, ip: str, port: int, token: str, name: str = ""):
+        """Refresca lo mostrado (también tras 'Generar nuevo código')."""
+        from remote_server import format_token, pairing_payload
+
+        self.address_label.setText(f"{ip}:{port}")
+        self.token_label.setText(format_token(token))
+        pixmap = qr_pixmap(pairing_payload(ip, port, token, name))
+        if pixmap is None:
+            self.qr_label.setText(
+                "QR no disponible (falta el módulo qrcode).\n"
+                "Emparejá escribiendo la dirección y el código."
+            )
+            self.qr_label.setWordWrap(True)
+        else:
+            self.qr_label.setPixmap(pixmap)

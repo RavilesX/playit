@@ -129,7 +129,7 @@ sudo apt update
 sudo apt install python3 python3-pip python3-venv ffmpeg portaudio19-dev libsndfile1 libxcb-cursor0
 git clone https://github.com/RavilesX/playit.git && cd playit
 python3 -m venv venv && source venv/bin/activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
 python3 main.py
 ```
 
@@ -141,7 +141,7 @@ python3 main.py
 brew install ffmpeg
 git clone https://github.com/RavilesX/playit.git && cd playit
 python3 -m venv venv && source venv/bin/activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
 python3 main.py
 ```
 
@@ -150,7 +150,7 @@ python3 main.py
 ```powershell
 git clone https://github.com/RavilesX/playit.git; cd playit
 python -m venv venv; .\venv\Scripts\activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
 python main.py
 ```
 
@@ -293,7 +293,7 @@ sudo apt update
 sudo apt install python3 python3-pip python3-venv ffmpeg portaudio19-dev libsndfile1 libxcb-cursor0
 git clone https://github.com/RavilesX/playit.git && cd playit
 python3 -m venv venv && source venv/bin/activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
 python3 main.py
 ```
 
@@ -305,7 +305,7 @@ python3 main.py
 brew install ffmpeg
 git clone https://github.com/RavilesX/playit.git && cd playit
 python3 -m venv venv && source venv/bin/activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
 python3 main.py
 ```
 
@@ -314,7 +314,7 @@ python3 main.py
 ```powershell
 git clone https://github.com/RavilesX/playit.git; cd playit
 python -m venv venv; .\venv\Scripts\activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
 python main.py
 ```
 

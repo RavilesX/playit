@@ -59,8 +59,9 @@ from resources import styled_message_box, bg_image, resource_path, style_url
 from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
 from dialogs import (
     AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog,
-    UpdateDialog, CorrectSongDialog, SongInfoDialog,
+    UpdateDialog, CorrectSongDialog, SongInfoDialog, RemotePairDialog,
 )
+from remote_server import RemoteBridge, RemoteServer
 from lazy_resources import (LazyAudioManager, LazyImageManager, LazyLyricsManager,
                             LazyPlaylistLoader, get_song_duration,
                             read_song_metadata)
@@ -151,6 +152,12 @@ class AudioPlayer(QMainWindow):
         self.current_channels: list = []
         self._repeat = False
         self._current_mlst_path = None
+
+        # Modo remoto (control desde PlayIt Mobile)
+        # _playlist_rev le dice al móvil "la lista cambió, volvé a pedirla"
+        self._playlist_rev = 0
+        self._remote_bridge = None
+        self._remote_server = None
 
         # Búsqueda en playlist
         self._search_query = ""
@@ -716,6 +723,7 @@ class AudioPlayer(QMainWindow):
         item.setText(f"{new_artist} - {new_song}")
         item.setData(PlaylistItemDelegate.PATH_ROLE, str(new_path))
 
+        self._bump_playlist_rev()
         self.status_label.setText(f"Corregido: {new_artist} - {new_song}")
 
     def _force_fetch_lyrics(self, item: QListWidgetItem):
@@ -851,6 +859,13 @@ class AudioPlayer(QMainWindow):
         self.timer.timeout.connect(self.update_display)
         self.timer.start(1000)
 
+        # update_display retorna temprano si no hay reproducción activa, y es
+        # justo ahí donde el móvil necesita ver "Pausada"/"Detenido": timer
+        # propio para el snapshot remoto (no hace nada si está apagado).
+        self.remote_timer = QTimer(self)
+        self.remote_timer.timeout.connect(self._publish_remote_state)
+        self.remote_timer.start(1000)
+
     def _perform_final_setup(self):
         self.update_status()
 
@@ -892,6 +907,9 @@ class AudioPlayer(QMainWindow):
         self._control_channels('stop')
         self.lazy_playlist.stop_loading()
         self._cleanup_demucs_job()
+        # Sin esto el hilo del servidor retiene el puerto hasta que muere el
+        # proceso (en Windows, TIME_WAIT: el próximo arranque cae al 8771)
+        self._stop_remote_mode()
         if self.playlist_dock.isVisible():
             self.playlist_dock.close()
         super().closeEvent(event)
@@ -932,6 +950,9 @@ class AudioPlayer(QMainWindow):
                 )
         finally:
             self.playlist_widget.setUpdatesEnabled(True)
+
+        # Una sola vez por lote: _on_songs_loaded se llama por lotes al escanear
+        self._bump_playlist_rev()
 
         if self.playlist and not self.prev_btn.isEnabled():
             self._set_playback_buttons_enabled(True)
@@ -999,7 +1020,12 @@ class AudioPlayer(QMainWindow):
         self.stop_playback()
         if not (0 <= self.current_index < len(self.playlist)):
             return
+        # Adelantar el destino al snapshot: cargar los stems bloquea el hilo
+        # GUI y el móvil confirma su update optimista a los 250 ms. Sin esto
+        # ese sondeo lee el estado viejo y el botón parpadea.
+        self._publish_remote_target()
         if not self._setup_audio():
+            self._publish_remote_state()
             return
         self._restore_mute_states()
         self._update_metadata()
@@ -1042,10 +1068,20 @@ class AudioPlayer(QMainWindow):
             self._update_playback_ui('Activa')
         self.update_lyrics_menu_state()
 
-    def toggle_repeat(self):
-        self._repeat = self.repeat_btn.isChecked()
+    def set_repeat(self, value: bool):
+        """Fija el modelo y sincroniza el botón.
+
+        Separado de toggle_repeat porque un comando remoto no pasa por el
+        botón (puede llegar con la ventana minimizada).
+        """
+        self._repeat = bool(value)
+        self.repeat_btn.setChecked(self._repeat)
         icon = "repeat_on" if self._repeat else "repeat"
         bg_image(self.repeat_btn, f"images/main_window/{icon}.png")
+
+    def toggle_repeat(self):
+        # El botón es checkable y ya cambió de estado: es la fuente aquí.
+        self.set_repeat(self.repeat_btn.isChecked())
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Letras en pantalla completa ──────────────────────────────────────
@@ -1385,6 +1421,9 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     def _update_playback_ui(self, state: str):
         self.playback_state = state
+        # Único lugar donde cambia playback_state: el móvil lo ve en su
+        # siguiente poll sin esperar al timer del snapshot.
+        self._publish_remote_state()
         if state != "Activa" and hasattr(self, 'visualizer'):
             self.visualizer.clear()
         stopped = state == "Detenido"
@@ -1438,8 +1477,24 @@ class AudioPlayer(QMainWindow):
     def set_individual_volume(self, track_name: str, value: int):
         self.individual_volumes[track_name] = value / 100.0
 
+    def set_mute(self, track_name: str, muted: bool):
+        """Fuente de verdad del mute: no depende de quién la llame.
+
+        Mismo motivo que `set_repeat`: un comando remoto entra por una señal,
+        no por un clic, así que `self.sender()` no sirve como entrada.
+        """
+        if track_name not in TRACK_NAMES:
+            return
+        self.mute_states[track_name] = bool(muted)
+        btn = getattr(self, f"{track_name}_btn")
+        icon_name = f"no_{track_name}" if muted else track_name
+        btn.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
+        btn.setChecked(bool(muted))
+        if self._lyrics_fullscreen:
+            self._show_fs_track_toast(track_name, bool(muted))
+
     def toggle_mute(self):
-        """Maneja el clic de cualquier botón de mute de pista."""
+        """Adaptador del clic: resuelve la pista y delega en `set_mute`."""
         sender = self.sender()
         if not isinstance(sender, QPushButton):
             return
@@ -1448,14 +1503,8 @@ class AudioPlayer(QMainWindow):
             self.bass_btn: "bass", self.other_btn: "other",
         }
         track_name = btn_to_track.get(sender)
-        if not track_name:
-            return
-        self.mute_states[track_name] = not self.mute_states[track_name]
-        muted = self.mute_states[track_name]
-        icon_name = f"no_{track_name}" if muted else track_name
-        sender.setIcon(QIcon(resource_path(f'images/main_window/icons01/{icon_name}.png')))
-        if self._lyrics_fullscreen:
-            self._show_fs_track_toast(track_name, muted)
+        if track_name:
+            self.set_mute(track_name, not self.mute_states[track_name])
 
     _TRACK_LABELS = {"drums": "Batería", "vocals": "Vocal", "bass": "Bajo", "other": "Otros"}
 
@@ -1591,6 +1640,7 @@ class AudioPlayer(QMainWindow):
             parts = [
                 f"Canciones: {len(self.playlist)}",
                 f"Reproducción: {self.playback_state.capitalize()}",
+                "Remoto: activo" if self._remote_server is not None else "",
                 self._format_demucs_progress(),
                 f"En cola: {len(self.demucs_queue)}" if self.demucs_queue else "",
                 f"Cache: {self._cached_stats.get('total_cached_items', 0)} elementos",
@@ -1770,6 +1820,7 @@ class AudioPlayer(QMainWindow):
         self._reset_sort_label()
         self._set_playback_buttons_enabled(False)
         self.stop_btn.setEnabled(False)
+        self._bump_playlist_rev()
         self.update_status()
 
     def scan_folder(self, path: Path):
@@ -1818,6 +1869,7 @@ class AudioPlayer(QMainWindow):
             self.current_index = next(
                 (i for i, s in enumerate(self.playlist) if s is current_song), -1,
             )
+        self._bump_playlist_rev()
         self.update_status()
 
     def sort_playlist(self, key: str = "artist", reverse: bool = False):
@@ -1867,6 +1919,7 @@ class AudioPlayer(QMainWindow):
             if self.playback_state in ("Activa", "Pausada"):
                 self.highlight_current_song()
 
+        self._bump_playlist_rev()
         self.update_status()
 
     def save_playlist_mlst(self):
@@ -1972,6 +2025,7 @@ class AudioPlayer(QMainWindow):
             self._current_mlst_path = file_path
             if added:
                 self._reset_sort_label()
+                self._bump_playlist_rev()
             self.status_label.setText(
                 f"Playlist cargada: {data.get('name', '')} ({added} nuevas canciones)"
             )
@@ -1983,6 +2037,142 @@ class AudioPlayer(QMainWindow):
                 QMessageBox.Icon.Critical,
             )
 
+    # ──────────────────────────────────────────────────────────────────────
+    # ── Modo remoto (PlayIt Mobile) ──────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
+    def _bump_playlist_rev(self):
+        """Marca la playlist como cambiada para que el móvil la re-descargue."""
+        self._playlist_rev += 1
+        self._publish_remote_playlist()
+
+    def _publish_remote_playlist(self):
+        if self._remote_bridge is None:
+            return
+        items = [{"i": i,
+                  "artist": s.get("artist", ""),
+                  "song": s.get("song", ""),
+                  "duration": s.get("duration", "")}
+                 for i, s in enumerate(self.playlist)]
+        # Las carpetas van aparte: solo sirven para resolver /api/cover en el
+        # hilo HTTP, nunca se le mandan al móvil.
+        folders = [str(s.get("path", "")) for s in self.playlist]
+        self._remote_bridge.publish_playlist(self._playlist_rev, items, folders)
+
+    def _publish_remote_state(self, state: str | None = None,
+                              position_ms: int | None = None,
+                              duration_ms: int | None = None):
+        """Snapshot para el móvil. `state` fuerza un valor distinto al real
+        (ver `_publish_remote_target`)."""
+        if self._remote_bridge is None:
+            return
+        song = (self.playlist[self.current_index]
+                if 0 <= self.current_index < len(self.playlist) else {})
+        pos_ms = dur_ms = 0
+        if self._track_data:
+            sr = self._track_data[0][1]
+            pos_ms = int(self._seek_position / sr * 1000)
+            dur_ms = int(len(self._track_data[0][0]) / sr * 1000)
+        self._remote_bridge.publish_state({
+            "v": 1,
+            "state": state if state is not None else self.playback_state,
+            "index": self.current_index,
+            "artist": song.get("artist", ""),
+            "song": song.get("song", ""),
+            "position_ms": pos_ms if position_ms is None else position_ms,
+            "duration_ms": dur_ms if duration_ms is None else duration_ms,
+            "repeat": self._repeat,
+            "count": len(self.playlist),
+            "rev": self._playlist_rev,
+        })
+
+    def _publish_remote_target(self):
+        """Publica la canción que se está por cargar como si ya sonara.
+
+        `play_current` bloquea el hilo GUI leyendo los stems; el móvil, que
+        confirma su update optimista a los 250 ms, vería el estado anterior y
+        revertiría el botón un instante. El tick de 1 s corrige si la carga
+        termina fallando.
+        """
+        self._publish_remote_state(state="Activa", position_ms=0,
+                                   duration_ms=0)
+
+    def _handle_remote_command(self, cmd: str, arg):
+        """Slot en el hilo GUI (la señal cruza desde el hilo HTTP)."""
+        if cmd == "play_pause":
+            self.toggle_play_pause()
+        elif cmd == "stop":
+            self.stop_playback()
+        elif cmd == "next":
+            if self.playlist:
+                self.play_next()
+        elif cmd == "prev":
+            if self.playlist:
+                self.play_previous()
+        elif cmd == "repeat":
+            self.set_repeat(not self._repeat if arg is None else bool(arg))
+        elif cmd == "play_index":
+            if isinstance(arg, int) and 0 <= arg < len(self.playlist):
+                self.current_index = arg
+                self.playlist_widget.setCurrentRow(arg)
+                self.play_current()
+        self._publish_remote_state()
+
+    def toggle_remote_mode(self, enabled: bool):
+        if not enabled:
+            self._stop_remote_mode()
+            self.update_status()
+            return
+        self._remote_bridge = RemoteBridge()
+        self._remote_bridge.command.connect(self._handle_remote_command)
+        self._remote_server = RemoteServer(self._remote_bridge)
+        try:
+            ip, port, token = self._remote_server.start()
+        except RuntimeError as exc:
+            self._remote_bridge = self._remote_server = None
+            self.remote_action.setChecked(False)
+            styled_message_box(
+                self, "Modo remoto", f"No se pudo abrir el puerto:\n{exc}",
+                QMessageBox.Icon.Critical,
+            )
+            return
+        self._publish_remote_playlist()
+        self._publish_remote_state()
+        self.update_status()
+        self._show_pair_dialog(ip, port, token)
+
+    def _show_pair_dialog(self, ip: str, port: int, token: str):
+        dialog = RemotePairDialog(self, ip=ip, port=port, token=token,
+                                  name=self._remote_bridge.name)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        dialog.regenerate_requested.connect(
+            lambda: self._regenerate_remote_token(dialog)
+        )
+        dialog.exec()
+
+    def _regenerate_remote_token(self, dialog):
+        """Reinicia el servidor con otro token: desempareja lo ya conectado."""
+        if self._remote_server is None:
+            return
+        self._remote_server.stop()
+        try:
+            ip, port, token = self._remote_server.start(rotate=True)
+        except RuntimeError as exc:
+            self._remote_bridge = self._remote_server = None
+            self.remote_action.setChecked(False)
+            self.update_status()
+            dialog.reject()
+            styled_message_box(
+                self, "Modo remoto", f"No se pudo abrir el puerto:\n{exc}",
+                QMessageBox.Icon.Critical,
+            )
+            return
+        dialog.set_pairing(ip, port, token, self._remote_bridge.name)
+
+    def _stop_remote_mode(self):
+        if self._remote_server is not None:
+            self._remote_server.stop()
+        self._remote_server = None
+        self._remote_bridge = None
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Letras ───────────────────────────────────────────────────────────
@@ -2887,6 +3077,11 @@ class AudioPlayer(QMainWindow):
             action.triggered.connect(btn.click)
             tracks_menu.addAction(action)
             self.track_toggle_actions.append(action)
+
+        self.remote_action = QAction("Modo remoto (PlayIt Mobile)…", self)
+        self.remote_action.setCheckable(True)
+        self.remote_action.toggled.connect(self.toggle_remote_mode)
+        options_menu.addAction(self.remote_action)
 
         cleanup_action = QAction("Limpiar Cache", self)
         cleanup_action.triggered.connect(self.cleanup_resources_manual)

@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 
-from PyInstaller.utils.hooks import collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 _IS_MAC = sys.platform == 'darwin'
 # macOS usa .icns; Windows/Linux usan .ico
@@ -25,12 +25,21 @@ qt_plugins = [
     if any(d in dest.replace('\\', '/').split('/') for d in _QT_PLUGIN_DIRS)
 ]
 
+# qrcode se importa perezosamente dentro del diálogo del modo remoto, así que
+# el análisis estático no lo ve. Si no está instalado en la máquina de build,
+# la app igual funciona (emparejamiento manual) — por eso el try.
+try:
+    __import__('qrcode')
+    _remote_hidden = collect_submodules('qrcode')
+except ImportError:
+    _remote_hidden = []
+
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=qt_plugins,
     datas=[('images', 'images'), ('fonts', 'fonts'), ('estilos.css', '.')],
-    hiddenimports=[],
+    hiddenimports=_remote_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
