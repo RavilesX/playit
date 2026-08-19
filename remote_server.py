@@ -57,9 +57,17 @@ MAX_BODY = 1024
 # dejar hilos del servidor colgados esperando bytes que no llegan.
 CONN_TIMEOUT = 10
 
-COMMANDS = ("play_pause", "stop", "next", "prev", "repeat", "play_index")
-# Comandos que no tienen sentido con la playlist vacía → 409
+COMMANDS = ("play_pause", "stop", "next", "prev", "repeat", "play_index",
+            "set_mute", "set_volume", "set_master_volume")
+# Comandos que no tienen sentido con la playlist vacía → 409. El mezclador no
+# está: mutear la voz o bajar el bajo son ajustes que valen antes de cargar
+# nada, igual que mover los sliders con la ventana recién abierta.
 NEEDS_PLAYLIST = ("play_pause", "next", "prev", "play_index")
+
+# Pistas que acepta el mezclador. Duplica `TRACK_NAMES` de audio_player a
+# propósito: importarlo desde acá sería un ciclo (audio_player importa este
+# módulo) por cuatro strings que no cambian.
+MIXER_TRACKS = ("drums", "vocals", "bass", "other")
 
 TOKEN_FILE = "remote_token.json"
 TOKEN_BYTES = 16                    # 32 caracteres hex
@@ -410,6 +418,27 @@ class _Handler(BaseHTTPRequestHandler):
         if cmd == "repeat":
             value = data.get("value")
             return {"cmd": cmd, "arg": None if value is None else bool(value)}
+        if cmd == "set_mute":
+            track = data.get("track")
+            if track not in MIXER_TRACKS:
+                self._send(400, {"error": f"pista desconocida: {track}"})
+                return None
+            return {"cmd": cmd, "arg": (track, bool(data.get("value")))}
+        if cmd in ("set_volume", "set_master_volume"):
+            # Absolutos y en enteros 0-100: un comando perdido se corrige solo
+            # con el siguiente, y no hay redondeo de floats en el JSON.
+            value = data.get("value")
+            if not isinstance(value, int) or isinstance(value, bool) \
+                    or not 0 <= value <= 100:
+                self._send(400, {"error": "volumen fuera de rango"})
+                return None
+            if cmd == "set_master_volume":
+                return {"cmd": cmd, "arg": value}
+            track = data.get("track")
+            if track not in MIXER_TRACKS:
+                self._send(400, {"error": f"pista desconocida: {track}"})
+                return None
+            return {"cmd": cmd, "arg": (track, value)}
         return {"cmd": cmd, "arg": None}
 
     # ── rutas ────────────────────────────────────────────────────────────

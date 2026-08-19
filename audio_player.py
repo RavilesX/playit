@@ -1477,6 +1477,33 @@ class AudioPlayer(QMainWindow):
     def set_individual_volume(self, track_name: str, value: int):
         self.individual_volumes[track_name] = value / 100.0
 
+    def set_track_volume(self, track_name: str, value: int):
+        """Volumen de una pista, venga del slider o del móvil.
+
+        Mueve el slider en vez de escribir `individual_volumes` a mano: así la
+        ventana muestra lo que realmente está sonando y queda un solo camino
+        (la señal del slider) hacia `set_individual_volume`.
+        """
+        if track_name not in TRACK_NAMES:
+            return
+        value = max(0, min(100, int(value)))
+        slider = self._track_sliders.get(track_name)
+        if slider is None:
+            self.set_individual_volume(track_name, value)
+        elif slider.value() != value:
+            slider.setValue(value)
+        else:
+            self.set_individual_volume(track_name, value)
+
+    def set_master_volume(self, value: int):
+        """Volumen general. Mismo criterio que `set_track_volume`: el dial es
+        la vista y `set_volume` el modelo."""
+        value = max(0, min(100, int(value)))
+        if self.volume_dial.value() != value:
+            self.volume_dial.setValue(value)
+        else:
+            self.set_volume(value)
+
     def set_mute(self, track_name: str, muted: bool):
         """Fuente de verdad del mute: no depende de quién la llame.
 
@@ -2083,6 +2110,13 @@ class AudioPlayer(QMainWindow):
             "repeat": self._repeat,
             "count": len(self.playlist),
             "rev": self._playlist_rev,
+            # Mezclador (PLAN_REMOTO §8): enteros 0-100, como los sliders.
+            # Su sola presencia es lo que le dice al móvil que puede mostrar
+            # los controles; un móvil viejo ignora las claves que no conoce.
+            "master_volume": int(self.volume),
+            "volumes": {t: int(round(self.individual_volumes[t] * 100))
+                        for t in TRACK_NAMES},
+            "mute": {t: bool(self.mute_states[t]) for t in TRACK_NAMES},
         })
 
     def _publish_remote_target(self):
@@ -2115,6 +2149,15 @@ class AudioPlayer(QMainWindow):
                 self.current_index = arg
                 self.playlist_widget.setCurrentRow(arg)
                 self.play_current()
+        elif cmd == "set_mute":
+            if isinstance(arg, tuple) and len(arg) == 2:
+                self.set_mute(arg[0], bool(arg[1]))
+        elif cmd == "set_volume":
+            if isinstance(arg, tuple) and len(arg) == 2:
+                self.set_track_volume(arg[0], arg[1])
+        elif cmd == "set_master_volume":
+            if isinstance(arg, int):
+                self.set_master_volume(arg)
         self._publish_remote_state()
 
     def toggle_remote_mode(self, enabled: bool):

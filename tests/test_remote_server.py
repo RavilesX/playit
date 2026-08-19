@@ -574,7 +574,8 @@ class TestContratoDelSnapshot:
     en silencio, sin ningún error."""
 
     CLAVES_STATE = {"v", "state", "index", "artist", "song", "position_ms",
-                    "duration_ms", "repeat", "count", "rev"}
+                    "duration_ms", "repeat", "count", "rev",
+                    "master_volume", "volumes", "mute"}
 
     def _snapshot(self, player):
         player._remote_bridge = RemoteBridge()
@@ -588,6 +589,10 @@ class TestContratoDelSnapshot:
         assert set(self._snapshot(player)) == self.CLAVES_STATE
 
     def test_tipos(self, player):
+        # Import diferido: audio_player arrastra Qt y este módulo también se
+        # importa para los tests puros del servidor.
+        from audio_player import TRACK_NAMES
+
         state = self._snapshot(player)
         assert state["v"] == PROTOCOL_VERSION
         assert isinstance(state["state"], str)
@@ -599,6 +604,12 @@ class TestContratoDelSnapshot:
         assert isinstance(state["repeat"], bool)
         assert isinstance(state["count"], int)
         assert isinstance(state["rev"], int)
+        assert isinstance(state["master_volume"], int)
+        assert set(state["volumes"]) == set(TRACK_NAMES)
+        assert all(isinstance(v, int) and 0 <= v <= 100
+                   for v in state["volumes"].values())
+        assert set(state["mute"]) == set(TRACK_NAMES)
+        assert all(isinstance(v, bool) for v in state["mute"].values())
 
     @pytest.mark.parametrize("estado", ["Detenido", "Pausada", "Activa"])
     def test_los_tres_estados_viajan_literales(self, player, estado):
@@ -670,3 +681,116 @@ class TestMuteRemoteable:
         assert player.mute_states["drums"] is not antes
         player.drums_btn.click()
         assert player.mute_states["drums"] is antes
+
+
+class TestMezcladorRemoto:
+    """Volumen y mute desde el móvil (PLAN_REMOTO §8).
+
+    Son aditivos: no suben PROTOCOL_VERSION. El móvil decide si mostrar los
+    controles por la presencia de las claves en el snapshot, así que lo que
+    se prueba acá es que viajen y que los comandos se validen antes de llegar
+    al hilo GUI.
+    """
+
+    @pytest.mark.parametrize("body,esperado", [
+        ({"cmd": "set_mute", "track": "vocals", "value": True},
+         ["set_mute", ("vocals", True)]),
+        ({"cmd": "set_mute", "track": "drums", "value": False},
+         ["set_mute", ("drums", False)]),
+        ({"cmd": "set_volume", "track": "bass", "value": 60},
+         ["set_volume", ("bass", 60)]),
+        ({"cmd": "set_volume", "track": "other", "value": 0},
+         ["set_volume", ("other", 0)]),
+        ({"cmd": "set_master_volume", "value": 30},
+         ["set_master_volume", 30]),
+    ])
+    def test_comandos_validos_llegan_al_puente(self, server, qtbot, body,
+                                               esperado):
+        bridge, port, token = server
+        with qtbot.waitSignal(bridge.command, timeout=3000) as blocker:
+            code, data = _request(port, "/api/command", token,
+                                  method="POST", body=body)
+        assert (code, data) == (200, {"ok": True})
+        assert blocker.args == esperado
+
+    @pytest.mark.parametrize("body", [
+        {"cmd": "set_mute", "track": "guitarra", "value": True},
+        {"cmd": "set_volume", "track": "guitarra", "value": 50},
+        {"cmd": "set_volume", "value": 50},
+        {"cmd": "set_volume", "track": "bass", "value": 101},
+        {"cmd": "set_volume", "track": "bass", "value": -1},
+        {"cmd": "set_volume", "track": "bass", "value": "alto"},
+        {"cmd": "set_volume", "track": "bass", "value": 50.5},
+        # bool es subclase de int: True no es un volumen
+        {"cmd": "set_master_volume", "value": True},
+        {"cmd": "set_master_volume"},
+    ])
+    def test_comandos_invalidos_son_400(self, server, qtbot, body):
+        bridge, port, token = server
+        recibidos = []
+        bridge.command.connect(lambda cmd, arg: recibidos.append((cmd, arg)))
+
+        code, data = _request(port, "/api/command", token,
+                              method="POST", body=body)
+        assert code == 400
+        assert "error" in data
+        # Nada cruzó al hilo GUI: la validación es del lado del handler.
+        qtbot.wait(100)
+        assert recibidos == []
+
+    def test_el_mezclador_no_necesita_playlist(self, token_file):
+        """Bajar el bajo antes de cargar nada es legítimo: 409 es solo para
+        los comandos de reproducción."""
+        bridge = RemoteBridge()
+        srv = _make_server(bridge, token_file)
+        _, port, token = srv.start()
+        try:
+            bridge.publish_playlist(0, [], [])
+            code, _ = _request(port, "/api/command", token, method="POST",
+                               body={"cmd": "set_volume", "track": "bass",
+                                     "value": 10})
+            assert code == 200
+            code, _ = _request(port, "/api/command", token, method="POST",
+                               body={"cmd": "next"})
+            assert code == 409
+        finally:
+            srv.stop()
+
+    def test_volumen_remoto_mueve_el_slider(self, player):
+        player._handle_remote_command("set_volume", ("bass", 40))
+        assert player._track_sliders["bass"].value() == 40
+        assert player.individual_volumes["bass"] == pytest.approx(0.4)
+
+    def test_volumen_general_remoto_mueve_el_dial(self, player):
+        player._handle_remote_command("set_master_volume", 35)
+        assert player.volume_dial.value() == 35
+        assert player.volume == 35
+
+    def test_mute_remoto_mueve_el_boton(self, player):
+        player._handle_remote_command("set_mute", ("vocals", True))
+        assert player.mute_states["vocals"] is True
+        assert player.vocals_btn.isChecked()
+        player._handle_remote_command("set_mute", ("vocals", False))
+        assert player.mute_states["vocals"] is False
+
+    def test_argumentos_rotos_no_revientan_el_hilo_gui(self, player):
+        """El servidor ya valida, pero el slot es lo último entre un comando
+        y la GUI: si revienta, se cae la app entera."""
+        for cmd, arg in (("set_mute", None), ("set_mute", ("x",)),
+                         ("set_volume", "bass"), ("set_volume", ("bass",)),
+                         ("set_master_volume", None),
+                         ("set_master_volume", "30")):
+            player._handle_remote_command(cmd, arg)
+
+    def test_el_snapshot_refleja_lo_que_cambio(self, player):
+        player._remote_bridge = RemoteBridge()
+        try:
+            player._handle_remote_command("set_volume", ("drums", 70))
+            player._handle_remote_command("set_master_volume", 45)
+            player._handle_remote_command("set_mute", ("other", True))
+            state = player._remote_bridge.snapshot_state()
+            assert state["volumes"]["drums"] == 70
+            assert state["master_volume"] == 45
+            assert state["mute"]["other"] is True
+        finally:
+            player._remote_bridge = None
