@@ -58,7 +58,7 @@ MAX_BODY = 1024
 CONN_TIMEOUT = 10
 
 COMMANDS = ("play_pause", "stop", "next", "prev", "repeat", "play_index",
-            "set_mute", "set_volume", "set_master_volume")
+            "set_mute", "set_volume", "set_master_volume", "set_auto_unmute")
 # Comandos que no tienen sentido con la playlist vacía → 409. El mezclador no
 # está: mutear la voz o bajar el bajo son ajustes que valen antes de cargar
 # nada, igual que mover los sliders con la ventana recién abierta.
@@ -424,6 +424,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": f"pista desconocida: {track}"})
                 return None
             return {"cmd": cmd, "arg": (track, bool(data.get("value")))}
+        if cmd == "set_auto_unmute":
+            return {"cmd": cmd, "arg": bool(data.get("value"))}
         if cmd in ("set_volume", "set_master_volume"):
             # Absolutos y en enteros 0-100: un comando perdido se corrige solo
             # con el siguiente, y no hay redondeo de floats en el JSON.

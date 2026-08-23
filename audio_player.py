@@ -1566,6 +1566,13 @@ class AudioPlayer(QMainWindow):
     AUTO_UNMUTE_FADE_S = 0.5  # duración del fundido (segundos)
     _AUTO_UNMUTE_ROW_H = 24  # alto reservado para la fila del checkbox (px)
 
+    def set_auto_unmute(self, value: bool):
+        """Fuente de verdad del auto-unmute: mismo motivo que `set_repeat`,
+        un comando remoto entra por señal y no por el click del checkbox."""
+        value = bool(value)
+        self.auto_unmute_enabled = value
+        self.auto_unmute_check.setChecked(value)
+
     def _on_auto_unmute_toggled(self, checked: bool):
         self.auto_unmute_enabled = checked
 
@@ -2117,6 +2124,7 @@ class AudioPlayer(QMainWindow):
             "volumes": {t: int(round(self.individual_volumes[t] * 100))
                         for t in TRACK_NAMES},
             "mute": {t: bool(self.mute_states[t]) for t in TRACK_NAMES},
+            "auto_unmute": bool(self.auto_unmute_enabled),
         })
 
     def _publish_remote_target(self):
@@ -2158,6 +2166,8 @@ class AudioPlayer(QMainWindow):
         elif cmd == "set_master_volume":
             if isinstance(arg, int):
                 self.set_master_volume(arg)
+        elif cmd == "set_auto_unmute":
+            self.set_auto_unmute(bool(arg))
         self._publish_remote_state()
 
     def toggle_remote_mode(self, enabled: bool):

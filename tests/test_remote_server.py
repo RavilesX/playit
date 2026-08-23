@@ -575,7 +575,7 @@ class TestContratoDelSnapshot:
 
     CLAVES_STATE = {"v", "state", "index", "artist", "song", "position_ms",
                     "duration_ms", "repeat", "count", "rev",
-                    "master_volume", "volumes", "mute"}
+                    "master_volume", "volumes", "mute", "auto_unmute"}
 
     def _snapshot(self, player):
         player._remote_bridge = RemoteBridge()
@@ -610,6 +610,7 @@ class TestContratoDelSnapshot:
                    for v in state["volumes"].values())
         assert set(state["mute"]) == set(TRACK_NAMES)
         assert all(isinstance(v, bool) for v in state["mute"].values())
+        assert isinstance(state["auto_unmute"], bool)
 
     @pytest.mark.parametrize("estado", ["Detenido", "Pausada", "Activa"])
     def test_los_tres_estados_viajan_literales(self, player, estado):
@@ -703,6 +704,10 @@ class TestMezcladorRemoto:
          ["set_volume", ("other", 0)]),
         ({"cmd": "set_master_volume", "value": 30},
          ["set_master_volume", 30]),
+        ({"cmd": "set_auto_unmute", "value": True},
+         ["set_auto_unmute", True]),
+        ({"cmd": "set_auto_unmute", "value": False},
+         ["set_auto_unmute", False]),
     ])
     def test_comandos_validos_llegan_al_puente(self, server, qtbot, body,
                                                esperado):
@@ -773,13 +778,23 @@ class TestMezcladorRemoto:
         player._handle_remote_command("set_mute", ("vocals", False))
         assert player.mute_states["vocals"] is False
 
+    def test_auto_unmute_remoto_mueve_el_checkbox(self, player):
+        player._handle_remote_command("set_auto_unmute", False)
+        assert player.auto_unmute_enabled is False
+        assert not player.auto_unmute_check.isChecked()
+        player._handle_remote_command("set_auto_unmute", True)
+        assert player.auto_unmute_enabled is True
+        assert player.auto_unmute_check.isChecked()
+
     def test_argumentos_rotos_no_revientan_el_hilo_gui(self, player):
         """El servidor ya valida, pero el slot es lo último entre un comando
         y la GUI: si revienta, se cae la app entera."""
         for cmd, arg in (("set_mute", None), ("set_mute", ("x",)),
                          ("set_volume", "bass"), ("set_volume", ("bass",)),
                          ("set_master_volume", None),
-                         ("set_master_volume", "30")):
+                         ("set_master_volume", "30"),
+                         ("set_auto_unmute", None),
+                         ("set_auto_unmute", "si")):
             player._handle_remote_command(cmd, arg)
 
     def test_el_snapshot_refleja_lo_que_cambio(self, player):
@@ -788,9 +803,11 @@ class TestMezcladorRemoto:
             player._handle_remote_command("set_volume", ("drums", 70))
             player._handle_remote_command("set_master_volume", 45)
             player._handle_remote_command("set_mute", ("other", True))
+            player._handle_remote_command("set_auto_unmute", False)
             state = player._remote_bridge.snapshot_state()
             assert state["volumes"]["drums"] == 70
             assert state["master_volume"] == 45
             assert state["mute"]["other"] is True
+            assert state["auto_unmute"] is False
         finally:
             player._remote_bridge = None
