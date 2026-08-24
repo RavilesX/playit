@@ -706,8 +706,20 @@ class RemotePairDialog(BaseDialog):
                  name: str = ""):
         # Alto ≤ 600: split.png mide 960x600 y el fondo se repetiría al pasarse
         super().__init__(parent, "Modo remoto", (420, 600))
+        # IP del teléfono que se emparejó, "" si el diálogo se cerró a mano
+        self.paired_with = ""
         self._setup_pair_ui()
         self.set_pairing(ip, port, token, name)
+
+    def on_paired(self, client_ip: str):
+        """Un teléfono terminó de emparejarse: el QR ya no hace falta.
+
+        Corre en el hilo GUI (la señal viene del hilo HTTP por conexión
+        encolada). Cerrar dos veces es inofensivo, pero el primero es el que
+        cuenta: `accept()` sobre un diálogo ya cerrado no hace nada.
+        """
+        self.paired_with = client_ip
+        self.accept()
 
     def _setup_pair_ui(self):
         self.qr_label = QLabel()

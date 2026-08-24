@@ -276,6 +276,9 @@ class RemoteBridge(QObject):
     """Único punto de contacto entre los hilos HTTP y el hilo GUI."""
 
     command = pyqtSignal(str, object)   # cmd, arg
+    # El móvil llama /api/hello al emparejarse: sirve para cerrar solo el
+    # diálogo del QR. Lleva la IP del teléfono, para poder mostrarla.
+    paired = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -452,6 +455,9 @@ class _Handler(BaseHTTPRequestHandler):
             from version import __version__
             self._send(200, {"v": PROTOCOL_VERSION,
                              "name": self.bridge.name, "app": __version__})
+            # Después de responder: el emparejamiento ya está hecho y el
+            # teléfono no tiene que esperar al hilo GUI para recibirlo.
+            self.bridge.paired.emit(self.client_address[0])
         elif route == "/api/state":
             self._send(200, self.bridge.snapshot_state())
         elif route == "/api/playlist":

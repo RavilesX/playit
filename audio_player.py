@@ -2200,7 +2200,19 @@ class AudioPlayer(QMainWindow):
         dialog.regenerate_requested.connect(
             lambda: self._regenerate_remote_token(dialog)
         )
-        dialog.exec()
+        # El QR ya cumplió su función cuando el teléfono se empareja: la señal
+        # llega desde el hilo HTTP y Qt entrega el slot en el hilo GUI.
+        bridge = self._remote_bridge
+        bridge.paired.connect(dialog.on_paired)
+        try:
+            dialog.exec()
+        finally:
+            # El diálogo muere al salir de acá; sin esto la señal seguiría
+            # apuntando a un objeto destruido en el próximo emparejamiento.
+            bridge.paired.disconnect(dialog.on_paired)
+        if dialog.paired_with:
+            self.status_label.setText(
+                f"PlayIt Mobile conectado desde {dialog.paired_with}")
 
     def _regenerate_remote_token(self, dialog):
         """Reinicia el servidor con otro token: desempareja lo ya conectado."""

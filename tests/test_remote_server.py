@@ -811,3 +811,49 @@ class TestMezcladorRemoto:
             assert state["auto_unmute"] is False
         finally:
             player._remote_bridge = None
+
+
+class TestEmparejamiento:
+    """El QR se cierra solo cuando el teléfono termina de emparejarse."""
+
+    def test_hello_emite_paired_con_la_ip(self, server, qtbot):
+        bridge, port, token = server
+        with qtbot.waitSignal(bridge.paired, timeout=3000) as blocker:
+            assert _request(port, "/api/hello", token)[0] == 200
+        assert blocker.args == ["127.0.0.1"]
+
+    def test_las_otras_rutas_no_emiten_paired(self, server, qtbot):
+        """Sólo /api/hello significa "me acabo de emparejar"; el sondeo de
+        estado no puede reabrir ni recerrar nada."""
+        bridge, port, token = server
+        with qtbot.assertNotEmitted(bridge.paired, wait=300):
+            _request(port, "/api/state", token)
+            _request(port, "/api/playlist", token)
+            _request(port, "/api/command", token, "POST", {"cmd": "stop"})
+
+    def test_token_invalido_no_emite_paired(self, server, qtbot):
+        """Un 401 no es un emparejamiento."""
+        bridge, port, _token = server
+        with qtbot.assertNotEmitted(bridge.paired, wait=300):
+            assert _request(port, "/api/hello", "0" * 32)[0] == 401
+
+    def test_el_dialogo_se_cierra_al_emparejar(self, player, qtbot):
+        from dialogs import RemotePairDialog
+
+        dialog = RemotePairDialog(None, ip="192.168.1.42", port=8770,
+                                  token="ab" * 16, name="PC-Test")
+        qtbot.addWidget(dialog)
+        dialog.show()
+        assert dialog.isVisible()
+
+        dialog.on_paired("192.168.1.77")
+        assert not dialog.isVisible()
+        assert dialog.result() == RemotePairDialog.DialogCode.Accepted
+        assert dialog.paired_with == "192.168.1.77"
+
+    def test_sin_emparejar_no_registra_ip(self, app):
+        from dialogs import RemotePairDialog
+
+        dialog = RemotePairDialog(None, ip="192.168.1.42", port=8770,
+                                  token="ab" * 16, name="PC-Test")
+        assert dialog.paired_with == ""
