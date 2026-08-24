@@ -16,7 +16,11 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPoint,QDir
 from PyQt6.QtGui import QDesktopServices, QImage, QPixmap
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout, QFileDialog, QMessageBox, QCheckBox
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout,
+    QFileDialog, QMessageBox, QCheckBox, QListWidget, QListWidgetItem,
+    QAbstractItemView, QMenu,
+)
 from demucs_worker import AUDIO_INPUT_FILTER
 from resources import resource_path, bg_image, styled_message_box, style_url
 from ui_components import DialogTitleBar, StyledButtons
@@ -271,6 +275,79 @@ class QueueDialog(BaseDialog):
 
         html += "</ul>"
         return html
+
+
+class _QueueListWidget(QListWidget):
+    """Lista de la cola de reproducción: Supr quita el ítem seleccionado."""
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Delete and self.currentItem() is not None:
+            self.takeItem(self.currentRow())
+        else:
+            super().keyPressEvent(event)
+
+
+class PlaybackQueueDialog(BaseDialog):
+    """Administración de la cola de reproducción ("Agregar a la cola" del
+    menú contextual de la playlist): reordenar arrastrando o quitar
+    canciones sin afectar la playlist. Edita audio_player.play_queue en vivo,
+    no hay Aceptar/Cancelar."""
+
+    SONG_ROLE = Qt.ItemDataRole.UserRole
+
+    def __init__(self, audio_player, parent=None):
+        self.audio_player = audio_player
+        super().__init__(parent, "Administración de cola", (380, 420))
+        self._setup_queue_ui()
+
+    def _setup_queue_ui(self):
+        hint = QLabel("Arrastra para reordenar. Supr o clic derecho para quitar de la cola.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #cfcfe0; font-size: 12px;")
+
+        self.queue_list = _QueueListWidget()
+        self.queue_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.queue_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.queue_list.customContextMenuRequested.connect(self._show_item_menu)
+        # rowsMoved (drag) y rowsRemoved (Supr / menú) son los dos únicos
+        # cambios posibles: cualquiera de los dos vuelca el orden actual.
+        self.queue_list.model().rowsMoved.connect(self._sync_order)
+        self.queue_list.model().rowsRemoved.connect(self._sync_order)
+        self._reload_items()
+
+        close_btn = QPushButton()
+        close_btn.setObjectName("cancelar_btn")
+        close_btn.setFixedSize(70, 70)
+        bg_image(close_btn, "images/split_dialog/cancelar_btn.png")
+        close_btn.clicked.connect(self.accept)
+
+        self.main_layout.addWidget(hint)
+        self.main_layout.addWidget(self.queue_list)
+        self.main_layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def _reload_items(self):
+        self.queue_list.clear()
+        for song in self.audio_player.play_queue:
+            item = QListWidgetItem(f"{song['artist']} - {song['song']}")
+            item.setData(self.SONG_ROLE, song)
+            self.queue_list.addItem(item)
+
+    def _show_item_menu(self, pos):
+        item = self.queue_list.itemAt(pos)
+        if item is None:
+            return
+        menu = QMenu(self.queue_list)
+        remove_action = menu.addAction("Quitar de la cola")
+        action = menu.exec(self.queue_list.mapToGlobal(pos))
+        if action == remove_action:
+            self.queue_list.takeItem(self.queue_list.row(item))
+
+    def _sync_order(self, *args):
+        self.audio_player.play_queue[:] = [
+            self.queue_list.item(i).data(self.SONG_ROLE)
+            for i in range(self.queue_list.count())
+        ]
 
 
 class SplitDialog(BaseDialog):

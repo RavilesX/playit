@@ -39,5 +39,6 @@ def clean_playlist(request):
         p.playlist.clear()
         p._playlist_keys.clear()
         p.playlist_widget.clear()
+        p.play_queue.clear()
         p.current_index = -1
     yield

@@ -162,3 +162,77 @@ class TestOrdenamiento:
         assert player.sort_label.text() == player._SORT_MODES[-1][2]
         player._cycle_sort()
         assert player.sort_label.text() == "Artista A-Z"
+
+
+class TestQueue:
+    """Cola de reproducción ('Agregar a la cola' / 'Administrar cola')."""
+
+    def setup_playlist(self, player):
+        player._on_songs_loaded([
+            make_song("A", "1"), make_song("B", "2"), make_song("C", "3"),
+        ])
+
+    def test_toggle_agrega_y_quita(self, player):
+        self.setup_playlist(player)
+        song = player.playlist[1]
+        assert not player._is_queued(song)
+        player._toggle_queue(song)
+        assert player._is_queued(song)
+        assert player.play_queue == [song]
+        player._toggle_queue(song)
+        assert not player._is_queued(song)
+        assert player.play_queue == []
+
+    def test_play_next_consume_cola_en_orden_fifo(self, player, monkeypatch):
+        self.setup_playlist(player)
+        monkeypatch.setattr(player, "play_current", lambda: None)
+        segunda, tercera = player.playlist[1], player.playlist[2]
+        player._toggle_queue(segunda)
+        player._toggle_queue(tercera)
+        player.current_index = 0
+
+        player.play_next()
+        assert player.current_index == 1
+        assert player.play_queue == [tercera]
+
+        player.play_next()
+        assert player.current_index == 2
+        assert player.play_queue == []
+
+        # Cola vacía: sigue el orden normal de la playlist.
+        player.play_next()
+        assert player.current_index == 0
+
+    def test_play_next_salta_cancion_encolada_y_luego_eliminada(self, player, monkeypatch):
+        self.setup_playlist(player)
+        monkeypatch.setattr(player, "play_current", lambda: None)
+        borrada = player.playlist[1]
+        player._toggle_queue(borrada)
+        player.playlist_widget.item(1).setSelected(True)
+        player.current_index = 0
+        player.remove_selected()
+        assert player.play_queue == []  # _purge_queue la descartó
+
+        player.play_next()
+        assert player.current_index == 1  # avance normal, sin la eliminada
+
+    def test_remove_selected_purga_la_cola(self, player):
+        self.setup_playlist(player)
+        song = player.playlist[1]
+        player._toggle_queue(song)
+        player.playlist_widget.item(1).setSelected(True)
+        player.remove_selected()
+        assert player.play_queue == []
+
+    def test_clear_playlist_vacia_la_cola(self, player):
+        self.setup_playlist(player)
+        player._toggle_queue(player.playlist[0])
+        player.clear_playlist()
+        assert player.play_queue == []
+
+    def test_sort_preserva_la_cola_por_identidad(self, player):
+        self.setup_playlist(player)
+        song = player.playlist[1]
+        player._toggle_queue(song)
+        player.sort_playlist("song", reverse=True)
+        assert player.play_queue == [song]

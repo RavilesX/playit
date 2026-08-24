@@ -60,6 +60,7 @@ from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
 from dialogs import (
     AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog,
     UpdateDialog, CorrectSongDialog, SongInfoDialog, RemotePairDialog,
+    PlaybackQueueDialog,
 )
 from remote_server import RemoteBridge, RemoteServer
 from lazy_resources import (LazyAudioManager, LazyImageManager, LazyLyricsManager,
@@ -152,6 +153,11 @@ class AudioPlayer(QMainWindow):
         self.current_channels: list = []
         self._repeat = False
         self._current_mlst_path = None
+
+        # Cola de reproducción ("Agregar a la cola"): canciones a reproducir
+        # a continuación, por identidad (mismos dicts que self.playlist) para
+        # sobrevivir sort/remove sin recalcular índices.
+        self.play_queue: list[dict] = []
 
         # Modo remoto (control desde PlayIt Mobile)
         # _playlist_rev le dice al móvil "la lista cambió, volvé a pedirla"
@@ -581,6 +587,15 @@ class AudioPlayer(QMainWindow):
         copy_artist_song_action = copy_menu.addAction("Artista - Canción")
         copy_path_action = copy_menu.addAction("Ruta")
 
+        menu.addSeparator()
+        row = self.playlist_widget.row(item)
+        song_data = self.playlist[row] if 0 <= row < len(self.playlist) else None
+        queued = song_data is not None and self._is_queued(song_data)
+        queue_action = menu.addAction(
+            "Eliminar de la cola" if queued else "Agregar a la cola"
+        )
+        manage_queue_action = menu.addAction("Administrar cola")
+
         action = menu.exec(self.playlist_widget.mapToGlobal(pos))
 
         if action == open_folder_action:
@@ -599,6 +614,35 @@ class AudioPlayer(QMainWindow):
             self._copy_song_info(item, 'artist_song')
         elif action == copy_path_action:
             self._copy_song_info(item, 'path')
+        elif action == queue_action:
+            self._toggle_queue(song_data)
+        elif action == manage_queue_action:
+            self._show_queue_manager()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # ── Cola de reproducción ("Agregar a la cola") ───────────────────────
+    # ──────────────────────────────────────────────────────────────────────
+    def _is_queued(self, song_data: dict) -> bool:
+        return any(s is song_data for s in self.play_queue)
+
+    def _toggle_queue(self, song_data: dict | None):
+        if song_data is None:
+            return
+        if self._is_queued(song_data):
+            self.play_queue[:] = [s for s in self.play_queue if s is not song_data]
+        else:
+            self.play_queue.append(song_data)
+
+    def _purge_queue(self):
+        """Descarta de la cola las canciones que ya no están en la playlist."""
+        self.play_queue[:] = [
+            s for s in self.play_queue if any(s is p for p in self.playlist)
+        ]
+
+    def _show_queue_manager(self):
+        dialog = PlaybackQueueDialog(self, parent=self)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        dialog.exec()
 
     def _copy_song_info(self, item: QListWidgetItem, kind: str):
         artist, _, song = item.text().partition(" - ")
@@ -1039,7 +1083,22 @@ class AudioPlayer(QMainWindow):
     def play_next(self):
         self.next_btn.setEnabled(False)
         self.stop_playback()
-        self.current_index = (self.current_index + 1) % len(self.playlist)
+        if self.play_queue:
+            # La cola tiene prioridad: se consume en orden (FIFO) antes de
+            # seguir la playlist. Búsqueda por identidad porque la cola
+            # guarda los mismos dicts de self.playlist, no índices.
+            queued_song = self.play_queue.pop(0)
+            row = next(
+                (i for i, s in enumerate(self.playlist) if s is queued_song), -1,
+            )
+            if row == -1:
+                # Se eliminó de la playlist mientras esperaba en la cola.
+                self.next_btn.setEnabled(True)
+                self.play_next()
+                return
+            self.current_index = row
+        else:
+            self.current_index = (self.current_index + 1) % len(self.playlist)
         self.play_current()
         self.next_btn.setEnabled(True)
 
@@ -1850,6 +1909,7 @@ class AudioPlayer(QMainWindow):
         self.playlist.clear()
         self._playlist_keys.clear()
         self.playlist_widget.clear()
+        self.play_queue.clear()
         self.current_index = -1
         self._reset_sort_label()
         self._set_playback_buttons_enabled(False)
@@ -1903,6 +1963,7 @@ class AudioPlayer(QMainWindow):
             self.current_index = next(
                 (i for i, s in enumerate(self.playlist) if s is current_song), -1,
             )
+        self._purge_queue()
         self._bump_playlist_rev()
         self.update_status()
 
