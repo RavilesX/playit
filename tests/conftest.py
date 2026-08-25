@@ -41,4 +41,6 @@ def clean_playlist(request):
         p.playlist_widget.clear()
         p.play_queue.clear()
         p.current_index = -1
+        for track in p.mute_states:
+            p.mute_states[track] = False
     yield

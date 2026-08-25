@@ -14,12 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPoint,QDir
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPoint, QDir
 from PyQt6.QtGui import QDesktopServices, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout,
-    QFileDialog, QMessageBox, QCheckBox, QListWidget, QListWidgetItem,
-    QAbstractItemView, QMenu,
+    QFileDialog, QMessageBox, QCheckBox, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QMenu, QWidget, QCompleter,
 )
 from demucs_worker import AUDIO_INPUT_FILTER
 from resources import resource_path, bg_image, styled_message_box, style_url
@@ -277,43 +277,403 @@ class QueueDialog(BaseDialog):
         return html
 
 
-class _QueueListWidget(QListWidget):
-    """Lista de la cola de reproducción: Supr quita el ítem seleccionado."""
+class _QueueTable(QTableWidget):
+    """Grid de la cola: Supr quita la fila seleccionada; arrastrar una fila
+    la reordena. El drag-and-drop de fila completa de QTableWidget no es
+    fiable con el InternalMove por defecto de Qt (mueve/duplica celdas
+    sueltas en vez de la fila), así que dropEvent se maneja a mano."""
+
+    def __init__(self, on_change, parent=None):
+        super().__init__(0, 3, parent)
+        self._on_change = on_change
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDragDropOverwriteMode(False)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Delete and self.currentItem() is not None:
-            self.takeItem(self.currentRow())
+        if event.key() == Qt.Key.Key_Delete and self.currentRow() != -1:
+            self.removeRow(self.currentRow())
+            self._on_change()
         else:
             super().keyPressEvent(event)
+
+    def dropEvent(self, event):
+        if event.source() is not self:
+            super().dropEvent(event)
+            return
+        src_row = self.currentRow()
+        if not (0 <= src_row < self.rowCount()):
+            event.ignore()
+            return
+        pos = event.position().toPoint()
+        target_row = self.rowAt(pos.y())
+        if target_row == -1:
+            target_row = self.rowCount() - 1
+        elif pos.y() > self.visualRect(self.model().index(target_row, 0)).center().y():
+            target_row += 1
+        if target_row > src_row:
+            target_row -= 1
+        if target_row != src_row:
+            self._move_row(src_row, target_row)
+        event.accept()
+        self._on_change()
+
+    def _move_row(self, src: int, dst: int):
+        row_items = [self.takeItem(src, c) for c in range(self.columnCount())]
+        # Las celdas con cellWidget (la de Tags) no viajan con takeItem: hay
+        # que despegarlas antes de removeRow, si no Qt las destruye al
+        # borrar la fila en vez de reusarlas en la fila destino.
+        row_widgets = [self.cellWidget(src, c) for c in range(self.columnCount())]
+        for widget in row_widgets:
+            if widget is not None:
+                widget.setParent(None)
+        self.removeRow(src)
+        self.insertRow(dst)
+        for c, item in enumerate(row_items):
+            if item is not None:
+                self.setItem(dst, c, item)
+        for c, widget in enumerate(row_widgets):
+            if widget is not None:
+                self.setCellWidget(dst, c, widget)
+        self.selectRow(dst)
+
+
+class _SongRef:
+    """Envoltorio opaco para guardar el dict de la canción en un
+    QTableWidgetItem: setData()/data() con Qt.UserRole hacen una copia de
+    tipos "convertibles" para QVariant (dict, list, tuple...), así que la
+    canción recuperada dejaba de ser el mismo objeto que self.playlist/
+    self.play_queue y las comparaciones por identidad (`is`) del resto de la
+    app fallaban en silencio. Un objeto sin conversión registrada no se
+    copia: PyQt guarda el puntero al objeto Python tal cual."""
+    __slots__ = ("song",)
+
+    def __init__(self, song: dict):
+        self.song = song
+
+
+class _TagLineEdit(QLineEdit):
+    """QLineEdit que avisa cuando pierde el foco (clic afuera / Tab) vía una
+    señal propia, separada de Enter (returnPressed). editingFinished mezcla
+    ambos casos en una sola señal y no alcanza para distinguir "confirmar"
+    de "cancelar": un chip nuevo debe descartarse en el primer caso y
+    agregarse en el segundo."""
+
+    focus_lost = pyqtSignal()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self.focus_lost.emit()
+
+
+class _TagChip(QWidget):
+    """Un tag individual dentro de la celda: doble clic lo edita sin tocar
+    los demás (a diferencia de un solo QLineEdit por celda, que editaba el
+    texto crudo completo de golpe). Vacío al confirmar = eliminarlo."""
+
+    changed = pyqtSignal(str)
+    removed = pyqtSignal()
+
+    QSS = """
+        QLabel#tag_label {
+            background: rgba(126,84,175,60);
+            border: 2px solid #B98CFF;
+            border-radius: 6px;
+            color: white;
+            padding: 2px 8px;
+        }
+        QLineEdit#tag_edit {
+            border: 2px solid #B98CFF;
+            border-radius: 6px;
+            background: rgba(0,0,0,0.4);
+            color: white;
+            padding: 1px 6px;
+        }
+    """
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(self.QSS)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Fuente de verdad de "¿estoy editando?": no self.edit.isVisible(),
+        # que depende de que toda la cadena de widgets padre (celda de
+        # tabla incluida) ya esté "shown" — justo después de un rebuild()
+        # eso no está garantizado todavía.
+        self._editing = False
+
+        self.label = QLabel(text)
+        self.label.setObjectName("tag_label")
+        self.edit = _TagLineEdit(text)
+        self.edit.setObjectName("tag_edit")
+        self.edit.setFixedWidth(90)
+        self.edit.hide()
+        self.edit.returnPressed.connect(self._commit)
+        self.edit.focus_lost.connect(self._commit)
+
+        layout.addWidget(self.label)
+        layout.addWidget(self.edit)
+
+    def mouseDoubleClickEvent(self, event):
+        self.label.hide()
+        self.edit.setText(self.label.text())
+        self.edit.show()
+        self.edit.setFocus()
+        self.edit.selectAll()
+        self._editing = True
+
+    def _commit(self):
+        if not self._editing:
+            # Ya se confirmó: al esconderlo, focus_lost se dispara también
+            # (perder el foco un widget oculto) y volvería a llamar esto.
+            return
+        self._editing = False
+        text = self.edit.text().strip()
+        self.edit.hide()
+        self.label.show()
+        if not text:
+            self.removed.emit()
+        elif text != self.label.text():
+            self.label.setText(text)
+            self.changed.emit(text)
+
+
+class _AddTagChip(QWidget):
+    """Chip "+ tag" al final de la fila: doble clic abre un campo vacío
+    para agregar una tag nueva sin afectar las existentes. Enter confirma;
+    un clic afuera se arrepiente y descarta lo escrito. Al abrir, muestra un
+    dropdown con las 4 pistas (las que reconoce _apply_tag_mutes en
+    audio_player.py) para elegir con un clic; sin seleccionar nada, el
+    usuario puede escribir lo que quiera, tag sugerida o no."""
+
+    # Mismo vocabulario que _TAG_TRACK_ALIASES en audio_player.py — no se
+    # importa de ahí para no crear un import circular (audio_player ya
+    # importa este módulo).
+    TRACK_SUGGESTIONS = ["Batería", "Bajo", "Voz", "Otros"]
+
+    added = pyqtSignal(str)
+
+    QSS = """
+        QLabel#tag_add_label {
+            border: 2px dashed rgba(185,140,255,150);
+            border-radius: 6px;
+            color: rgba(255,255,255,150);
+            padding: 2px 8px;
+        }
+        QLineEdit#tag_edit {
+            border: 2px solid #B98CFF;
+            border-radius: 6px;
+            background: rgba(0,0,0,0.4);
+            color: white;
+            padding: 1px 6px;
+        }
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(self.QSS)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._editing = False
+
+        self.label = QLabel("+ tag")
+        self.label.setObjectName("tag_add_label")
+        self.edit = _TagLineEdit()
+        self.edit.setObjectName("tag_edit")
+        self.edit.setFixedWidth(90)
+        self.edit.setPlaceholderText("nueva tag")
+        self.edit.hide()
+        self.edit.returnPressed.connect(self._commit)
+        self.edit.focus_lost.connect(self._cancel)
+
+        completer = QCompleter(self.TRACK_SUGGESTIONS, self.edit)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        # activated (no highlighted): un clic en una opción agrega esa tag
+        # de una, no solo la escribe y espera a que el usuario confirme.
+        completer.activated.connect(self._pick_suggestion)
+        self.edit.setCompleter(completer)
+        self._completer = completer
+
+        layout.addWidget(self.label)
+        layout.addWidget(self.edit)
+
+    def mouseDoubleClickEvent(self, event):
+        self.label.hide()
+        self.edit.clear()
+        self.edit.show()
+        self.edit.setFocus()
+        self._editing = True
+        self._completer.complete()  # dropdown con las 4 pistas, sin escribir nada
+
+    def _pick_suggestion(self, text: str):
+        self.edit.setText(text)
+        self._commit()
+
+    def _commit(self):
+        if not self._editing:
+            return
+        self._editing = False
+        text = self.edit.text().strip()
+        self.edit.hide()
+        self.label.show()
+        if text:
+            self.added.emit(text)
+
+    def _cancel(self):
+        if not self._editing:
+            return  # _commit ya lo cerró; focus_lost es solo su eco
+        self._editing = False
+        self.edit.clear()
+        self.edit.hide()
+        self.label.show()
+
+
+class _TagsCell(QWidget):
+    """Fila de chips de una celda de Tags: cada uno se edita o elimina
+    independiente de los demás, más un chip "+ tag" para agregar. Guarda
+    los cambios directo en song['tags'] (misma coma-separada de siempre)."""
+
+    def __init__(self, song: dict, parent=None):
+        super().__init__(parent)
+        self.song = song
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(4, 2, 4, 2)
+        self._layout.setSpacing(4)
+        self._rebuild()
+
+    def _tags(self) -> list[str]:
+        raw = self.song.get('tags', '')
+        return [t.strip() for t in raw.split(',') if t.strip()]
+
+    def _save(self, tags: list[str]):
+        self.song['tags'] = ", ".join(tags)
+
+    def _rebuild(self):
+        while self._layout.count():
+            child = self._layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        for i, tag in enumerate(self._tags()):
+            chip = _TagChip(tag, self)
+            chip.changed.connect(lambda new, idx=i: self._on_chip_changed(idx, new))
+            chip.removed.connect(lambda idx=i: self._on_chip_removed(idx))
+            self._layout.addWidget(chip)
+
+        add_chip = _AddTagChip(self)
+        add_chip.added.connect(self._on_tag_added)
+        self._layout.addWidget(add_chip)
+        self._layout.addStretch()
+
+    def _on_chip_changed(self, idx: int, new_text: str):
+        tags = self._tags()
+        if idx < len(tags):
+            tags[idx] = new_text
+            self._save(tags)
+        self._rebuild()
+
+    def _on_chip_removed(self, idx: int):
+        tags = self._tags()
+        if idx < len(tags):
+            del tags[idx]
+            self._save(tags)
+        self._rebuild()
+
+    def _on_tag_added(self, text: str):
+        tags = self._tags()
+        tags.append(text)
+        self._save(tags)
+        self._rebuild()
 
 
 class PlaybackQueueDialog(BaseDialog):
     """Administración de la cola de reproducción ("Agregar a la cola" del
-    menú contextual de la playlist): reordenar arrastrando o quitar
-    canciones sin afectar la playlist. Edita audio_player.play_queue en vivo,
+    menú contextual de la playlist): grid con Canción/Duración/Tags,
+    reordenable arrastrando filas, quitar canciones sin afectar la playlist.
+    Edita audio_player.play_queue (y los "tags" de cada canción) en vivo,
     no hay Aceptar/Cancelar."""
 
     SONG_ROLE = Qt.ItemDataRole.UserRole
+    COL_SONG, COL_DURATION, COL_TAGS = range(3)
+
+    TABLE_QSS = """
+        QTableWidget#queue_table {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            font-size: 13px;
+            gridline-color: rgba(255,255,255,0.15);
+            border: 0px;
+        }
+        QTableWidget#queue_table::item { padding: 4px; }
+        QTableWidget#queue_table::item:selected {
+            background: #7E54AF;
+            color: white;
+        }
+        QHeaderView::section {
+            background: #3AABEF;
+            color: white;
+            font-weight: bold;
+            border: 0px;
+            padding: 4px;
+        }
+    """
 
     def __init__(self, audio_player, parent=None):
         self.audio_player = audio_player
-        super().__init__(parent, "Administración de cola", (380, 420))
+        super().__init__(parent, "Administración de cola", (840, 525))
         self._setup_queue_ui()
 
     def _setup_queue_ui(self):
-        hint = QLabel("Arrastra para reordenar. Supr o clic derecho para quitar de la cola.")
+        hint = QLabel(
+            "Arrastra una fila para reordenar. Supr o clic derecho para quitar "
+            "de la cola. Doble clic en un tag lo edita (vacío al confirmar lo "
+            "elimina), o en \"+ tag\" agregas uno nuevo: elige una pista del "
+            "desplegable o escribe lo que quieras; Enter confirma, clic afuera "
+            "cancela."
+        )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #cfcfe0; font-size: 12px;")
 
-        self.queue_list = _QueueListWidget()
-        self.queue_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.queue_list.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.queue_list.customContextMenuRequested.connect(self._show_item_menu)
-        # rowsMoved (drag) y rowsRemoved (Supr / menú) son los dos únicos
-        # cambios posibles: cualquiera de los dos vuelca el orden actual.
-        self.queue_list.model().rowsMoved.connect(self._sync_order)
-        self.queue_list.model().rowsRemoved.connect(self._sync_order)
+        toolbar = QHBoxLayout()
+        toolbar.addStretch()
+        export_btn = QPushButton("⇩")
+        export_btn.setObjectName("queue_export_btn")
+        export_btn.setFixedSize(28, 28)
+        export_btn.setToolTip(
+            "Crear una playlist (Music List) a partir de las canciones en la cola"
+        )
+        export_btn.setStyleSheet("""
+            QPushButton#queue_export_btn {
+                background: rgba(126,84,175,60);
+                border: 2px solid #B98CFF;
+                border-radius: 6px;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton#queue_export_btn:hover {
+                background: rgba(126,84,175,120);
+            }
+        """)
+        export_btn.clicked.connect(self.audio_player.export_queue_mlst)
+        toolbar.addWidget(export_btn)
+
+        self.table = _QueueTable(on_change=self._sync_order)
+        self.table.setObjectName("queue_table")
+        self.table.setStyleSheet(self.TABLE_QSS)
+        self.table.setHorizontalHeaderLabels(["Canción", "Duración", "Tags"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(34)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(self.COL_SONG, header.ResizeMode.Stretch)
+        header.setSectionResizeMode(self.COL_DURATION, header.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self.COL_TAGS, header.ResizeMode.Stretch)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_item_menu)
         self._reload_items()
 
         close_btn = QPushButton()
@@ -321,32 +681,48 @@ class PlaybackQueueDialog(BaseDialog):
         close_btn.setFixedSize(70, 70)
         bg_image(close_btn, "images/split_dialog/cancelar_btn.png")
         close_btn.clicked.connect(self.accept)
+        # Sin esto es el botón default del diálogo: Enter en el campo de una
+        # tag nueva (o al editar una existente) también lo activaba y
+        # cerraba todo el diálogo de golpe.
+        close_btn.setAutoDefault(False)
 
         self.main_layout.addWidget(hint)
-        self.main_layout.addWidget(self.queue_list)
+        self.main_layout.addLayout(toolbar)
+        self.main_layout.addWidget(self.table)
         self.main_layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def _reload_items(self):
-        self.queue_list.clear()
+        self.table.setRowCount(0)
         for song in self.audio_player.play_queue:
-            item = QListWidgetItem(f"{song['artist']} - {song['song']}")
-            item.setData(self.SONG_ROLE, song)
-            self.queue_list.addItem(item)
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            song_item = QTableWidgetItem(f"{song['artist']} - {song['song']}")
+            song_item.setFlags(song_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            song_item.setData(self.SONG_ROLE, _SongRef(song))
+            self.table.setItem(row, self.COL_SONG, song_item)
+
+            duration_item = QTableWidgetItem(str(song.get('duration', '') or ''))
+            duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, self.COL_DURATION, duration_item)
+
+            self.table.setCellWidget(row, self.COL_TAGS, _TagsCell(song))
 
     def _show_item_menu(self, pos):
-        item = self.queue_list.itemAt(pos)
-        if item is None:
+        row = self.table.rowAt(pos.y())
+        if row == -1:
             return
-        menu = QMenu(self.queue_list)
+        menu = QMenu(self.table)
         remove_action = menu.addAction("Quitar de la cola")
-        action = menu.exec(self.queue_list.mapToGlobal(pos))
+        action = menu.exec(self.table.mapToGlobal(pos))
         if action == remove_action:
-            self.queue_list.takeItem(self.queue_list.row(item))
+            self.table.removeRow(row)
+            self._sync_order()
 
-    def _sync_order(self, *args):
+    def _sync_order(self):
         self.audio_player.play_queue[:] = [
-            self.queue_list.item(i).data(self.SONG_ROLE)
-            for i in range(self.queue_list.count())
+            self.table.item(r, self.COL_SONG).data(self.SONG_ROLE).song
+            for r in range(self.table.rowCount())
         ]
 
 

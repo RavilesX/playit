@@ -588,11 +588,12 @@ class AudioPlayer(QMainWindow):
         copy_path_action = copy_menu.addAction("Ruta")
 
         menu.addSeparator()
-        row = self.playlist_widget.row(item)
-        song_data = self.playlist[row] if 0 <= row < len(self.playlist) else None
-        queued = song_data is not None and self._is_queued(song_data)
+        # Con selección múltiple, "Agregar/Eliminar de la cola" actúa sobre
+        # todos los ítems seleccionados, no solo el que recibió el clic.
+        target_songs = self._queue_action_targets(item)
+        add_mode = not (target_songs and all(self._is_queued(s) for s in target_songs))
         queue_action = menu.addAction(
-            "Eliminar de la cola" if queued else "Agregar a la cola"
+            "Agregar a la cola" if add_mode else "Eliminar de la cola"
         )
         manage_queue_action = menu.addAction("Administrar cola")
 
@@ -615,7 +616,7 @@ class AudioPlayer(QMainWindow):
         elif action == copy_path_action:
             self._copy_song_info(item, 'path')
         elif action == queue_action:
-            self._toggle_queue(song_data)
+            self._toggle_queue_many(target_songs, add_mode)
         elif action == manage_queue_action:
             self._show_queue_manager()
 
@@ -632,6 +633,26 @@ class AudioPlayer(QMainWindow):
             self.play_queue[:] = [s for s in self.play_queue if s is not song_data]
         else:
             self.play_queue.append(song_data)
+
+    def _queue_action_targets(self, item: QListWidgetItem) -> list[dict]:
+        """Canciones objetivo de Agregar/Eliminar de la cola: toda la
+        selección múltiple si el ítem clickeado forma parte de ella, si no
+        solo ese ítem (clic derecho fuera de la selección actual)."""
+        selected_items = self.playlist_widget.selectedItems()
+        items = selected_items if item in selected_items and len(selected_items) > 1 else [item]
+        songs = []
+        for it in items:
+            row = self.playlist_widget.row(it)
+            if 0 <= row < len(self.playlist):
+                songs.append(self.playlist[row])
+        return songs
+
+    def _toggle_queue_many(self, songs: list[dict], add: bool):
+        for song in songs:
+            if add and not self._is_queued(song):
+                self.play_queue.append(song)
+            elif not add and self._is_queued(song):
+                self.play_queue[:] = [s for s in self.play_queue if s is not song]
 
     def _purge_queue(self):
         """Descarta de la cola las canciones que ya no están en la playlist."""
@@ -1097,6 +1118,7 @@ class AudioPlayer(QMainWindow):
                 self.play_next()
                 return
             self.current_index = row
+            self._apply_tag_mutes(queued_song)
         else:
             self.current_index = (self.current_index + 1) % len(self.playlist)
         self.play_current()
@@ -1579,6 +1601,31 @@ class AudioPlayer(QMainWindow):
         if self._lyrics_fullscreen:
             self._show_fs_track_toast(track_name, bool(muted))
 
+    # Nombres de pista tal como los escribe el usuario en las tags de la
+    # cola (Administrar cola), normalizados (minúsculas, sin acentos) por
+    # _normalize_text antes de comparar contra esta tabla.
+    _TAG_TRACK_ALIASES = {
+        "bateria": "drums",
+        "voz": "vocals", "vocal": "vocals", "vocales": "vocals",
+        "bajo": "bass",
+        "otros": "other", "otro": "other",
+    }
+
+    def _apply_tag_mutes(self, song_data: dict):
+        """Al consumir una canción de la cola (no en el avance normal de la
+        playlist), sus tags pueden nombrar pistas (Batería/Bajo/Voz/Otros):
+        si encuentra alguna, mutea esas pistas y enciende el resto. Sin
+        coincidencias no toca el mute actual."""
+        found = {
+            self._TAG_TRACK_ALIASES[key]
+            for part in song_data.get('tags', '').split(',')
+            if (key := self._normalize_text(part.strip())) in self._TAG_TRACK_ALIASES
+        }
+        if not found:
+            return
+        for track in TRACK_NAMES:
+            self.set_mute(track, track in found)
+
     def toggle_mute(self):
         """Adaptador del clic: resuelve la pista y delega en `set_mute`."""
         sender = self.sender()
@@ -2025,18 +2072,40 @@ class AudioPlayer(QMainWindow):
                 QMessageBox.Icon.Information,
             )
             return
+        file_path = self._prompt_mlst_path()
+        if not file_path:
+            return
+        if self._write_mlst_file(self.playlist, file_path):
+            self._current_mlst_path = file_path
 
+    def export_queue_mlst(self):
+        """Botón de exportar del diálogo "Administración de cola": vuelca las
+        canciones actualmente encoladas (no toda la playlist) a un .mlst."""
+        if not self.play_queue:
+            styled_message_box(
+                self, "Cola vacía",
+                "No hay canciones en la cola para exportar.",
+                QMessageBox.Icon.Information,
+            )
+            return
+        file_path = self._prompt_mlst_path()
+        if not file_path:
+            return
+        self._write_mlst_file(self.play_queue, file_path)
+
+    def _prompt_mlst_path(self) -> str:
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Guardar Playlist",
             str(Path.home() / "Music"),
             "Music List (*.mlst)",
         )
         if not file_path:
-            return
-
+            return ""
         if not file_path.endswith('.mlst'):
             file_path += '.mlst'
+        return file_path
 
+    def _write_mlst_file(self, songs: list[dict], file_path: str) -> bool:
         data = {
             "name": Path(file_path).stem,
             "created": datetime.now().strftime('%Y-%m-%d'),
@@ -2046,25 +2115,25 @@ class AudioPlayer(QMainWindow):
                     "song": song["song"],
                     "path": str(song["path"]),
                 }
-                for song in self.playlist
+                for song in songs
             ],
         }
-
         try:
             Path(file_path).write_text(
                 json.dumps(data, indent=4, ensure_ascii=False),
                 encoding='utf-8',
             )
-            self._current_mlst_path = file_path
             styled_message_box(
                 self, "Playlist guardada",
-                f"Se guardaron {len(self.playlist)} canciones en:\n{Path(file_path).name}",
+                f"Se guardaron {len(songs)} canciones en:\n{Path(file_path).name}",
             )
+            return True
         except Exception as e:
             styled_message_box(
                 self, "Error", f"No se pudo guardar: {e}",
                 QMessageBox.Icon.Critical,
             )
+            return False
 
     def load_playlist_mlst(self):
         file_path, _ = QFileDialog.getOpenFileName(

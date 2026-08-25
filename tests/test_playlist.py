@@ -236,3 +236,119 @@ class TestQueue:
         player._toggle_queue(song)
         player.sort_playlist("song", reverse=True)
         assert player.play_queue == [song]
+
+    def test_targets_multiseleccion_si_el_click_cae_dentro(self, player):
+        self.setup_playlist(player)
+        for row in (0, 1, 2):
+            player.playlist_widget.item(row).setSelected(True)
+        clicked = player.playlist_widget.item(1)
+        targets = player._queue_action_targets(clicked)
+        assert {id(s) for s in targets} == {id(s) for s in player.playlist}
+
+    def test_targets_un_solo_item_si_el_click_cae_fuera_de_la_seleccion(self, player):
+        self.setup_playlist(player)
+        player.playlist_widget.item(0).setSelected(True)
+        clicked = player.playlist_widget.item(2)  # no seleccionado
+        targets = player._queue_action_targets(clicked)
+        assert targets == [player.playlist[2]]
+
+    def test_targets_un_solo_item_sin_seleccion_multiple(self, player):
+        self.setup_playlist(player)
+        player.playlist_widget.item(1).setSelected(True)
+        clicked = player.playlist_widget.item(1)
+        targets = player._queue_action_targets(clicked)
+        assert targets == [player.playlist[1]]
+
+    def test_toggle_many_agrega_todos_los_seleccionados(self, player):
+        self.setup_playlist(player)
+        songs = list(player.playlist)
+        player._toggle_queue_many(songs, add=True)
+        assert {id(s) for s in player.play_queue} == {id(s) for s in songs}
+
+    def test_toggle_many_no_duplica_los_ya_encolados(self, player):
+        self.setup_playlist(player)
+        player._toggle_queue(player.playlist[0])
+        player._toggle_queue_many(player.playlist, add=True)
+        assert len(player.play_queue) == 3
+
+    def test_toggle_many_quita_todos_los_seleccionados(self, player):
+        self.setup_playlist(player)
+        player._toggle_queue_many(player.playlist, add=True)
+        player._toggle_queue_many(player.playlist[:2], add=False)
+        assert player.play_queue == [player.playlist[2]]
+
+    def test_menu_agregar_vs_eliminar_con_multiseleccion_mixta(self, player):
+        """Selección con algunos encolados y otros no: el menú debe ofrecer
+        'Agregar' (afecta solo a los que faltan), no 'Eliminar'."""
+        self.setup_playlist(player)
+        player._toggle_queue(player.playlist[0])
+        for row in (0, 1, 2):
+            player.playlist_widget.item(row).setSelected(True)
+        clicked = player.playlist_widget.item(1)
+        targets = player._queue_action_targets(clicked)
+        add_mode = not (targets and all(player._is_queued(s) for s in targets))
+        assert add_mode is True
+
+        player._toggle_queue_many(targets, add_mode)
+        assert len(player.play_queue) == 3
+
+
+class TestTagMutes:
+    """Al consumir una canción de la cola, sus tags (Batería/Bajo/Voz/Otros)
+    mutean esas pistas y encienden el resto."""
+
+    def setup_playlist(self, player):
+        player._on_songs_loaded([
+            make_song("A", "1"), make_song("B", "2"), make_song("C", "3"),
+        ])
+
+    def test_tags_mutean_pistas_nombradas_y_encienden_el_resto(self, player, monkeypatch):
+        self.setup_playlist(player)
+        monkeypatch.setattr(player, "play_current", lambda: None)
+        player.playlist[1]["tags"] = "Batería, Voz"
+        player._toggle_queue(player.playlist[1])
+        player.current_index = 0
+
+        player.play_next()
+
+        assert player.mute_states == {
+            "drums": True, "vocals": True, "bass": False, "other": False,
+        }
+
+    def test_tags_sin_acentos_y_alias_voz_vocal(self, player, monkeypatch):
+        self.setup_playlist(player)
+        monkeypatch.setattr(player, "play_current", lambda: None)
+        player.playlist[1]["tags"] = "bajo"
+        player._toggle_queue(player.playlist[1])
+        player.current_index = 0
+
+        player.play_next()
+
+        assert player.mute_states == {
+            "drums": False, "vocals": False, "bass": True, "other": False,
+        }
+
+    def test_sin_tags_reconocidas_no_toca_el_mute(self, player, monkeypatch):
+        self.setup_playlist(player)
+        monkeypatch.setattr(player, "play_current", lambda: None)
+        player.playlist[1]["tags"] = "instrumental"
+        player._toggle_queue(player.playlist[1])
+        player.current_index = 0
+        player.set_mute("bass", True)
+
+        player.play_next()
+
+        assert player.mute_states["bass"] is True
+
+    def test_avance_normal_sin_cola_no_toca_el_mute(self, player, monkeypatch):
+        self.setup_playlist(player)
+        monkeypatch.setattr(player, "play_current", lambda: None)
+        player.playlist[1]["tags"] = "Batería"
+        player.current_index = 0
+        player.set_mute("vocals", True)
+
+        player.play_next()  # sin cola: avanza secuencial, ignora tags
+
+        assert player.mute_states == {
+            "drums": False, "vocals": True, "bass": False, "other": False,
+        }
