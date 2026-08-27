@@ -6,7 +6,7 @@
 
 **Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-[![Versión](https://img.shields.io/badge/versión-2.0.1-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Versión](https://img.shields.io/badge/versión-2.1.1-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
 [![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
@@ -180,6 +180,8 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 ```
 
 ## Versión actual
+
+**v2.1.1** — **cola de reproducción**: clic derecho en la playlist para "Agregar a la cola" o "Eliminar de la cola" (funciona también con varias canciones seleccionadas a la vez), y "Administrar cola" abre un grid donde se reordena arrastrando filas, se quitan canciones sin tocar la playlist, y cada una puede llevar **tags** editables (Batería/Bajo/Voz/Otros o texto libre, con un desplegable de sugerencias). Si una canción encolada tiene alguna de esas tags, al reproducirse **mutea automáticamente esa pista y enciende las demás**. La cola también se puede **exportar** a una playlist `.mlst` con un clic.
 
 **v2.0.1** — el modo remoto suma el **mezclador**: desde PlayIt Mobile ahora se controla el volumen general, y el volumen y el silencio de cada pista (batería, voz, bajo y otros), más el interruptor de **auto-unmute**. Lo que se toca en el teléfono se mueve también en la ventana de la PC, así que no hay dos estados distintos según desde dónde se ajuste; y el mezclador funciona sin necesidad de tener una canción cargada.
 
@@ -363,6 +365,8 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 ```
 
 ## Current version
+
+**v2.1.1** — **playback queue**: right-click a playlist entry for "Agregar a la cola" / "Eliminar de la cola" (works with multiple songs selected at once), and "Administrar cola" opens a grid where you reorder by dragging rows, remove songs without touching the playlist, and tag each one (Batería/Bajo/Voz/Otros or free text, with a suggestion dropdown). If a queued song carries one of those tags, playing it **automatically mutes that stem and unmutes the rest**. The queue can also be **exported** to a `.mlst` playlist with one click.
 
 **v2.0.1** — remote mode gains the **mixer**: PlayIt Mobile can now drive master volume, plus per-stem volume and mute (drums, vocals, bass, other), and the **auto-unmute** switch. What you touch on the phone moves on the PC window too, so there is never a split state depending on where you adjusted it; the mixer also works with no song loaded.
 
