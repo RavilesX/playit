@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPoint, QDir
-from PyQt6.QtGui import QDesktopServices, QImage, QPixmap
+from PyQt6.QtGui import QDesktopServices, QImage, QPixmap, QPainter, QPen, QColor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout,
     QFileDialog, QMessageBox, QCheckBox, QTableWidget, QTableWidgetItem,
@@ -277,19 +277,42 @@ class QueueDialog(BaseDialog):
         return html
 
 
+# Columnas y rol de datos de la tabla de PlaybackQueueDialog, a nivel de
+# módulo para que _QueueTable pueda usarlos sin acoplarse a esa clase (que
+# se define más abajo en este archivo). PlaybackQueueDialog los expone
+# también como atributos de clase (mismos valores) por compatibilidad.
+_QUEUE_SONG_ROLE = Qt.ItemDataRole.UserRole
+_QUEUE_COL_SONG, _QUEUE_COL_DURATION, _QUEUE_COL_TAGS = range(3)
+
+
 class _QueueTable(QTableWidget):
     """Grid de la cola: Supr quita la fila seleccionada; arrastrar una fila
-    la reordena. El drag-and-drop de fila completa de QTableWidget no es
-    fiable con el InternalMove por defecto de Qt (mueve/duplica celdas
-    sueltas en vez de la fila), así que dropEvent se maneja a mano."""
+    la reordena.
+
+    Reordenamiento 100% manual (mousePress/Move/Release), sin el Drag & Drop
+    nativo de Qt (QDrag/dropEvent): QAbstractItemView, del lado donde arranca
+    el arrastre, hace su propia limpieza posterior al soltar cuando la
+    acción resuelta es Move — asume que dropMimeData() ya movió los datos y
+    borra la fila de origen por su cuenta. Como _move_row ya reubica la fila
+    a mano, esa limpieza automática de Qt caía sobre el índice viejo (ya
+    movido) y terminaba borrando la fila. Desactivar el DnD nativo por
+    completo es la única forma de que ese ciclo de limpieza no se dispare.
+    """
+
+    DRAG_THRESHOLD = 4  # px; evita que un clic con la mano temblando cuente como arrastre
+
+    INDICATOR_COLOR = QColor("#B98CFF")
 
     def __init__(self, on_change, parent=None):
         super().__init__(0, 3, parent)
         self._on_change = on_change
-        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.setDragDropOverwriteMode(False)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._press_row = -1
+        self._press_pos = None
+        self._dragging = False
+        self._indicator_y = None
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Delete and self.currentRow() != -1:
@@ -298,44 +321,115 @@ class _QueueTable(QTableWidget):
         else:
             super().keyPressEvent(event)
 
-    def dropEvent(self, event):
-        if event.source() is not self:
-            super().dropEvent(event)
-            return
-        src_row = self.currentRow()
-        if not (0 <= src_row < self.rowCount()):
-            event.ignore()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_row = self.rowAt(event.position().toPoint().y())
+            self._press_pos = event.position().toPoint()
+            self._dragging = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._press_row == -1 or not (event.buttons() & Qt.MouseButton.LeftButton):
+            super().mouseMoveEvent(event)
             return
         pos = event.position().toPoint()
-        target_row = self.rowAt(pos.y())
-        if target_row == -1:
-            target_row = self.rowCount() - 1
-        elif pos.y() > self.visualRect(self.model().index(target_row, 0)).center().y():
-            target_row += 1
-        if target_row > src_row:
-            target_row -= 1
-        if target_row != src_row:
-            self._move_row(src_row, target_row)
-        event.accept()
-        self._on_change()
+        if not self._dragging:
+            if (pos - self._press_pos).manhattanLength() < self.DRAG_THRESHOLD:
+                return
+            self._dragging = True
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        # No se delega a super(): el comportamiento por defecto arrastraría
+        # la selección detrás del cursor en vez de mantener resaltada la
+        # fila que se está moviendo.
+        self._set_indicator_y(self._raw_drop_row(pos))
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+            self.unsetCursor()
+            self._set_indicator_y(None)
+            src_row = self._press_row
+            raw_target = self._raw_drop_row(event.position().toPoint())
+            # raw_target es "insertar antes de esta fila" en la indexación
+            # ACTUAL (previa a mover nada); si cae después del origen, hay
+            # que restarle 1 porque quitar la fila de origen recorre todo
+            # lo que está detrás un lugar.
+            target_row = raw_target - 1 if raw_target > src_row else raw_target
+            if 0 <= target_row < self.rowCount() and target_row != src_row:
+                self._move_row(src_row, target_row)
+                self._on_change()
+            self._press_row = -1
+            self._dragging = False
+            return
+        self._press_row = -1
+        self._dragging = False
+        super().mouseReleaseEvent(event)
+
+    def _raw_drop_row(self, pos: QPoint) -> int:
+        """Fila (0..rowCount, ambos inclusive) antes de la cual caería el
+        drop en la posición actual del mouse, en la indexación sin mover
+        nada todavía. rowCount() significa "después de la última fila"."""
+        row = self.rowAt(pos.y())
+        if row == -1:
+            return self.rowCount()
+        rect = self.visualRect(self.model().index(row, 0))
+        return row + 1 if pos.y() > rect.center().y() else row
+
+    def _set_indicator_y(self, raw_target: int | None):
+        """Guarda la coordenada Y de la línea de destino (o None para
+        ocultarla) y repinta solo si cambió, para no repintar en cada pixel
+        de movimiento del mouse."""
+        y = None
+        if raw_target is not None:
+            if raw_target >= self.rowCount():
+                if self.rowCount() == 0:
+                    y = 0
+                else:
+                    y = self.visualRect(self.model().index(self.rowCount() - 1, 0)).bottom()
+            else:
+                y = self.visualRect(self.model().index(raw_target, 0)).top()
+        if y != self._indicator_y:
+            self._indicator_y = y
+            self.viewport().update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._indicator_y is None:
+            return
+        painter = QPainter(self.viewport())
+        painter.setPen(QPen(self.INDICATOR_COLOR, 2))
+        painter.drawLine(0, self._indicator_y, self.viewport().width(), self._indicator_y)
+        painter.end()
 
     def _move_row(self, src: int, dst: int):
-        row_items = [self.takeItem(src, c) for c in range(self.columnCount())]
-        # Las celdas con cellWidget (la de Tags) no viajan con takeItem: hay
-        # que despegarlas antes de removeRow, si no Qt las destruye al
-        # borrar la fila en vez de reusarlas en la fila destino.
-        row_widgets = [self.cellWidget(src, c) for c in range(self.columnCount())]
-        for widget in row_widgets:
-            if widget is not None:
-                widget.setParent(None)
+        # Columnas con QTableWidgetItem (Canción, Duración): take/setItem es
+        # la forma soportada por Qt de transplantarlas, sin riesgo.
+        row_items = {
+            c: self.takeItem(src, c)
+            for c in range(self.columnCount()) if c != _QUEUE_COL_TAGS
+        }
+        # La celda de Tags usa cellWidget (_TagsCell), no QTableWidgetItem:
+        # NO se debe reutilizar ese widget "movido a mano". QAbstractItemView
+        # guarda internamente su propio mapa índice→widget aparte del árbol
+        # padre/hijo normal; con setParent(None) + removeRow() ese mapa
+        # interno igual intenta destruir el widget mientras Python todavía
+        # lo referencia para reinsertarlo — use-after-free, y de ahí el
+        # segfault. Más simple y seguro: guardar solo el song dict y
+        # reconstruir un _TagsCell nuevo en el destino (misma operación que
+        # ya hace _reload_items() al abrir el diálogo).
+        # OJO: el song hay que leerlo de row_items (ya sacado con takeItem
+        # arriba), no con self.item(src, ...) — ese ítem ya no está en la
+        # celda a esta altura y devolvería None (bug real: dejaba sin tags
+        # cell a toda fila que pasara por un arrastre).
+        song_item = row_items.get(_QUEUE_COL_SONG)
+        song = song_item.data(_QUEUE_SONG_ROLE).song if song_item else None
+
         self.removeRow(src)
         self.insertRow(dst)
-        for c, item in enumerate(row_items):
+        for c, item in row_items.items():
             if item is not None:
                 self.setItem(dst, c, item)
-        for c, widget in enumerate(row_widgets):
-            if widget is not None:
-                self.setCellWidget(dst, c, widget)
+        if song is not None:
+            self.setCellWidget(dst, _QUEUE_COL_TAGS, _TagsCell(song))
         self.selectRow(dst)
 
 
@@ -597,8 +691,10 @@ class PlaybackQueueDialog(BaseDialog):
     Edita audio_player.play_queue (y los "tags" de cada canción) en vivo,
     no hay Aceptar/Cancelar."""
 
-    SONG_ROLE = Qt.ItemDataRole.UserRole
-    COL_SONG, COL_DURATION, COL_TAGS = range(3)
+    # Mismos valores que usa _QueueTable._move_row (definidos a nivel de
+    # módulo para que ambas clases compartan uno solo sin acoplarse entre sí).
+    SONG_ROLE = _QUEUE_SONG_ROLE
+    COL_SONG, COL_DURATION, COL_TAGS = _QUEUE_COL_SONG, _QUEUE_COL_DURATION, _QUEUE_COL_TAGS
 
     TABLE_QSS = """
         QTableWidget#queue_table {
@@ -608,7 +704,10 @@ class PlaybackQueueDialog(BaseDialog):
             gridline-color: rgba(255,255,255,0.15);
             border: 0px;
         }
-        QTableWidget#queue_table::item { padding: 4px; }
+        QTableWidget#queue_table::item {
+            padding: 4px;
+            background: rgba(0,0,0,0.35);
+        }
         QTableWidget#queue_table::item:selected {
             background: #7E54AF;
             color: white;
