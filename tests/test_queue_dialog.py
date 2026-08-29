@@ -1,7 +1,8 @@
 """Tests del diálogo "Administración de cola" (dialogs.PlaybackQueueDialog).
 
 Usa un FakePlayer liviano en vez del fixture `player` (AudioPlayer completo):
-el diálogo solo necesita `audio_player.play_queue` y `export_queue_mlst`.
+el diálogo solo necesita `audio_player.play_queue`, `export_queue_mlst` y
+`_refresh_queue_indicators` (el punto morado de la playlist principal).
 """
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtTest import QTest
@@ -16,6 +17,9 @@ class FakePlayer:
 
     def export_queue_mlst(self):
         self.export_calls += 1
+
+    def _refresh_queue_indicators(self):
+        pass
 
 
 def make_song(artist, duration="1:00", tags=""):

@@ -823,6 +823,9 @@ class PlaybackQueueDialog(BaseDialog):
             self.table.item(r, self.COL_SONG).data(self.SONG_ROLE).song
             for r in range(self.table.rowCount())
         ]
+        # Quitar una fila acá también saca la canción de la cola: el punto
+        # morado del renglón en la playlist principal tiene que apagarse.
+        self.audio_player._refresh_queue_indicators()
 
 
 class SplitDialog(BaseDialog):

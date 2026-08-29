@@ -292,6 +292,63 @@ class TestQueue:
         player._toggle_queue_many(targets, add_mode)
         assert len(player.play_queue) == 3
 
+    def test_indicador_se_prende_y_apaga_con_toggle(self, player):
+        from ui_components import PlaylistItemDelegate
+
+        self.setup_playlist(player)
+        song = player.playlist[1]
+        item = player.playlist_widget.item(1)
+        assert not item.data(PlaylistItemDelegate.QUEUE_ROLE)
+
+        player._toggle_queue(song)
+        assert item.data(PlaylistItemDelegate.QUEUE_ROLE) is True
+        # Los demás renglones no se prenden solos.
+        assert not player.playlist_widget.item(0).data(PlaylistItemDelegate.QUEUE_ROLE)
+
+        player._toggle_queue(song)
+        assert not item.data(PlaylistItemDelegate.QUEUE_ROLE)
+
+    def test_indicador_con_toggle_many(self, player):
+        from ui_components import PlaylistItemDelegate
+
+        self.setup_playlist(player)
+        player._toggle_queue_many(player.playlist, add=True)
+        for row in range(3):
+            assert player.playlist_widget.item(row).data(PlaylistItemDelegate.QUEUE_ROLE)
+
+        player._toggle_queue_many(player.playlist[:2], add=False)
+        assert not player.playlist_widget.item(0).data(PlaylistItemDelegate.QUEUE_ROLE)
+        assert not player.playlist_widget.item(1).data(PlaylistItemDelegate.QUEUE_ROLE)
+        assert player.playlist_widget.item(2).data(PlaylistItemDelegate.QUEUE_ROLE)
+
+    def test_indicador_se_apaga_al_consumir_de_la_cola(self, player, monkeypatch):
+        from ui_components import PlaylistItemDelegate
+
+        self.setup_playlist(player)
+        monkeypatch.setattr(player, "play_current", lambda: None)
+        song = player.playlist[1]
+        player._toggle_queue(song)
+        player.current_index = 0
+
+        player.play_next()  # consume la canción encolada
+
+        item = next(
+            player.playlist_widget.item(r) for r in range(3)
+            if player.playlist[r] is song
+        )
+        assert not item.data(PlaylistItemDelegate.QUEUE_ROLE)
+
+    def test_indicador_se_apaga_al_quitar_desde_remove_selected(self, player):
+        from ui_components import PlaylistItemDelegate
+
+        self.setup_playlist(player)
+        player._toggle_queue(player.playlist[1])
+        player.playlist_widget.item(1).setSelected(True)
+        player.remove_selected()
+        # La canción restante que quedó en su lugar no debe heredar el punto.
+        for row in range(player.playlist_widget.count()):
+            assert not player.playlist_widget.item(row).data(PlaylistItemDelegate.QUEUE_ROLE)
+
 
 class TestTagMutes:
     """Al consumir una canción de la cola, sus tags (Batería/Bajo/Voz/Otros)

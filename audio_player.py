@@ -626,6 +626,16 @@ class AudioPlayer(QMainWindow):
     def _is_queued(self, song_data: dict) -> bool:
         return any(s is song_data for s in self.play_queue)
 
+    def _refresh_queue_indicators(self):
+        """Sincroniza el punto morado de "en cola" de cada renglón de la
+        playlist con self.play_queue. Se llama después de cualquier cambio
+        a la cola (agregar/quitar/consumir), nunca desde el paint() del
+        delegate — ahí sería recalcular la pertenencia en cada repintado."""
+        for row, song in enumerate(self.playlist):
+            item = self.playlist_widget.item(row)
+            if item is not None:
+                item.setData(PlaylistItemDelegate.QUEUE_ROLE, self._is_queued(song))
+
     def _toggle_queue(self, song_data: dict | None):
         if song_data is None:
             return
@@ -633,6 +643,7 @@ class AudioPlayer(QMainWindow):
             self.play_queue[:] = [s for s in self.play_queue if s is not song_data]
         else:
             self.play_queue.append(song_data)
+        self._refresh_queue_indicators()
 
     def _queue_action_targets(self, item: QListWidgetItem) -> list[dict]:
         """Canciones objetivo de Agregar/Eliminar de la cola: toda la
@@ -653,12 +664,14 @@ class AudioPlayer(QMainWindow):
                 self.play_queue.append(song)
             elif not add and self._is_queued(song):
                 self.play_queue[:] = [s for s in self.play_queue if s is not song]
+        self._refresh_queue_indicators()
 
     def _purge_queue(self):
         """Descarta de la cola las canciones que ya no están en la playlist."""
         self.play_queue[:] = [
             s for s in self.play_queue if any(s is p for p in self.playlist)
         ]
+        self._refresh_queue_indicators()
 
     def _show_queue_manager(self):
         dialog = PlaybackQueueDialog(self, parent=self)
@@ -1109,6 +1122,7 @@ class AudioPlayer(QMainWindow):
             # seguir la playlist. Búsqueda por identidad porque la cola
             # guarda los mismos dicts de self.playlist, no índices.
             queued_song = self.play_queue.pop(0)
+            self._refresh_queue_indicators()
             row = next(
                 (i for i, s in enumerate(self.playlist) if s is queued_song), -1,
             )

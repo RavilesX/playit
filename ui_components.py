@@ -188,11 +188,15 @@ class PlaylistItemDelegate(QStyledItemDelegate):
 
     DURATION_ROLE = Qt.ItemDataRole.UserRole + 1
     PATH_ROLE = Qt.ItemDataRole.UserRole + 2
+    QUEUE_ROLE = Qt.ItemDataRole.UserRole + 3  # bool: la canción está en la cola de reproducción
     MARGIN = 6
+    QUEUE_DOT_SIZE = 8
+    QUEUE_DOT_COLOR = QColor("#B98CFF")
 
     def paint(self, painter, option, index):
         duration = index.data(self.DURATION_ROLE)
-        if not duration:
+        queued = bool(index.data(self.QUEUE_ROLE))
+        if not duration and not queued:
             super().paint(painter, option, index)
             return
 
@@ -200,23 +204,30 @@ class PlaylistItemDelegate(QStyledItemDelegate):
         self.initStyleOption(opt, index)
         style = opt.widget.style() if opt.widget else QApplication.style()
 
-        dur_width = opt.fontMetrics.horizontalAdvance(duration) + self.MARGIN
+        dur_width = (opt.fontMetrics.horizontalAdvance(duration) + self.MARGIN
+                     if duration else 0)
+        dot_width = (self.QUEUE_DOT_SIZE + self.MARGIN) if queued else 0
         text_rect = style.subElementRect(
             QStyle.SubElement.SE_ItemViewItemText, opt, opt.widget)
 
         # El renglón puede ser más ancho que el viewport (títulos largos):
-        # anclar la duración al borde visible, no al ancho total del ítem
+        # anclar duración/indicador al borde visible, no al ancho total del ítem
         right_limit = text_rect.right()
         if opt.widget is not None:
             right_limit = min(right_limit,
                               opt.widget.viewport().rect().right() - self.MARGIN)
+        reserved_width = dur_width + dot_width
         dur_rect = QRect(right_limit - dur_width, text_rect.top(),
                          dur_width, text_rect.height())
+        # El punto de "en cola" va a la izquierda de la duración, ambos
+        # anclados al mismo borde derecho.
+        dot_rect = QRect(right_limit - reserved_width, text_rect.top(),
+                         dot_width, text_rect.height())
 
-        # Fondo/selección/icono + título elidido para no tapar la duración
+        # Fondo/selección/icono + título elidido para no tapar duración/indicador
         opt.text = opt.fontMetrics.elidedText(
             opt.text, Qt.TextElideMode.ElideRight,
-            dur_rect.left() - text_rect.left() - self.MARGIN)
+            right_limit - reserved_width - text_rect.left() - self.MARGIN)
         style.drawControl(
             QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
@@ -232,10 +243,18 @@ class PlaylistItemDelegate(QStyledItemDelegate):
         else:
             pen_color = opt.palette.color(QPalette.ColorRole.Text)
         painter.setPen(pen_color)
-        painter.drawText(
-            dur_rect,
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-            duration)
+        if duration:
+            painter.drawText(
+                dur_rect,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                duration)
+        if queued:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self.QUEUE_DOT_COLOR)
+            radius = self.QUEUE_DOT_SIZE // 2
+            center = QPoint(dot_rect.right() - radius, dot_rect.center().y())
+            painter.drawEllipse(center, radius, radius)
         painter.restore()
 
 
