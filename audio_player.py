@@ -556,6 +556,7 @@ class AudioPlayer(QMainWindow):
         self.next_btn.clicked.connect(self.play_next)
         self.stop_btn.clicked.connect(self.stop_playback)
         self.repeat_btn.clicked.connect(self.toggle_repeat)
+        self.progress_song.sliderMoved.connect(self._on_progress_moved)
         self.progress_song.sliderReleased.connect(self._on_progress_released)
         self.progress_song.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -1466,6 +1467,18 @@ class AudioPlayer(QMainWindow):
         finally:
             self._seeking = False
 
+    def _on_progress_moved(self, value_ms: int):
+        # update_display esta congelado durante el arrastre, asi que la etiqueta
+        # de tiempo la refresca el propio arrastre.
+        if not self._track_data:
+            return
+        total_s = len(self._track_data[0][0]) // self._track_data[0][1]
+        cur_m, cur_s = divmod(value_ms // 1000, 60)
+        tot_m, tot_s = divmod(int(total_s), 60)
+        self.progress_label.setText(
+            f"{cur_m:02d}:{cur_s:02d} / {tot_m:02d}:{tot_s:02d}"
+        )
+
     def _on_progress_released(self):
         self.seek_to(self.progress_song.value())
         self.update_lyrics_display()
@@ -1757,6 +1770,11 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     def update_display(self):
         if self.playback_state != "Activa" or not self._track_data or self._seeking:
+            return
+        # Mientras el usuario arrastra el handle, escribir setValue lo devuelve
+        # a la posicion de reproduccion: el arrastre se veia como cancelado
+        # (y sliderReleased leia el valor viejo, no el soltado).
+        if self.progress_song.isSliderDown():
             return
         try:
             sr = self._track_data[0][1]
