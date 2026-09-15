@@ -50,6 +50,7 @@ Detalles que conviene saber:
 - **El código se conserva entre reinicios**, así el teléfono se reconecta solo; si el router le cambia la IP a la PC, la vuelve a encontrar sola. **"Generar nuevo código"** desempareja cualquier teléfono anterior.
 - **Sin cifrado**: el código viaja en claro por la red local. En una red doméstica o de sala de ensayo es aceptable —lo peor que puede pasar es que alguien te cambie la canción—; en una red pública, conviene generar un código nuevo al terminar.
 - Windows puede pedir permiso de firewall dos veces (TCP y UDP): hay que permitirlo en **redes privadas**.
+- **En desarrollo**: el escritorio ya expone el control completo de la **cola de reproducción** (agregar, quitar, reordenar y tags por API) para cuando PlayIt Mobile sume esa pantalla; todavía no forma parte de una versión publicada.
 
 ## Sistemas soportados
 
@@ -235,6 +236,7 @@ Worth knowing:
 - **The code survives restarts**, so the phone reconnects on its own; if the router changes the PC's IP, it finds it again by itself. **"Generar nuevo código"** unpairs any previously paired phone.
 - **No encryption**: the code travels in the clear over the local network. Fine at home or in a rehearsal room —worst case someone skips your song—; on a public network, generate a new code when you're done.
 - Windows may ask for firewall permission twice (TCP and UDP); allow it on **private networks**.
+- **In progress**: the desktop already exposes full **playback queue** control over the API (add, remove, reorder, tags) for when PlayIt Mobile ships that screen; not part of a published release yet.
 
 ## Supported systems
 
