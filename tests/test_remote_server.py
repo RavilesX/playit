@@ -575,7 +575,8 @@ class TestContratoDelSnapshot:
 
     CLAVES_STATE = {"v", "state", "index", "artist", "song", "position_ms",
                     "duration_ms", "repeat", "count", "rev",
-                    "master_volume", "volumes", "mute", "auto_unmute"}
+                    "master_volume", "volumes", "mute", "auto_unmute", "queue",
+                    "queue_tags"}
 
     def _snapshot(self, player):
         player._remote_bridge = RemoteBridge()
@@ -611,6 +612,8 @@ class TestContratoDelSnapshot:
         assert set(state["mute"]) == set(TRACK_NAMES)
         assert all(isinstance(v, bool) for v in state["mute"].values())
         assert isinstance(state["auto_unmute"], bool)
+        assert isinstance(state["queue"], list)
+        assert all(isinstance(i, int) for i in state["queue"])
 
     @pytest.mark.parametrize("estado", ["Detenido", "Pausada", "Activa"])
     def test_los_tres_estados_viajan_literales(self, player, estado):
@@ -809,6 +812,175 @@ class TestMezcladorRemoto:
             assert state["master_volume"] == 45
             assert state["mute"]["other"] is True
             assert state["auto_unmute"] is False
+        finally:
+            player._remote_bridge = None
+
+
+def _make_song(artist, song):
+    from pathlib import Path
+    return {"artist": artist, "song": song, "path": Path("/tmp/x")}
+
+
+class TestColaRemota:
+    """queue_add/queue_remove/queue_clear/queue_reorder: aditivo, sin subir
+    PROTOCOL_VERSION, mismo trato que el mezclador remoto."""
+
+    def setup_playlist(self, player):
+        player._on_songs_loaded([
+            _make_song("A", "1"), _make_song("B", "2"), _make_song("C", "3"),
+        ])
+
+    @pytest.mark.parametrize("body,esperado", [
+        ({"cmd": "queue_add", "index": 1}, ["queue_add", 1]),
+        ({"cmd": "queue_remove", "index": 0}, ["queue_remove", 0]),
+        ({"cmd": "queue_clear"}, ["queue_clear", None]),
+        ({"cmd": "queue_reorder", "order": [1, 0]}, ["queue_reorder", [1, 0]]),
+        ({"cmd": "queue_reorder", "order": []}, ["queue_reorder", []]),
+        ({"cmd": "queue_set_tags", "index": 1, "value": "Voz, Bajo"},
+         ["queue_set_tags", (1, "Voz, Bajo")]),
+        ({"cmd": "queue_set_tags", "index": 0, "value": ""},
+         ["queue_set_tags", (0, "")]),
+    ])
+    def test_comandos_validos_llegan_al_puente(self, server, qtbot, body,
+                                               esperado):
+        bridge, port, token = server
+        with qtbot.waitSignal(bridge.command, timeout=3000) as blocker:
+            code, data = _request(port, "/api/command", token,
+                                  method="POST", body=body)
+        assert (code, data) == (200, {"ok": True})
+        assert blocker.args == esperado
+
+    @pytest.mark.parametrize("body", [
+        {"cmd": "queue_add", "index": 99},
+        {"cmd": "queue_add", "index": True},
+        {"cmd": "queue_add"},
+        {"cmd": "queue_remove", "index": -1},
+        {"cmd": "queue_reorder", "order": [0, 0]},   # repetido
+        {"cmd": "queue_reorder", "order": [0, 1, 2, 3]},  # más que la playlist
+        {"cmd": "queue_reorder", "order": "todo"},
+        {"cmd": "queue_reorder", "order": [0, "1"]},
+        {"cmd": "queue_set_tags", "index": 99, "value": "Voz"},
+        {"cmd": "queue_set_tags", "index": 0},            # sin value
+        {"cmd": "queue_set_tags", "index": 0, "value": 7},  # no es texto
+        {"cmd": "queue_set_tags", "value": "Voz"},        # sin índice
+        {"cmd": "queue_set_tags", "index": 0, "value": "x" * 201},
+    ])
+    def test_comandos_invalidos_son_400(self, server, qtbot, body):
+        bridge, port, token = server
+        recibidos = []
+        bridge.command.connect(lambda cmd, arg: recibidos.append((cmd, arg)))
+
+        code, data = _request(port, "/api/command", token,
+                              method="POST", body=body)
+        assert code == 400
+        assert "error" in data
+        qtbot.wait(100)
+        assert recibidos == []
+
+    def test_queue_clear_no_necesita_playlist(self, token_file):
+        """Igual que el mezclador: vaciar la cola sin nada cargado no es un
+        409, la playlist vacía no tiene nada que ver con esto."""
+        bridge = RemoteBridge()
+        srv = _make_server(bridge, token_file)
+        _, port, token = srv.start()
+        try:
+            bridge.publish_playlist(0, [], [])
+            code, _ = _request(port, "/api/command", token, method="POST",
+                               body={"cmd": "queue_clear"})
+            assert code == 200
+        finally:
+            srv.stop()
+
+    def test_queue_add_remove_remoto_mueve_la_cola(self, player):
+        self.setup_playlist(player)
+        player._handle_remote_command("queue_add", 1)
+        assert player.play_queue == [player.playlist[1]]
+        player._handle_remote_command("queue_add", 1)   # ya está: no duplica
+        assert player.play_queue == [player.playlist[1]]
+        player._handle_remote_command("queue_remove", 1)
+        assert player.play_queue == []
+
+    def test_queue_clear_remoto_vacia_la_cola(self, player):
+        self.setup_playlist(player)
+        player._toggle_queue_many(player.playlist, True)
+        player._handle_remote_command("queue_clear", None)
+        assert player.play_queue == []
+
+    def test_queue_reorder_remoto_permuta_la_cola(self, player):
+        self.setup_playlist(player)
+        a, b, c = player.playlist
+        player._toggle_queue_many([a, b, c], True)
+        player._handle_remote_command("queue_reorder", [2, 0, 1])
+        assert player.play_queue == [c, a, b]
+
+    def test_queue_reorder_que_no_calza_se_ignora_entero(self, player):
+        """No es exactamente la misma cola (falta una, sobra un índice
+        repetido, etc.): el pedido se descarta completo, no a medias."""
+        self.setup_playlist(player)
+        a, b, c = player.playlist
+        player._toggle_queue_many([a, b], True)
+        antes = list(player.play_queue)
+        player._handle_remote_command("queue_reorder", [0, 1, 2])  # trae a c
+        assert player.play_queue == antes
+        player._handle_remote_command("queue_reorder", [0])   # falta uno
+        assert player.play_queue == antes
+
+    def test_argumentos_rotos_no_revientan_el_hilo_gui(self, player):
+        self.setup_playlist(player)
+        for cmd, arg in (("queue_add", None), ("queue_add", "1"),
+                         ("queue_remove", None), ("queue_reorder", None),
+                         ("queue_reorder", "todo"), ("queue_reorder", [None]),
+                         ("queue_set_tags", None), ("queue_set_tags", (99, "x")),
+                         ("queue_set_tags", ("0", "x"))):
+            player._handle_remote_command(cmd, arg)
+
+    def test_tags_remotas_se_escriben_en_la_cancion(self, player):
+        """Las tags viven en el dict de la canción (el mismo que la cola
+        guarda por identidad), no en una tabla aparte de la cola."""
+        self.setup_playlist(player)
+        player._handle_remote_command("queue_set_tags", (1, "Voz, Bajo"))
+        assert player.playlist[1]["tags"] == "Voz, Bajo"
+        player._handle_remote_command("queue_set_tags", (1, ""))
+        assert player.playlist[1]["tags"] == ""
+
+    def test_el_snapshot_lleva_las_tags_en_el_orden_de_la_cola(self, player):
+        self.setup_playlist(player)
+        player._remote_bridge = RemoteBridge()
+        try:
+            player._handle_remote_command("queue_set_tags", (2, "Voz"))
+            player._handle_remote_command("queue_add", 2)
+            player._handle_remote_command("queue_add", 0)
+            state = player._remote_bridge.snapshot_state()
+            assert state["queue"] == [2, 0]
+            # Paralela a "queue": una canción sin tags viaja como cadena
+            # vacía, nunca como null ni como hueco.
+            assert state["queue_tags"] == ["Voz", ""]
+        finally:
+            player._remote_bridge = None
+
+    def test_el_snapshot_refleja_la_cola_en_orden_fifo(self, player):
+        self.setup_playlist(player)
+        player._remote_bridge = RemoteBridge()
+        try:
+            a, b, c = player.playlist
+            player._handle_remote_command("queue_add", 2)
+            player._handle_remote_command("queue_add", 0)
+            state = player._remote_bridge.snapshot_state()
+            assert state["queue"] == [2, 0]
+        finally:
+            player._remote_bridge = None
+
+    def test_mutacion_local_empuja_snapshot_al_toque(self, player):
+        """_refresh_queue_indicators ya corre tras cualquier cambio de cola
+        (para el punto morado); tiene que llevarse puesto el snapshot sin
+        esperar el tick de remote_timer."""
+        self.setup_playlist(player)
+        player._remote_bridge = RemoteBridge()
+        try:
+            player._toggle_queue(player.playlist[1])
+            assert player._remote_bridge.snapshot_state()["queue"] == [1]
+            player._toggle_queue(player.playlist[1])
+            assert player._remote_bridge.snapshot_state()["queue"] == []
         finally:
             player._remote_bridge = None
 

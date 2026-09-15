@@ -636,6 +636,10 @@ class AudioPlayer(QMainWindow):
             item = self.playlist_widget.item(row)
             if item is not None:
                 item.setData(PlaylistItemDelegate.QUEUE_ROLE, self._is_queued(song))
+        # Empuje inmediato al móvil: sin esto la cola solo se actualizaría en
+        # el tick de 1 s de remote_timer, y un cambio hecho en el Desktop se
+        # vería con hasta un segundo de retraso.
+        self._publish_remote_state()
 
     def _toggle_queue(self, song_data: dict | None):
         if song_data is None:
@@ -2268,6 +2272,7 @@ class AudioPlayer(QMainWindow):
             sr = self._track_data[0][1]
             pos_ms = int(self._seek_position / sr * 1000)
             dur_ms = int(len(self._track_data[0][0]) / sr * 1000)
+        queue = self._queue_indices()
         self._remote_bridge.publish_state({
             "v": 1,
             "state": state if state is not None else self.playback_state,
@@ -2287,7 +2292,50 @@ class AudioPlayer(QMainWindow):
                         for t in TRACK_NAMES},
             "mute": {t: bool(self.mute_states[t]) for t in TRACK_NAMES},
             "auto_unmute": bool(self.auto_unmute_enabled),
+            # Cola remota: aditivo igual que el mezclador, no sube
+            # PROTOCOL_VERSION. Índices de playlist (mismo "i" que
+            # /api/playlist), en orden FIFO de consumo — no los dicts, que
+            # nunca se serializan.
+            "queue": queue,
+            # Tags de las canciones encoladas, en el mismo orden que "queue"
+            # (paralela, no un dict: las claves JSON serían strings y el
+            # móvil tendría que reconvertirlas a índice). Son las que dispara
+            # el auto-mute por tags al consumir la cola.
+            "queue_tags": [
+                str(self.playlist[i].get('tags', '') or '') for i in queue
+            ],
         })
+
+    def _queue_indices(self) -> list[int]:
+        """`self.play_queue` traducida a índices de playlist, en orden FIFO.
+
+        Búsqueda por identidad: play_queue guarda los mismos dicts de
+        self.playlist, no índices. Una canción encolada que ya no está en la
+        playlist (borrada mientras esperaba) no debería quedar, pero por las
+        dudas se descarta acá en vez de mandarle un -1 al móvil.
+        """
+        indices = []
+        for queued in self.play_queue:
+            row = next((i for i, s in enumerate(self.playlist) if s is queued), -1)
+            if row != -1:
+                indices.append(row)
+        return indices
+
+    def set_song_tags(self, row: int, tags: str):
+        """Tags de una canción de la playlist, vengan del administrador de
+        cola o del móvil.
+
+        Fuente de verdad separada de la vista, mismo motivo que `set_mute` /
+        `set_repeat`: un comando remoto entra por señal y no puede leer la
+        celda de tags del diálogo (que ni siquiera tiene por qué estar
+        abierto).
+        """
+        if not isinstance(row, int) or isinstance(row, bool):
+            return
+        if not 0 <= row < len(self.playlist):
+            return
+        self.playlist[row]['tags'] = str(tags)
+        self._refresh_queue_indicators()
 
     def _publish_remote_target(self):
         """Publica la canción que se está por cargar como si ya sonara.
@@ -2330,7 +2378,41 @@ class AudioPlayer(QMainWindow):
                 self.set_master_volume(arg)
         elif cmd == "set_auto_unmute":
             self.set_auto_unmute(bool(arg))
+        elif cmd == "queue_add":
+            if isinstance(arg, int) and 0 <= arg < len(self.playlist):
+                self._toggle_queue_many([self.playlist[arg]], True)
+        elif cmd == "queue_remove":
+            if isinstance(arg, int) and 0 <= arg < len(self.playlist):
+                self._toggle_queue_many([self.playlist[arg]], False)
+        elif cmd == "queue_clear":
+            self.play_queue.clear()
+            self._refresh_queue_indicators()
+        elif cmd == "queue_reorder":
+            self._remote_queue_reorder(arg)
+        elif cmd == "queue_set_tags":
+            if isinstance(arg, tuple) and len(arg) == 2:
+                self.set_song_tags(arg[0], arg[1])
         self._publish_remote_state()
+
+    def _remote_queue_reorder(self, order):
+        """Aplica un reordenamiento remoto de la cola (índices de playlist).
+
+        El servidor ya validó rango y que no haya repetidos; acá falta la
+        única regla que no puede chequear con el playlist_count solo: que el
+        pedido sea exactamente una permutación de la cola actual, ni una
+        canción de más ni de menos. Si no calza se ignora entero en vez de
+        aplicar a medias.
+        """
+        if not isinstance(order, list):
+            return
+        songs = [self.playlist[i] for i in order
+                 if isinstance(i, int) and 0 <= i < len(self.playlist)]
+        if len(songs) != len(self.play_queue):
+            return
+        if {id(s) for s in songs} != {id(s) for s in self.play_queue}:
+            return
+        self.play_queue[:] = songs
+        self._refresh_queue_indicators()
 
     def toggle_remote_mode(self, enabled: bool):
         if not enabled:

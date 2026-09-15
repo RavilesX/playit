@@ -52,13 +52,17 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = 1
 DEFAULT_PORT = 8770
 PORT_RANGE = range(DEFAULT_PORT, DEFAULT_PORT + 10)
-MAX_BODY = 1024
+# queue_reorder manda la cola entera como lista de índices: con playlists
+# grandes un cuerpo de 1024 se queda corto.
+MAX_BODY = 4096
 # Corta conexiones keep-alive muertas (teléfono fuera de cobertura) para no
 # dejar hilos del servidor colgados esperando bytes que no llegan.
 CONN_TIMEOUT = 10
 
 COMMANDS = ("play_pause", "stop", "next", "prev", "repeat", "play_index",
-            "set_mute", "set_volume", "set_master_volume", "set_auto_unmute")
+            "set_mute", "set_volume", "set_master_volume", "set_auto_unmute",
+            "queue_add", "queue_remove", "queue_clear", "queue_reorder",
+            "queue_set_tags")
 # Comandos que no tienen sentido con la playlist vacía → 409. El mezclador no
 # está: mutear la voz o bajar el bajo son ajustes que valen antes de cargar
 # nada, igual que mover los sliders con la ventana recién abierta.
@@ -68,6 +72,11 @@ NEEDS_PLAYLIST = ("play_pause", "next", "prev", "play_index")
 # propósito: importarlo desde acá sería un ciclo (audio_player importa este
 # módulo) por cuatro strings que no cambian.
 MIXER_TRACKS = ("drums", "vocals", "bass", "other")
+
+# Tope de la cadena de tags de una canción (queue_set_tags). Las tags reales
+# son cuatro nombres de pista y alguna nota suelta; el límite está para que
+# un cliente no use el campo como almacenamiento arbitrario.
+MAX_TAGS_LEN = 200
 
 TOKEN_FILE = "remote_token.json"
 TOKEN_BYTES = 16                    # 32 caracteres hex
@@ -444,6 +453,48 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": f"pista desconocida: {track}"})
                 return None
             return {"cmd": cmd, "arg": (track, value)}
+        if cmd in ("queue_add", "queue_remove"):
+            index = data.get("index")
+            if not isinstance(index, int) or isinstance(index, bool) \
+                    or not 0 <= index < count:
+                self._send(400, {"error": "indice fuera de rango"})
+                return None
+            return {"cmd": cmd, "arg": index}
+        if cmd == "queue_reorder":
+            # La cola entera, en el orden final deseado: cada elemento es un
+            # índice de playlist (igual que "i" en /api/playlist), sin
+            # repetidos. No agrega ni quita canciones de la cola, solo
+            # reordena — el GUI descarta el pedido si el conjunto no calza
+            # exacto con la cola actual.
+            order = data.get("order")
+            if not isinstance(order, list) or len(order) > count:
+                self._send(400, {"error": "orden invalido"})
+                return None
+            cleaned = []
+            for idx in order:
+                if not isinstance(idx, int) or isinstance(idx, bool) \
+                        or not 0 <= idx < count:
+                    self._send(400, {"error": "orden invalido"})
+                    return None
+                cleaned.append(idx)
+            if len(set(cleaned)) != len(cleaned):
+                self._send(400, {"error": "orden invalido"})
+                return None
+            return {"cmd": cmd, "arg": cleaned}
+        if cmd == "queue_set_tags":
+            # Tags de una canción, la misma cadena coma-separada que escribe
+            # el administrador de cola. Absoluto como el resto: manda la
+            # lista completa, no un "agregar una tag".
+            index = data.get("index")
+            value = data.get("value")
+            if not isinstance(index, int) or isinstance(index, bool) \
+                    or not 0 <= index < count:
+                self._send(400, {"error": "indice fuera de rango"})
+                return None
+            if not isinstance(value, str) or len(value) > MAX_TAGS_LEN:
+                self._send(400, {"error": "tags invalidas"})
+                return None
+            return {"cmd": cmd, "arg": (index, value)}
         return {"cmd": cmd, "arg": None}
 
     # ── rutas ────────────────────────────────────────────────────────────
