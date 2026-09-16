@@ -6,7 +6,7 @@
 
 **Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-[![Versión](https://img.shields.io/badge/versión-2.1.1-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Versión](https://img.shields.io/badge/versión-2.2.0-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
 [![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
@@ -24,7 +24,7 @@ PlayIt es un reproductor de audio de escritorio que separa canciones en cuatro p
 
 ### Características
 
-- **Separación de pistas** con Demucs (modelo `htdemucs_ft`), con aceleración GPU (CUDA en NVIDIA, MPS en Apple Silicon) y cola de procesamiento. Acepta entrada en mp3, wav, flac, ogg, opus, m4a, aac, aiff, wma y wv; la salida siempre es mp3.
+- **Separación de pistas** con Demucs (modelo `htdemucs_ft`), con aceleración GPU (CUDA en NVIDIA, MPS en Apple Silicon) y cola de procesamiento, **de a una canción o por lote** (varios archivos sueltos o una carpeta entera). Acepta entrada en mp3, wav, flac, ogg, opus, m4a, aac, aiff, wma y wv; la salida siempre es mp3.
 - **Reproducción multi-pista**: 4 stems sincronizados con control de volumen/mute individual.
 - **Letras sincronizadas (LRC)**: descarga automática, offset ajustable, colores por intérprete y editor visual de sincronización sobre la forma de onda de la voz.
 - **Auto-unmute**: reactiva la voz con fundido en las secciones sin letra (modo karaoke inteligente).
@@ -50,7 +50,7 @@ Detalles que conviene saber:
 - **El código se conserva entre reinicios**, así el teléfono se reconecta solo; si el router le cambia la IP a la PC, la vuelve a encontrar sola. **"Generar nuevo código"** desempareja cualquier teléfono anterior.
 - **Sin cifrado**: el código viaja en claro por la red local. En una red doméstica o de sala de ensayo es aceptable —lo peor que puede pasar es que alguien te cambie la canción—; en una red pública, conviene generar un código nuevo al terminar.
 - Windows puede pedir permiso de firewall dos veces (TCP y UDP): hay que permitirlo en **redes privadas**.
-- **En desarrollo**: el escritorio ya expone el control completo de la **cola de reproducción** (agregar, quitar, reordenar y tags por API) para cuando PlayIt Mobile sume esa pantalla; todavía no forma parte de una versión publicada.
+- **A la espera del teléfono**: desde la v2.2.0 el escritorio expone el control completo de la **cola de reproducción** por API (agregar, quitar, reordenar y tags); la pantalla que lo usa todavía no llega a PlayIt Mobile.
 
 ## Sistemas soportados
 
@@ -182,11 +182,11 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 
 ## Versión actual
 
+**v2.2.0** — **separación por lote**: el diálogo de dividir suma **"Varios archivos…"** y **"Carpeta…"** (recursiva), para encolar una biblioteca entera de una sentada. El artista y la canción salen solos del nombre de cada archivo (`Artista - Canción`); por los que no cumplen el patrón se pregunta **antes de arrancar**, uno por uno, con la opción de omitir ese archivo o cancelar el lote —así nadie tiene que quedarse frente a la pantalla mientras corre—. Avisa también cuando dos archivos del lote resuelven al mismo nombre, porque uno pisaría al otro. Con **"Cronometrar proceso"** marcado, el lote ya no saca un aviso por canción: al terminar muestra un único resumen con el tiempo de cada una, el total, el promedio y el dispositivo usado. Incluye además el **punto morado** en la playlist para las canciones encoladas y el arreglo del arrastre de la barra de progreso.
+
 **v2.1.1** — **cola de reproducción**: clic derecho en la playlist para "Agregar a la cola" o "Eliminar de la cola" (funciona también con varias canciones seleccionadas a la vez), y "Administrar cola" abre un grid donde se reordena arrastrando filas, se quitan canciones sin tocar la playlist, y cada una puede llevar **tags** editables (Batería/Bajo/Voz/Otros o texto libre, con un desplegable de sugerencias). Si una canción encolada tiene alguna de esas tags, al reproducirse **mutea automáticamente esa pista y enciende las demás**. La cola también se puede **exportar** a una playlist `.mlst` con un clic.
 
-**v2.0.1** — el modo remoto suma el **mezclador**: desde PlayIt Mobile ahora se controla el volumen general, y el volumen y el silencio de cada pista (batería, voz, bajo y otros), más el interruptor de **auto-unmute**. Lo que se toca en el teléfono se mueve también en la ventana de la PC, así que no hay dos estados distintos según desde dónde se ajuste; y el mezclador funciona sin necesidad de tener una canción cargada.
-
-**v2.0** — **modo remoto**: PlayIt Mobile controla la reproducción del escritorio por Wi-Fi (play/pausa, detener, anterior/siguiente, repetir y elegir canción de la lista). Se activa desde **Opciones → Modo remoto**, que abre un diálogo con un **QR de emparejamiento** —más la dirección y el código para tipear a mano si el teléfono no puede escanear— y muestra **"Remoto: activo"** en la barra de estado. El servidor sólo acepta conexiones de la red local y exige el código en cada petición; **el audio nunca sale de la PC**. El teléfono ve la lista completa con artista, título y duración, y las **carátulas** de cada canción; el **código se conserva entre reinicios** y la app se **redescubre sola en la red** si el router le cambia la IP al escritorio, así que el emparejamiento se hace una sola vez ("Generar nuevo código" lo revoca). Historial completo en [Releases](https://github.com/RavilesX/playit/releases).
+**v2.0.1** — el modo remoto suma el **mezclador**: desde PlayIt Mobile ahora se controla el volumen general, y el volumen y el silencio de cada pista (batería, voz, bajo y otros), más el interruptor de **auto-unmute**. Lo que se toca en el teléfono se mueve también en la ventana de la PC, así que no hay dos estados distintos según desde dónde se ajuste; y el mezclador funciona sin necesidad de tener una canción cargada. Historial completo en [Releases](https://github.com/RavilesX/playit/releases).
 
 ## Contacto
 
@@ -210,7 +210,7 @@ PlayIt is a desktop audio player that splits songs into four independent stems (
 
 ### Features
 
-- **Stem separation** with Demucs (`htdemucs_ft` model), GPU-accelerated (CUDA on NVIDIA, MPS on Apple Silicon), with a processing queue. Input can be mp3, wav, flac, ogg, opus, m4a, aac, aiff, wma or wv; output is always mp3.
+- **Stem separation** with Demucs (`htdemucs_ft` model), GPU-accelerated (CUDA on NVIDIA, MPS on Apple Silicon), with a processing queue, **one song at a time or in batches** (many files or a whole folder). Input can be mp3, wav, flac, ogg, opus, m4a, aac, aiff, wma or wv; output is always mp3.
 - **Multi-stem playback**: 4 synchronized stems with individual volume/mute.
 - **Synced lyrics (LRC)**: automatic fetching, adjustable offset, per-singer colors, and a visual sync editor over the vocals waveform.
 - **Auto-unmute**: fades vocals back in during sections without lyrics (smart karaoke mode).
@@ -236,7 +236,7 @@ Worth knowing:
 - **The code survives restarts**, so the phone reconnects on its own; if the router changes the PC's IP, it finds it again by itself. **"Generar nuevo código"** unpairs any previously paired phone.
 - **No encryption**: the code travels in the clear over the local network. Fine at home or in a rehearsal room —worst case someone skips your song—; on a public network, generate a new code when you're done.
 - Windows may ask for firewall permission twice (TCP and UDP); allow it on **private networks**.
-- **In progress**: the desktop already exposes full **playback queue** control over the API (add, remove, reorder, tags) for when PlayIt Mobile ships that screen; not part of a published release yet.
+- **Waiting on the phone**: as of v2.2.0 the desktop exposes full **playback queue** control over the API (add, remove, reorder, tags); the screen that uses it hasn't shipped in PlayIt Mobile yet.
 
 ## Supported systems
 
@@ -368,11 +368,11 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 
 ## Current version
 
+**v2.2.0** — **batch separation**: the split dialog gains **"Varios archivos…"** and **"Carpeta…"** (recursive), so a whole library can be queued in one sitting. Artist and song are taken from each filename (`Artista - Canción`); the ones that don't match the pattern are asked for **before anything starts**, one by one, with the option to skip that file or cancel the batch —so nobody has to sit in front of the screen while it runs—. It also warns when two files in the batch resolve to the same name, since one would overwrite the other. With **"Cronometrar proceso"** checked, a batch no longer pops a dialog per song: when it finishes it shows a single summary with each song's time, the total, the average and the device used. Also included: the **purple dot** marking queued songs in the playlist, and a fix for dragging the progress bar.
+
 **v2.1.1** — **playback queue**: right-click a playlist entry for "Agregar a la cola" / "Eliminar de la cola" (works with multiple songs selected at once), and "Administrar cola" opens a grid where you reorder by dragging rows, remove songs without touching the playlist, and tag each one (Batería/Bajo/Voz/Otros or free text, with a suggestion dropdown). If a queued song carries one of those tags, playing it **automatically mutes that stem and unmutes the rest**. The queue can also be **exported** to a `.mlst` playlist with one click.
 
-**v2.0.1** — remote mode gains the **mixer**: PlayIt Mobile can now drive master volume, plus per-stem volume and mute (drums, vocals, bass, other), and the **auto-unmute** switch. What you touch on the phone moves on the PC window too, so there is never a split state depending on where you adjusted it; the mixer also works with no song loaded.
-
-**v2.0** — **remote mode**: PlayIt Mobile drives desktop playback over Wi-Fi (play/pause, stop, previous/next, repeat, and picking any song from the list). Turn it on from **Opciones → Modo remoto**, which opens a dialog with a **pairing QR code** —plus the address and code to type by hand if the phone can't scan— and shows **"Remoto: activo"** in the status bar. The server only accepts local-network connections and requires the code on every request; **audio never leaves the PC**. The phone gets the full list with artist, title and duration, plus each song's **cover art**; the **code survives restarts** and the app **finds the desktop again on the network** if the router changes its IP, so pairing happens once ("Generar nuevo código" revokes it). Full history in [Releases](https://github.com/RavilesX/playit/releases).
+**v2.0.1** — remote mode gains the **mixer**: PlayIt Mobile can now drive master volume, plus per-stem volume and mute (drums, vocals, bass, other), and the **auto-unmute** switch. What you touch on the phone moves on the PC window too, so there is never a split state depending on where you adjusted it; the mixer also works with no song loaded. Full history in [Releases](https://github.com/RavilesX/playit/releases).
 
 ## Contact
 
