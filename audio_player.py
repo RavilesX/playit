@@ -60,7 +60,7 @@ from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
 from dialogs import (
     AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog,
     UpdateDialog, CorrectSongDialog, SongInfoDialog, RemotePairDialog,
-    PlaybackQueueDialog,
+    PlaybackQueueDialog, BatchTimingDialog, format_elapsed,
 )
 from remote_server import RemoteBridge, RemoteServer
 from lazy_resources import (LazyAudioManager, LazyImageManager, LazyLyricsManager,
@@ -184,6 +184,10 @@ class AudioPlayer(QMainWindow):
         self.demucs_worker = None
         self.last_in_queue = {"artist": "", "song": ""}
         self._current_demucs_job: dict | None = None
+        # Cronómetro por lote: {batch_id: [renglones]}. El resumen sale una
+        # sola vez, cuando ya no queda ningún trabajo de ese lote.
+        self._batch_timings: dict[int, list[dict]] = {}
+        self._batch_seq = 0
         self._verification_attempts = 0
 
         # Dependencias — marcamos vc_available=True fuera de Windows (no se necesita)
@@ -2820,6 +2824,7 @@ class AudioPlayer(QMainWindow):
         self.split_dialog = SplitDialog(self)
         bg_image(self.split_dialog, 'images/split_dialog/split.png')
         self.split_dialog.process_started.connect(self.process_song)
+        self.split_dialog.batch_started.connect(self.process_batch)
         self.split_dialog.show()
 
     def process_song(self, artist: str, song: str, file_path: str, timed: bool = False):
@@ -2832,10 +2837,45 @@ class AudioPlayer(QMainWindow):
             self.processing_multiple = True
             self.update_status()
 
+    def process_batch(self, jobs: list[dict], timed: bool = False):
+        """Encola de golpe los trabajos de un lote del diálogo de división.
+
+        Los nombres ya vienen resueltos (SplitDialog los valida antes de
+        emitir), así que aquí solo se llena la cola: arranca el primero y el
+        resto espera su turno, igual que al agregar canciones una por una.
+        """
+        if not jobs:
+            return
+
+        # batch_id agrupa los renglones del cronómetro: sin él, dos lotes
+        # encolados uno tras otro mezclarían sus resúmenes.
+        batch_id = self._batch_seq
+        self._batch_seq += 1
+        for job in jobs:
+            self.demucs_queue.append({
+                "artist": job["artist"], "song": job["song"],
+                "file_path": job["file_path"], "timed": timed,
+                "batch_id": batch_id,
+            })
+        self.last_in_queue = {"artist": jobs[-1]["artist"], "song": jobs[-1]["song"]}
+
+        if self.demucs_active:
+            self.processing_multiple = True
+            self.update_status()
+            return
+
+        # Con más de un trabajo pendiente, processing_multiple evita un
+        # diálogo de error por cada track fallido en medio del lote.
+        self.processing_multiple = len(self.demucs_queue) > 1
+        self._process_next_job()
+
     def _process_next_job(self):
         if not self.demucs_queue:
             self.demucs_active = False
             self.processing_multiple = False
+            # Se suelta el trabajo ya terminado: _finish_timed_job mira este
+            # atributo para saber si al lote todavía le queda algo corriendo.
+            self._current_demucs_job = None
             self.update_status()
             return
         self._start_demucs_job(self.demucs_queue.pop(0))
@@ -2860,8 +2900,9 @@ class AudioPlayer(QMainWindow):
             self.demucs_thread.finished.connect(self.demucs_thread.deleteLater)
             self.demucs_thread.start()
         except Exception as e:
+            # _handle_demucs_error ya avanza la cola; avanzar otra vez aquí
+            # arrancaba un trabajo y lo pisaba con el siguiente.
             self._handle_demucs_error(f"Error iniciando separación: {e}")
-            self._process_next_job()
 
     def _cleanup_demucs_job(self):
         try:
@@ -2889,16 +2930,51 @@ class AudioPlayer(QMainWindow):
             self._start_file_verification()
         # Al final (con el track ya en la playlist y el siguiente trabajo de la
         # cola ya lanzado, para que el diálogo modal no la detenga)
-        if job and job.get('timed'):
-            elapsed = time.monotonic() - job['t0']
-            mins, secs = divmod(int(round(elapsed)), 60)
-            styled_message_box(
-                self, "Tiempo de separación",
-                f"{job['artist']} - {job['song']}\n\n"
-                f"El proceso tomó {mins} min {secs} s.\n"
-                f"Procesado con: {device}",
-                QMessageBox.Icon.Information,
-            )
+        self._finish_timed_job(job, device)
+
+    def _finish_timed_job(self, job: dict | None, device: str, failed: bool = False):
+        """Cierra el cronómetro de un trabajo terminado.
+
+        Una canción suelta saca su modal ahí mismo; una del lote solo anota
+        su renglón y el resumen sale cuando el lote entero termina.
+        """
+        if not job or not job.get('timed'):
+            return
+
+        elapsed = time.monotonic() - job['t0']
+        batch_id = job.get('batch_id')
+        if batch_id is None:
+            if not failed:
+                styled_message_box(
+                    self, "Tiempo de separación",
+                    f"{job['artist']} - {job['song']}\n\n"
+                    f"El proceso tomó {format_elapsed(elapsed)}.\n"
+                    f"Procesado con: {device}",
+                    QMessageBox.Icon.Information,
+                )
+            return
+
+        self._batch_timings.setdefault(batch_id, []).append({
+            "artist": job['artist'], "song": job['song'],
+            "elapsed": elapsed, "device": device, "failed": failed,
+        })
+
+        # El lote terminó cuando ninguno de sus trabajos sigue en la cola ni
+        # corriendo. Se mira _current_demucs_job porque para cuando llegamos
+        # aquí el siguiente ya salió de demucs_queue. Canciones agregadas a
+        # mano en medio del lote no lo alargan: no llevan este batch_id.
+        running = self._current_demucs_job
+        pending = self.demucs_queue + ([running] if running else [])
+        if not any(j.get('batch_id') == batch_id for j in pending):
+            self._show_batch_timing_summary(batch_id)
+
+    def _show_batch_timing_summary(self, batch_id: int):
+        rows = self._batch_timings.pop(batch_id, [])
+        if not rows:
+            return
+        dialog = BatchTimingDialog(self, rows)
+        bg_image(dialog, 'images/split_dialog/split.png')
+        dialog.exec()
 
     def _finish_demucs_job(self):
         self.demucs_active = False
@@ -2910,10 +2986,14 @@ class AudioPlayer(QMainWindow):
         self.demucs_worker = None
 
     def _handle_demucs_error(self, error_msg: str):
+        job = self._current_demucs_job
         self._finish_demucs_job()
         if not self.processing_multiple:
             styled_message_box(self, "Error", error_msg, QMessageBox.Icon.Critical)
         self._process_next_job()
+        # Un track fallido también cierra su renglón: si no, un lote cuyo
+        # último trabajo falla nunca mostraría el resumen.
+        self._finish_timed_job(job, "", failed=True)
 
     def _update_demucs_progress(self, value: int):
         self.demucs_progress = value

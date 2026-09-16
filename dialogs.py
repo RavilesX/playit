@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QCheckBox, QTableWidget, QTableWidgetItem,
     QAbstractItemView, QMenu, QWidget, QCompleter,
 )
-from demucs_worker import AUDIO_INPUT_FILTER
+from demucs_worker import AUDIO_INPUT_EXTS, AUDIO_INPUT_FILTER
 from resources import resource_path, bg_image, styled_message_box, style_url
 from ui_components import DialogTitleBar, StyledButtons
 from version import __version__
@@ -828,14 +828,55 @@ class PlaybackQueueDialog(BaseDialog):
         self.audio_player._refresh_queue_indicators()
 
 
+def format_elapsed(seconds: float) -> str:
+    """Duración legible. Las horas solo aparecen cuando las hay: un lote
+    largo en CPU se mide en horas, una canción suelta en minutos."""
+    hours, rest = divmod(int(round(seconds)), 3600)
+    mins, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours} h {mins} min {secs} s"
+    return f"{mins} min {secs} s"
+
+
+def guess_artist_song(file_path: str) -> tuple[str, str]:
+    """Mejor intento de (artista, canción) a partir del nombre del archivo.
+
+    El patrón es "Artista - Canción"; sin guion no hay artista que adivinar,
+    así que el nombre completo se toma como canción. Siempre devuelve algo:
+    el diálogo del lote lo usa para pre-llenar los campos que el usuario va
+    a corregir a mano.
+    """
+    stem = os.path.splitext(os.path.basename(file_path))[0]
+    parts = [string.capwords(p.strip()) for p in stem.split('-')]
+    if len(parts) >= 2:
+        return parts[0], parts[-1]
+    return "", parts[0]
+
+
+def parse_artist_song(file_path: str) -> tuple[str, str] | None:
+    """(artista, canción) solo si el nombre cumple el patrón "Artista - Canción".
+
+    None cuando falta el guion o alguno de los dos lados queda vacío
+    ("Artista - .mp3"): el llamador decide si pedirlos a mano (lote) o no
+    hacer nada (botón de extraer).
+    """
+    artist, song = guess_artist_song(file_path)
+    return (artist, song) if artist and song else None
+
+
 class SplitDialog(BaseDialog):
     process_started = pyqtSignal(str, str, str, bool)
+    # Lote: lista de dicts {artist, song, file_path} ya resueltos + cronómetro.
+    # Señal aparte de process_started para que el destino encole todo de una
+    # vez en lugar de recibir N emisiones sueltas.
+    batch_started = pyqtSignal(list, bool)
     dialog_closed = pyqtSignal()
 
     def __init__(self, parent=None):
-        # 460 de alto: los widgets nativos de macOS son más altos y con 440
-        # el botón MP3 quedaba pegado al textbox
-        super().__init__(parent, "Dividir Canción", (360, 460))
+        # 530 de alto: los widgets nativos de macOS son más altos y con 440
+        # el botón MP3 quedaba pegado al textbox; los controles del lote
+        # suman otra fila
+        super().__init__(parent, "Dividir Canción", (360, 530))
         self._setup_split_ui()
 
     def _setup_split_ui(self):
@@ -859,6 +900,8 @@ class SplitDialog(BaseDialog):
         self.main_layout.addWidget(QLabel("Canción*"))
         self.main_layout.addWidget(self.song)
         self.main_layout.addWidget(self._create_timing_checkbox())
+        self.main_layout.addWidget(self._create_batch_label())
+        self.main_layout.addLayout(self._create_batch_buttons())
         self.main_layout.addLayout(btn_layout)
 
         self._setup_validation()
@@ -884,6 +927,140 @@ class SplitDialog(BaseDialog):
             QCheckBox::indicator:checked:hover {{ image: url({hover_checked}); }}
         """)
         return self.timing_chk
+
+    def _create_batch_label(self) -> QLabel:
+        label = QLabel("Por lote — artista y canción salen del nombre del archivo")
+        label.setWordWrap(True)
+        label.setStyleSheet("color: #9a9aad; font-size: 11px;")
+        return label
+
+    def _create_batch_buttons(self) -> QHBoxLayout:
+        """Encolar varias canciones sin llenar el formulario una por una."""
+        layout = QHBoxLayout()
+        layout.setSpacing(6)
+
+        files_btn = QPushButton("Varios archivos…")
+        files_btn.setObjectName("playlistToolBtn")
+        files_btn.setToolTip("Agrega a la cola todos los archivos seleccionados")
+        files_btn.clicked.connect(self._select_batch_files)
+
+        folder_btn = QPushButton("Carpeta…")
+        folder_btn.setObjectName("playlistToolBtn")
+        folder_btn.setToolTip("Agrega a la cola el audio de una carpeta y sus subcarpetas")
+        folder_btn.clicked.connect(self._select_batch_folder)
+
+        layout.addStretch()
+        layout.addWidget(files_btn)
+        layout.addWidget(folder_btn)
+        layout.addStretch()
+        return layout
+
+    def _select_batch_files(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Seleccionar archivos de audio", "", AUDIO_INPUT_FILTER
+        )
+        if paths:
+            # dict.fromkeys: quita repetidos conservando el orden de selección
+            self._start_batch(list(dict.fromkeys(paths)))
+
+    def _select_batch_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta con audio")
+        if not folder:
+            return
+        # Recursivo: las bibliotecas suelen venir en carpetas por álbum.
+        paths = sorted(
+            (str(f) for f in Path(folder).rglob("*")
+             if f.is_file() and f.suffix.lower().lstrip(".") in AUDIO_INPUT_EXTS),
+            key=str.lower,
+        )
+        if not paths:
+            styled_message_box(
+                self, "Sin archivos",
+                "La carpeta no contiene archivos de audio compatibles.",
+                QMessageBox.Icon.Warning,
+            )
+            return
+        self._start_batch(paths)
+
+    def _start_batch(self, paths: list[str]):
+        reply = styled_message_box(
+            self,
+            "Separación por lote",
+            f"Se agregarán {len(paths)} canciones a la cola.\n\n"
+            "Dependiendo de su hardware, el proceso puede demorar varias horas. "
+            "¿Continuar?",
+            QMessageBox.Icon.Question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        jobs = self._resolve_batch_names(paths)
+        if not jobs or not self._confirm_duplicates(jobs):
+            return
+
+        self.batch_started.emit(jobs, self.timing_chk.isChecked())
+        self.hide()
+        self.dialog_closed.emit()
+
+    def _confirm_duplicates(self, jobs: list[dict]) -> bool:
+        """Avisa si dos trabajos del lote resuelven al mismo artista/canción.
+
+        Ambos escribirían la misma carpeta de music_library y el segundo
+        pisaría al primero sin decir nada. Pasa fácil al tomar una carpeta
+        entera: el mismo tema en dos álbumes.
+        """
+        seen, dupes = set(), []
+        for job in jobs:
+            key = (job["artist"].casefold(), job["song"].casefold())
+            if key in seen:
+                dupes.append(f"{job['artist']} - {job['song']}")
+            else:
+                seen.add(key)
+        if not dupes:
+            return True
+
+        listed = "\n".join(f"• {d}" for d in dupes[:10])
+        if len(dupes) > 10:
+            listed += f"\n… y {len(dupes) - 10} más"
+        reply = styled_message_box(
+            self,
+            "Nombres repetidos",
+            "Estas canciones se repiten dentro del lote y la última "
+            f"sobrescribirá a la anterior:\n\n{listed}\n\n¿Continuar de todos modos?",
+            QMessageBox.Icon.Warning,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _resolve_batch_names(self, paths: list[str]) -> list[dict]:
+        """Artista/canción de cada archivo, preguntando por los que no calzan.
+
+        Toda la validación ocurre aquí, ANTES de encolar nada: un diálogo en
+        medio de la separación dejaría la cola parada esperando al usuario.
+        Devuelve [] si se cancela el lote completo.
+        """
+        pending = [p for p in paths if parse_artist_song(p) is None]
+        jobs = []
+        asked = 0
+
+        for path in paths:
+            names = parse_artist_song(path)
+            if names is None:
+                asked += 1
+                dialog = BatchNameDialog(
+                    self.parent_window or self, path, asked, len(pending)
+                )
+                bg_image(dialog, 'images/split_dialog/split.png')
+                result = dialog.exec()
+                if result == BatchNameDialog.SKIP:
+                    continue
+                if result != QDialog.DialogCode.Accepted:
+                    return []          # cancelar aquí descarta el lote entero
+                names = dialog.get_values()
+            jobs.append({"artist": names[0], "song": names[1], "file_path": path})
+
+        return jobs
 
     def _create_file_button(self) -> QPushButton:
         btn = QPushButton()
@@ -997,18 +1174,178 @@ class SplitDialog(BaseDialog):
         if not file_path:
             return
 
-        filename = os.path.splitext(os.path.basename(file_path))[0]
-
-        if '-' not in filename:
+        names = parse_artist_song(file_path)
+        if names is None:
             return
 
-        parts = filename.split('-')
-        if len(parts) >= 2:
-            artist = string.capwords(parts[0].strip())
-            song = string.capwords(parts[-1].strip())
+        self.artist.setText(names[0])
+        self.song.setText(names[1])
 
-            self.artist.setText(artist)
-            self.song.setText(song)
+
+class BatchNameDialog(BaseDialog):
+    """Pide artista y canción de un archivo del lote que no cumple el patrón.
+
+    Sale antes de encolar nada (ver SplitDialog._resolve_batch_names):
+    "Omitir" deja ese archivo fuera del lote y "Cancelar" descarta el lote
+    completo.
+    """
+
+    # QDialog reserva 0 y 1 para rechazar/aceptar; 2 = omitir este archivo
+    SKIP = 2
+
+    def __init__(self, parent=None, file_path: str = "", index: int = 1, total: int = 1):
+        super().__init__(parent, "Nombrar archivo", (380, 360))
+        self._setup_name_ui(file_path, index, total)
+
+    def _setup_name_ui(self, file_path: str, index: int, total: int):
+        counter = QLabel(f"Archivo {index} de {total} sin \"-\" en el nombre")
+        counter.setStyleSheet("color: #9a9aad; font-size: 11px;")
+
+        name_label = QLabel(os.path.basename(file_path))
+        name_label.setWordWrap(True)
+        name_label.setStyleSheet("color: #3AABEF; font-size: 13px;")
+
+        guess_artist, guess_song = guess_artist_song(file_path)
+        self.artist = QLineEdit(guess_artist)
+        self.song = QLineEdit(guess_song)
+        self.song.setObjectName("SongText")
+
+        self.main_layout.addWidget(counter)
+        self.main_layout.addWidget(name_label)
+        self.main_layout.addWidget(QLabel("Artista*"))
+        self.main_layout.addWidget(self.artist)
+        self.main_layout.addWidget(QLabel("Canción*"))
+        self.main_layout.addWidget(self.song)
+        self.main_layout.addStretch()
+        self.main_layout.addLayout(self._create_action_buttons())
+
+        self._setup_validation()
+        self.artist.setFocus()
+
+    def _create_action_buttons(self) -> QHBoxLayout:
+        layout = QHBoxLayout()
+
+        cancel_btn = QPushButton()
+        cancel_btn.setObjectName("cancelar_btn")
+        cancel_btn.setFixedSize(70, 70)
+        cancel_btn.setToolTip("Cancelar el lote completo")
+        bg_image(cancel_btn, "images/split_dialog/cancelar_btn.png")
+        cancel_btn.clicked.connect(self.reject)
+
+        skip_btn = QPushButton("Omitir")
+        skip_btn.setObjectName("playlistToolBtn")
+        skip_btn.setFixedSize(110, 34)
+        skip_btn.setToolTip("No separar este archivo y seguir con el resto del lote")
+        skip_btn.clicked.connect(lambda: self.done(self.SKIP))
+
+        self.accept_btn = QPushButton()
+        self.accept_btn.setObjectName("aceptar_btn")
+        self.accept_btn.setFixedSize(70, 70)
+
+        enabled_path = QDir.toNativeSeparators(
+            resource_path('images/split_dialog/aceptar_btn.png')
+        ).replace('\\', '/')
+        disabled_path = QDir.toNativeSeparators(
+            resource_path('images/split_dialog/aceptar_btn_disabled.png')
+        ).replace('\\', '/')
+        self.accept_btn.setStyleSheet(f"""
+            QPushButton#aceptar_btn{{
+                image: url({enabled_path});
+            }}
+            QPushButton#aceptar_btn:disabled{{
+                image: url({disabled_path});
+            }}
+        """)
+        self.accept_btn.clicked.connect(self.accept)
+
+        layout.addWidget(cancel_btn)
+        layout.addStretch()
+        layout.addWidget(skip_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+        layout.addStretch()
+        layout.addWidget(self.accept_btn)
+        return layout
+
+    def _setup_validation(self):
+        for field in (self.artist, self.song):
+            field.textChanged.connect(self._update_accept_button_state)
+        self._update_accept_button_state()
+
+    def _update_accept_button_state(self):
+        self.accept_btn.setEnabled(
+            bool(self.artist.text().strip() and self.song.text().strip())
+        )
+
+    def get_values(self) -> tuple[str, str]:
+        return self.artist.text().strip(), self.song.text().strip()
+
+class BatchTimingDialog(BaseDialog):
+    """Resumen del cronómetro de un lote: tiempo por canción y total.
+
+    Un único diálogo al final, en vez del modal por canción que sale en una
+    separación suelta: con 30 archivos serían 30 clics en medio de la noche.
+    Los que fallaron aparecen igual (marcados) pero no suman al total.
+    """
+
+    def __init__(self, parent=None, rows: list[dict] | None = None):
+        super().__init__(parent, "Tiempo de separación", (460, 520))
+        self._setup_summary(rows or [])
+
+    def _setup_summary(self, rows: list[dict]):
+        view = QTextEdit()
+        view.setReadOnly(True)
+        view.setObjectName("queue_text")
+        view.setHtml(self._build_html(rows))
+        view.setStyleSheet("""
+            #queue_text {
+                color: #cfcfe0;
+                background-color: qlineargradient(
+                    spread:pad, x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(0,0,0,0.5), stop:1 rgba(0,0,0,0.1)
+                );
+                border: 0px;
+                padding-top: 2px;
+                font-size: 14px;
+            }
+        """)
+        self.main_layout.addWidget(view)
+
+    def _build_html(self, rows: list[dict]) -> str:
+        done = [r for r in rows if not r.get('failed')]
+        failed = len(rows) - len(done)
+        total = sum(r['elapsed'] for r in done)
+        # El dispositivo puede variar entre canciones: en macOS un track
+        # puede caer al fallback de CPU y el siguiente volver a MPS.
+        devices = sorted({r['device'] for r in done if r.get('device')})
+
+        body = []
+        for row in rows:
+            name = html.escape(f"{row['artist']} - {row['song']}")
+            if row.get('failed'):
+                value = "<span style='color:#ff6b6b;'>Error</span>"
+            else:
+                value = html.escape(format_elapsed(row['elapsed']))
+            body.append(
+                f"<tr><td>{name}</td>"
+                f"<td align='right' style='color:#F88FFF;'>&nbsp;&nbsp;{value}</td></tr>"
+            )
+
+        footer = [f"<b>Total: {html.escape(format_elapsed(total))}</b>"]
+        if len(done) > 1:
+            footer.append(f"Promedio por canción: "
+                          f"{html.escape(format_elapsed(total / len(done)))}")
+        if devices:
+            footer.append(f"Procesado con: {html.escape(', '.join(devices))}")
+        if failed:
+            footer.append(f"<span style='color:#ff6b6b;'>"
+                          f"{failed} con error (no suman al total)</span>")
+
+        return (
+            f"<h2 style='color:#3AABEF;'><center>Lote de {len(rows)} "
+            f"{'canción' if len(rows) == 1 else 'canciones'}</center></h2>"
+            f"<table width='100%' cellspacing='4'>{''.join(body)}</table>"
+            f"<hr><center>{'<br>'.join(footer)}</center>"
+        )
+
 
 class CorrectSongDialog(BaseDialog):
     def __init__(self, parent=None, artist: str = "", song: str = ""):
