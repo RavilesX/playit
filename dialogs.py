@@ -873,10 +873,10 @@ class SplitDialog(BaseDialog):
     dialog_closed = pyqtSignal()
 
     def __init__(self, parent=None):
-        # 530 de alto: los widgets nativos de macOS son más altos y con 440
-        # el botón MP3 quedaba pegado al textbox; los controles del lote
-        # suman otra fila
-        super().__init__(parent, "Dividir Canción", (360, 530))
+        # 560 de alto: los widgets nativos de macOS son más altos y con 440
+        # el botón MP3 quedaba pegado al textbox; la nota del lote y el botón
+        # de carpeta suman otras dos filas
+        super().__init__(parent, "Dividir Canción", (360, 560))
         self._setup_split_ui()
 
     def _setup_split_ui(self):
@@ -901,7 +901,9 @@ class SplitDialog(BaseDialog):
         self.main_layout.addWidget(self.song)
         self.main_layout.addWidget(self._create_timing_checkbox())
         self.main_layout.addWidget(self._create_batch_label())
-        self.main_layout.addLayout(self._create_batch_buttons())
+        self.main_layout.addWidget(
+            self._create_folder_button(), alignment=Qt.AlignmentFlag.AlignCenter
+        )
         self.main_layout.addLayout(btn_layout)
 
         self._setup_validation()
@@ -929,39 +931,21 @@ class SplitDialog(BaseDialog):
         return self.timing_chk
 
     def _create_batch_label(self) -> QLabel:
-        label = QLabel("Por lote — artista y canción salen del nombre del archivo")
+        label = QLabel(
+            "Por lote: elegí varios archivos en el botón MP3, o una carpeta acá "
+            "abajo. El artista y la canción salen del nombre de cada archivo."
+        )
         label.setWordWrap(True)
         label.setStyleSheet("color: #9a9aad; font-size: 11px;")
         return label
 
-    def _create_batch_buttons(self) -> QHBoxLayout:
-        """Encolar varias canciones sin llenar el formulario una por una."""
-        layout = QHBoxLayout()
-        layout.setSpacing(6)
-
-        files_btn = QPushButton("Varios archivos…")
-        files_btn.setObjectName("playlistToolBtn")
-        files_btn.setToolTip("Agrega a la cola todos los archivos seleccionados")
-        files_btn.clicked.connect(self._select_batch_files)
-
-        folder_btn = QPushButton("Carpeta…")
-        folder_btn.setObjectName("playlistToolBtn")
-        folder_btn.setToolTip("Agrega a la cola el audio de una carpeta y sus subcarpetas")
-        folder_btn.clicked.connect(self._select_batch_folder)
-
-        layout.addStretch()
-        layout.addWidget(files_btn)
-        layout.addWidget(folder_btn)
-        layout.addStretch()
-        return layout
-
-    def _select_batch_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, "Seleccionar archivos de audio", "", AUDIO_INPUT_FILTER
-        )
-        if paths:
-            # dict.fromkeys: quita repetidos conservando el orden de selección
-            self._start_batch(list(dict.fromkeys(paths)))
+    def _create_folder_button(self) -> QPushButton:
+        """La otra entrada al lote es el propio botón MP3 (ver _select_file)."""
+        btn = QPushButton("Carpeta…")
+        btn.setObjectName("playlistToolBtn")
+        btn.setToolTip("Agrega a la cola el audio de una carpeta y sus subcarpetas")
+        btn.clicked.connect(self._select_batch_folder)
+        return btn
 
     def _select_batch_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta con audio")
@@ -1066,6 +1050,7 @@ class SplitDialog(BaseDialog):
         btn = QPushButton()
         btn.setObjectName("file_btn")
         btn.setFixedSize(200, 100)
+        btn.setToolTip("Un archivo llena el formulario; varios arrancan el lote")
         bg_image(btn, "images/split_dialog/mp3.png")
         btn.clicked.connect(self._select_file)
         return btn
@@ -1126,11 +1111,23 @@ class SplitDialog(BaseDialog):
         self._update_accept_button_state()
 
     def _select_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Seleccionar archivo de audio", "", AUDIO_INPUT_FILTER
+        """Un archivo llena el formulario; varios arrancan el lote.
+
+        Un botón aparte para "varios archivos" era redundante: en el diálogo
+        de selección múltiple siempre se puede elegir uno solo.
+        """
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Seleccionar archivos de audio", "", AUDIO_INPUT_FILTER
         )
-        if file_path:
-            self.file_path.setText(file_path)
+        if not paths:
+            return
+
+        # dict.fromkeys: quita repetidos conservando el orden de selección
+        paths = list(dict.fromkeys(paths))
+        if len(paths) == 1:
+            self.file_path.setText(paths[0])
+            return
+        self._start_batch(paths)
 
     def _update_accept_button_state(self):
         required_fields = [

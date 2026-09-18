@@ -94,6 +94,58 @@ class TestResolveBatchNames:
         dialog.deleteLater()
 
 
+class TestSelectFile:
+    """El botón MP3 es la única entrada de archivos: uno llena el formulario,
+    varios arrancan el lote (antes había un botón aparte, redundante)."""
+
+    def _pick(self, monkeypatch, paths):
+        monkeypatch.setattr(
+            dialogs.QFileDialog, "getOpenFileNames",
+            staticmethod(lambda *a, **k: (paths, "")),
+        )
+
+    def test_un_archivo_llena_el_formulario(self, app, monkeypatch):
+        dialog = SplitDialog(None)
+        self._pick(monkeypatch, ["/m/A - Uno.mp3"])
+        monkeypatch.setattr(
+            dialog, "_start_batch", lambda paths: pytest.fail("no debió ir al lote")
+        )
+        dialog._select_file()
+        assert dialog.file_path.text() == "/m/A - Uno.mp3"
+        dialog.deleteLater()
+
+    def test_varios_archivos_arrancan_el_lote(self, app, monkeypatch):
+        dialog = SplitDialog(None)
+        self._pick(monkeypatch, ["/m/A - Uno.mp3", "/m/B - Dos.mp3"])
+        batches = []
+        monkeypatch.setattr(dialog, "_start_batch", batches.append)
+        dialog._select_file()
+        assert batches == [["/m/A - Uno.mp3", "/m/B - Dos.mp3"]]
+        assert dialog.file_path.text() == ""      # el formulario no se toca
+        dialog.deleteLater()
+
+    def test_repetidos_no_cuentan_como_varios(self, app, monkeypatch):
+        dialog = SplitDialog(None)
+        self._pick(monkeypatch, ["/m/A - Uno.mp3", "/m/A - Uno.mp3"])
+        monkeypatch.setattr(
+            dialog, "_start_batch", lambda paths: pytest.fail("no debió ir al lote")
+        )
+        dialog._select_file()
+        assert dialog.file_path.text() == "/m/A - Uno.mp3"
+        dialog.deleteLater()
+
+    def test_cancelar_no_toca_nada(self, app, monkeypatch):
+        dialog = SplitDialog(None)
+        dialog.file_path.setText("/m/previo.mp3")
+        self._pick(monkeypatch, [])
+        monkeypatch.setattr(
+            dialog, "_start_batch", lambda paths: pytest.fail("no debió ir al lote")
+        )
+        dialog._select_file()
+        assert dialog.file_path.text() == "/m/previo.mp3"
+        dialog.deleteLater()
+
+
 class TestConfirmDuplicates:
     """Dos trabajos con el mismo artista/canción escriben la misma carpeta."""
 
