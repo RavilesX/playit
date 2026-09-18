@@ -828,6 +828,20 @@ class PlaybackQueueDialog(BaseDialog):
         self.audio_player._refresh_queue_indicators()
 
 
+def labeled_field(text: str, field: QWidget) -> QVBoxLayout:
+    """Etiqueta pegada a su campo.
+
+    Apiladas sueltas en el layout del diálogo quedaban separadas por el
+    mismo espacio que separa un bloque del siguiente, así que la etiqueta
+    flotaba lejos del textbox que describe.
+    """
+    box = QVBoxLayout()
+    box.setSpacing(2)
+    box.addWidget(QLabel(text))
+    box.addWidget(field)
+    return box
+
+
 def format_elapsed(seconds: float) -> str:
     """Duración legible. Las horas solo aparecen cuando las hay: un lote
     largo en CPU se mide en horas, una canción suelta en minutos."""
@@ -873,10 +887,11 @@ class SplitDialog(BaseDialog):
     dialog_closed = pyqtSignal()
 
     def __init__(self, parent=None):
-        # 560 de alto: los widgets nativos de macOS son más altos y con 440
-        # el botón MP3 quedaba pegado al textbox; la nota del lote y el botón
-        # de carpeta suman otras dos filas
-        super().__init__(parent, "Dividir Canción", (360, 560))
+        # 530 de alto: los widgets nativos de macOS son más altos y con 440
+        # el botón MP3 quedaba pegado al textbox; el botón de carpeta suma
+        # otra fila. El sobrante se reparte como espacio entre los controles,
+        # así que de más tampoco conviene.
+        super().__init__(parent, "Dividir Canción", (360, 530))
         self._setup_split_ui()
 
     def _setup_split_ui(self):
@@ -892,18 +907,16 @@ class SplitDialog(BaseDialog):
 
         # Layout
         self.main_layout.addWidget(file_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.main_layout.addWidget(
+                            self._create_folder_button(), alignment=Qt.AlignmentFlag.AlignCenter
+                        )
         self.main_layout.addSpacing(20)
         self.main_layout.addWidget(self.file_path)
         self.main_layout.addWidget(extract_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.main_layout.addWidget(QLabel("Artista*"))
-        self.main_layout.addWidget(self.artist)
-        self.main_layout.addWidget(QLabel("Canción*"))
-        self.main_layout.addWidget(self.song)
+        self.main_layout.addLayout(labeled_field("Artista*", self.artist))
+        self.main_layout.addLayout(labeled_field("Canción*", self.song))
         self.main_layout.addWidget(self._create_timing_checkbox())
-        self.main_layout.addWidget(self._create_batch_label())
-        self.main_layout.addWidget(
-            self._create_folder_button(), alignment=Qt.AlignmentFlag.AlignCenter
-        )
+
         self.main_layout.addLayout(btn_layout)
 
         self._setup_validation()
@@ -930,14 +943,6 @@ class SplitDialog(BaseDialog):
         """)
         return self.timing_chk
 
-    def _create_batch_label(self) -> QLabel:
-        label = QLabel(
-            "Por lote: elegí varios archivos en el botón MP3, o una carpeta acá "
-            "abajo. El artista y la canción salen del nombre de cada archivo."
-        )
-        label.setWordWrap(True)
-        label.setStyleSheet("color: #9a9aad; font-size: 11px;")
-        return label
 
     def _create_folder_button(self) -> QPushButton:
         """La otra entrada al lote es el propio botón MP3 (ver _select_file)."""
@@ -1209,10 +1214,8 @@ class BatchNameDialog(BaseDialog):
 
         self.main_layout.addWidget(counter)
         self.main_layout.addWidget(name_label)
-        self.main_layout.addWidget(QLabel("Artista*"))
-        self.main_layout.addWidget(self.artist)
-        self.main_layout.addWidget(QLabel("Canción*"))
-        self.main_layout.addWidget(self.song)
+        self.main_layout.addLayout(labeled_field("Artista*", self.artist))
+        self.main_layout.addLayout(labeled_field("Canción*", self.song))
         self.main_layout.addStretch()
         self.main_layout.addLayout(self._create_action_buttons())
 
@@ -1356,10 +1359,8 @@ class CorrectSongDialog(BaseDialog):
 
         btn_layout = self._create_action_buttons()
 
-        self.main_layout.addWidget(QLabel("Artista*"))
-        self.main_layout.addWidget(self.artist)
-        self.main_layout.addWidget(QLabel("Canción*"))
-        self.main_layout.addWidget(self.song)
+        self.main_layout.addLayout(labeled_field("Artista*", self.artist))
+        self.main_layout.addLayout(labeled_field("Canción*", self.song))
         self.main_layout.addStretch()
         self.main_layout.addLayout(btn_layout)
 
