@@ -460,3 +460,26 @@ class TestMensajeDeEstado:
         player._status_msg_timer.stop()  # vence el mensaje: vuelve el resumen
         player.update_status()
         assert player.status_label.text().startswith("Canciones: 2")
+
+
+class TestOperacionEnCurso:
+    """begin_status/end_status: la operación encabeza el resumen hasta terminar."""
+
+    def test_se_queda_hasta_terminar_sin_tapar_el_resumen(self, player):
+        player._status_msg_timer.stop()
+        player.begin_status("instalar", "Instalando Demucs...")
+        player.begin_status("descarga", "Descargando MP3...")
+        player.update_status()  # lo que dispararía el timer de 1 s
+        text = player.status_label.text()
+        assert text.startswith("Instalando Demucs... | Descargando MP3... | Canciones:")
+
+        player.end_status("instalar", "Demucs instalado correctamente.")
+        assert player.status_label.text() == "Demucs instalado correctamente."
+        player._status_msg_timer.stop()  # vence el resultado
+        player.update_status()
+        assert player.status_label.text().startswith("Descargando MP3... | Canciones:")
+
+        player.end_status("descarga", "Descarga completada.")
+        player._status_msg_timer.stop()
+        player.update_status()
+        assert player.status_label.text().startswith("Canciones:")

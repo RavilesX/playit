@@ -42,7 +42,10 @@ from ytdlp_worker import YTDLPWorker
 
 class DependencyManager(QObject):
     changed = pyqtSignal()    # tras el chequeo inicial o una instalación exitosa
-    status = pyqtSignal(str)  # texto para la barra de estado
+    # Barra de estado: (clave, texto). op_started abre una operación en curso
+    # y op_finished la cierra con su resultado
+    op_started = pyqtSignal(str, str)
+    op_finished = pyqtSignal(str, str)
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -157,14 +160,14 @@ class DependencyManager(QObject):
             lambda msg: self._on_install_error(name, msg, progress_attr=progress_attr),
         )
         self._running[name] = (thread, worker)
-        self.status.emit(f"Instalando {name}...")
+        self.op_started.emit(name, f"Instalando {name}...")
 
     def _on_install_success(self, name: str, available_attr: str, message: str,
                             progress_attr: str | None = None, after=None):
         setattr(self, available_attr, True)
         if progress_attr:
             setattr(self, progress_attr, False)
-        self.status.emit(f"{name} instalado correctamente.")
+        self.op_finished.emit(name, f"{name} instalado correctamente.")
         if after:
             after()
         self.changed.emit()
@@ -175,7 +178,7 @@ class DependencyManager(QObject):
     def _on_install_error(self, name: str, msg: str, progress_attr: str | None = None):
         if progress_attr:
             setattr(self, progress_attr, False)
-        self.status.emit(f"Error instalando {name}.")
+        self.op_finished.emit(name, f"Error instalando {name}.")
         styled_message_box(self.parent(), "Error de instalación", msg, QMessageBox.Icon.Critical)
 
     def install_python(self):

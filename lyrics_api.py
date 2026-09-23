@@ -101,25 +101,24 @@ def needs_lyrics(dir_path) -> bool:
 
 class LyricsFetchQueue:
     """Un solo hilo de fondo para no saturar red/CPU al cargar playlists
-    grandes: busca las letras que falten, termina tras 5 s sin trabajo y
-    renace con el próximo `put`."""
+    grandes: busca las letras que falten.
+
+    El hilo vive todo el proceso bloqueado en `get()` (daemon, sin costo en
+    reposo). Antes terminaba tras 5 s sin trabajo y renacía en el próximo
+    `put`, pero un `put` justo mientras terminaba veía el hilo aún vivo y su
+    canción se quedaba sin buscar hasta el siguiente.
+    """
 
     def __init__(self):
         self._queue: queue.Queue = queue.Queue()
-        self._thread = None
+        threading.Thread(target=self._run, daemon=True).start()
 
     def put(self, dir_path, artist: str, song: str):
         self._queue.put((dir_path, artist, song))
-        if self._thread is None or not self._thread.is_alive():
-            self._thread = threading.Thread(target=self._run, daemon=True)
-            self._thread.start()
 
     def _run(self):
         while True:
-            try:
-                dir_path, artist, song = self._queue.get(timeout=5)
-            except queue.Empty:
-                return
+            dir_path, artist, song = self._queue.get()
             try:
                 if needs_lyrics(dir_path):
                     fetch_lyrics(artist, song, Path(dir_path))

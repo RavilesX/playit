@@ -803,7 +803,7 @@ class AudioPlayer(QMainWindow):
                 return
 
         artist, song = song_data['artist'], song_data['song']
-        self.show_status_message(f"Buscando letras: {artist} - {song}...")
+        self.begin_status(f"lyrics:{path}", f"Buscando letras: {artist} - {song}...")
 
         def worker():
             found = False
@@ -833,9 +833,8 @@ class AudioPlayer(QMainWindow):
                 self._handle_lyrics_not_found()
             self.update_lyrics_menu_state()
 
-        self.show_status_message(
-            "Letras actualizadas" if found else "No se encontraron letras"
-        )
+        self.end_status(f"lyrics:{path}",
+                        "Letras actualizadas" if found else "No se encontraron letras")
 
     @staticmethod
     def _move_song_folder(old_path: Path, new_path: Path):
@@ -1029,7 +1028,7 @@ class AudioPlayer(QMainWindow):
             return
 
     def _on_playlist_loaded(self):
-        self.show_status_message(f"Playlist cargada: {len(self.playlist)} canciones")
+        self.end_status("playlist", f"Playlist cargada: {len(self.playlist)} canciones")
         self.update_status()
 
     def _handle_cover_loaded(self, image: QImage):
@@ -1805,6 +1804,7 @@ class AudioPlayer(QMainWindow):
                 self._last_stats_update = now
 
             parts = [
+                *self._status_ops.values(),
                 f"Canciones: {len(self.playlist)}",
                 f"Reproducción: {self.playback_state.capitalize()}",
                 "Remoto: activo" if self._remote_server is not None else "",
@@ -1958,7 +1958,7 @@ class AudioPlayer(QMainWindow):
             return
         # Carpeta nueva: items sin ordenar
         self._reset_sort_label()
-        self.show_status_message("Cargando playlist...")
+        self.begin_status("playlist", "Cargando playlist...")
         try:
             self.lazy_playlist.load_playlist_lazy(Path(path))
         except Exception as e:
@@ -1966,7 +1966,7 @@ class AudioPlayer(QMainWindow):
                 self, "Error", f"Error iniciando carga: {str(e)}",
                 QMessageBox.Icon.Critical,
             )
-            self.show_status_message("Error cargando playlist")
+            self.end_status("playlist", "Error cargando playlist")
 
     def clear_playlist(self):
         self.stop_playback()
@@ -2703,7 +2703,8 @@ class AudioPlayer(QMainWindow):
                              on_finished, on_error, status_msg: str):
         setattr(self, thread_attr, start_worker_thread(worker, on_finished, on_error))
         setattr(self, worker_attr, worker)
-        self.show_status_message(status_msg)
+        # Clave = thread_attr: los handlers de fin cierran con end_status(thread_attr, …)
+        self.begin_status(thread_attr, status_msg)
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Descarga MP3 ─────────────────────────────────────────────────────
@@ -2729,11 +2730,11 @@ class AudioPlayer(QMainWindow):
         )
 
     def _on_download_finished(self, message: str):
-        self.show_status_message("Descarga completada.")
+        self.end_status('download_thread', "Descarga completada.")
         styled_message_box(self, "Descarga finalizada", message, QMessageBox.Icon.Information)
 
     def _on_download_error(self, msg: str):
-        self.show_status_message("Error en descarga.")
+        self.end_status('download_thread', "Error en descarga.")
         styled_message_box(self, "Error de descarga", msg, QMessageBox.Icon.Critical)
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2902,7 +2903,11 @@ class AudioPlayer(QMainWindow):
         self._status_msg_timer = QTimer(self)
         self._status_msg_timer.setSingleShot(True)
         self._status_msg_timer.timeout.connect(self.update_status)
-        self.deps.status.connect(self.show_status_message)
+        # Operaciones en curso {clave: texto}: encabezan el resumen hasta que
+        # terminan (begin_status / end_status)
+        self._status_ops: dict[str, str] = {}
+        self.deps.op_started.connect(self.begin_status)
+        self.deps.op_finished.connect(self.end_status)
         self.status_bar.showMessage("Listo", 3000)
         self.update_status()
 
@@ -2912,6 +2917,18 @@ class AudioPlayer(QMainWindow):
         permanente con stretch=1 y deja sin ancho el área del mensaje."""
         self.status_label.setText(text)
         self._status_msg_timer.start(ms)
+
+    def begin_status(self, key: str, text: str):
+        """Operación larga en curso: su texto encabeza el resumen de la barra
+        hasta end_status, sin taparlo (siguen viéndose el progreso de Demucs,
+        la hora y otras operaciones simultáneas)."""
+        self._status_ops[key] = text
+        self.update_status()
+
+    def end_status(self, key: str, text: str):
+        """Cierra la operación `key` y muestra su resultado como mensaje puntual."""
+        self._status_ops.pop(key, None)
+        self.show_status_message(text)
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Caché ────────────────────────────────────────────────────────────
@@ -3001,7 +3018,7 @@ class AudioPlayer(QMainWindow):
 
     def _on_update_check_success(self, latest_version: str, html_url: str):
         self.check_updates_action.setEnabled(True)
-        self.show_status_message("Búsqueda de actualizaciones completa.")
+        self.end_status('update_check_thread', "Búsqueda de actualizaciones completa.")
 
         if __version__ == "dev":
             self._show_update_dialog(
@@ -3024,7 +3041,7 @@ class AudioPlayer(QMainWindow):
 
     def _on_update_check_error(self, msg: str):
         self.check_updates_action.setEnabled(True)
-        self.show_status_message("Error buscando actualizaciones.")
+        self.end_status('update_check_thread', "Error buscando actualizaciones.")
         self._show_update_dialog(msg)
 
     def show_search_dialog(self):

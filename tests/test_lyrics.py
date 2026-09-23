@@ -123,6 +123,21 @@ class TestNecesitaLetras:
         assert not lyrics_api.needs_lyrics(tmp_path)
 
 
+class TestColaDeLetras:
+    def test_procesa_lo_que_llega_sin_importar_cuando(self, monkeypatch, tmp_path):
+        import time
+        fetched = []
+        monkeypatch.setattr(lyrics_api, "needs_lyrics", lambda d: True)
+        monkeypatch.setattr(lyrics_api, "fetch_lyrics", lambda a, s, d: fetched.append(s))
+        q = lyrics_api.LyricsFetchQueue()
+        q.put(tmp_path, "A", "Uno")
+        q.put(tmp_path, "B", "Dos")
+        deadline = time.time() + 2
+        while len(fetched) < 2 and time.time() < deadline:
+            time.sleep(0.01)
+        assert fetched == ["Uno", "Dos"]
+
+
 class TestAutoUnmuteVoz:
     def test_linea_en_blanco_se_detecta(self, player):
         player.lyrics = [

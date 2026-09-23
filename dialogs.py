@@ -903,7 +903,7 @@ class SplitDialog(BaseDialog):
         self.main_layout.addWidget(QLabel("Canción*"))
         self.main_layout.addWidget(self.song)
         self.main_layout.addWidget(self._create_timing_checkbox())
-        
+
         self.main_layout.addLayout(btn_layout)
 
         self._setup_validation()
