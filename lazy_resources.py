@@ -20,6 +20,7 @@ import logging
 import threading
 import time
 import json
+from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap, QIcon, QImage
 from PIL import Image
@@ -56,6 +57,30 @@ def read_song_metadata(song_folder: Path) -> dict:
     except Exception:
         pass
     return {}
+
+
+def write_mlst(songs: list[dict], file_path) -> None:
+    """Vuelca canciones de la playlist a un .mlst. Lanza si no puede escribir."""
+    data = {
+        "name": Path(file_path).stem,
+        "created": datetime.now().strftime('%Y-%m-%d'),
+        "songs": [
+            {"artist": song["artist"], "song": song["song"], "path": str(song["path"])}
+            for song in songs
+        ],
+    }
+    Path(file_path).write_text(
+        json.dumps(data, indent=4, ensure_ascii=False), encoding='utf-8'
+    )
+
+
+def read_mlst(file_path) -> tuple[str, list[dict]]:
+    """(nombre, canciones) de un .mlst; descarta entradas sin artista, título
+    o ruta. Lanza si el archivo no se puede leer o no es JSON válido."""
+    data = json.loads(Path(file_path).read_text(encoding='utf-8'))
+    songs = [s for s in data.get("songs", [])
+             if s.get("artist") and s.get("song") and s.get("path")]
+    return data.get("name", ""), songs
 
 
 class ResourceCache:

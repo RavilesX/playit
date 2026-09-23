@@ -1,5 +1,8 @@
-"""Tests de manejo de playlist: agregar, deduplicar, remover, buscar."""
+"""Tests de manejo de playlist: agregar, deduplicar, remover, buscar, .mlst."""
+import json
 from pathlib import Path
+
+from lazy_resources import read_mlst, write_mlst
 
 
 def make_song(artist, song, path="/tmp/x"):
@@ -84,6 +87,17 @@ class TestScanFolder:
         # Re-escanear no duplica
         player.scan_folder(tmp_path)
         assert len(player.playlist) == 1
+
+    def test_carpeta_de_una_cancion_agrega_solo_esa(self, player, tmp_path):
+        # Lo que hace DemucsQueue.song_ready tras cada separación
+        for artist, song in (("A", "Uno"), ("B", "Dos")):
+            d = tmp_path / artist / song
+            d.mkdir(parents=True)
+            (d / "data.json").write_text(
+                f'{{"{artist}": {{"{song}": {{"path": "x"}}}}}}', encoding="utf-8"
+            )
+        player.scan_folder(tmp_path / "B" / "Dos")
+        assert [s["song"] for s in player.playlist] == ["Dos"]
 
 
 class TestBusqueda:
@@ -409,3 +423,40 @@ class TestTagMutes:
         assert player.mute_states == {
             "drums": False, "vocals": True, "bass": False, "other": False,
         }
+
+
+class TestMlst:
+    def test_ida_y_vuelta(self, tmp_path):
+        f = tmp_path / "fiesta.mlst"
+        write_mlst([make_song("Ñandú", "Canción", "/m/a"), make_song("B", "2", "/m/b")], f)
+        name, songs = read_mlst(f)
+        assert name == "fiesta"
+        assert songs == [{"artist": "Ñandú", "song": "Canción", "path": "/m/a"},
+                         {"artist": "B", "song": "2", "path": "/m/b"}]
+        assert "Ñandú" in f.read_text(encoding="utf-8")  # ensure_ascii=False
+
+    def test_descarta_entradas_incompletas(self, tmp_path):
+        f = tmp_path / "x.mlst"
+        f.write_text(json.dumps({"name": "x", "songs": [
+            {"artist": "A", "song": "1", "path": "/m/a"},
+            {"artist": "", "song": "2", "path": "/m/b"},
+            {"artist": "C", "song": "3"},
+        ]}), encoding="utf-8")
+        assert [s["song"] for s in read_mlst(f)[1]] == ["1"]
+
+
+class TestMensajeDeEstado:
+    def test_cargar_mlst_no_lo_pisa_update_status(self, player, tmp_path, monkeypatch):
+        f = tmp_path / "fiesta.mlst"
+        write_mlst([make_song("A", "1", "/m/a"), make_song("B", "2", "/m/b")], f)
+        monkeypatch.setattr("audio_player.QFileDialog.getOpenFileName",
+                            lambda *a, **k: (str(f), ""))
+        monkeypatch.setattr(player._lyrics_fetch, "put", lambda *a: None)
+
+        player.load_playlist_mlst()
+        player.update_status()  # lo que dispara cualquier otra ruta
+        assert player.status_label.text() == "Playlist cargada: fiesta (2 nuevas canciones)"
+
+        player._status_msg_timer.stop()  # vence el mensaje: vuelve el resumen
+        player.update_status()
+        assert player.status_label.text().startswith("Canciones: 2")

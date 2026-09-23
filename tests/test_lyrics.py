@@ -2,7 +2,8 @@
 
 import pytest
 
-from audio_player import LYRICS_NOT_FOUND_TEXT
+import lyrics_api
+from lyrics_api import LYRICS_NOT_FOUND_TEXT
 
 LRC_EJEMPLO = """[00:01.00]<center>Primera línea</center>
 [00:03.50]<center>Segunda línea</center>
@@ -53,34 +54,34 @@ class TestAjusteTiming:
 class TestFallbackHibrido:
     """LRCLIB estricto primero; syncedlyrics (fuzzy) solo si LRCLIB no encuentra."""
 
-    def test_lrclib_encuentra_no_usa_fallback(self, player, tmp_path, monkeypatch):
-        monkeypatch.setattr(player, "_search_lrclib", lambda a, s: "[00:01.00]hola")
+    def test_lrclib_encuentra_no_usa_fallback(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(lyrics_api, "search_lrclib", lambda a, s: "[00:01.00]hola")
         monkeypatch.setattr(
-            player, "_search_syncedlyrics",
+            lyrics_api, "search_syncedlyrics",
             lambda a, s: pytest.fail("No debe llamarse al fallback"),
         )
-        player._fetch_lyrics_from_api("A", "B", tmp_path)
+        lyrics_api.fetch_lyrics("A", "B", tmp_path)
         content = (tmp_path / "lyrics.lrc").read_text(encoding="utf-8")
         assert "<center>hola</center>" in content
 
-    def test_fallback_se_usa_cuando_lrclib_falla(self, player, tmp_path, monkeypatch):
-        monkeypatch.setattr(player, "_search_lrclib", lambda a, s: "")
+    def test_fallback_se_usa_cuando_lrclib_falla(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(lyrics_api, "search_lrclib", lambda a, s: "")
         monkeypatch.setattr(
-            player, "_search_syncedlyrics", lambda a, s: "[00:02.00]mundo"
+            lyrics_api, "search_syncedlyrics", lambda a, s: "[00:02.00]mundo"
         )
-        player._fetch_lyrics_from_api("A", "B", tmp_path)
+        lyrics_api.fetch_lyrics("A", "B", tmp_path)
         content = (tmp_path / "lyrics.lrc").read_text(encoding="utf-8")
         assert "<center>mundo</center>" in content
         assert LYRICS_NOT_FOUND_TEXT not in content
 
-    def test_placeholder_si_ambos_fallan(self, player, tmp_path, monkeypatch):
-        monkeypatch.setattr(player, "_search_lrclib", lambda a, s: "")
-        monkeypatch.setattr(player, "_search_syncedlyrics", lambda a, s: "")
-        player._fetch_lyrics_from_api("A", "B", tmp_path)
+    def test_placeholder_si_ambos_fallan(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(lyrics_api, "search_lrclib", lambda a, s: "")
+        monkeypatch.setattr(lyrics_api, "search_syncedlyrics", lambda a, s: "")
+        lyrics_api.fetch_lyrics("A", "B", tmp_path)
         content = (tmp_path / "lyrics.lrc").read_text(encoding="utf-8")
         assert LYRICS_NOT_FOUND_TEXT in content
 
-    def test_search_syncedlyrics_tolera_paquete_ausente(self, player, monkeypatch):
+    def test_search_syncedlyrics_tolera_paquete_ausente(self, monkeypatch):
         import builtins
         real_import = builtins.__import__
 
@@ -90,23 +91,36 @@ class TestFallbackHibrido:
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", fake_import)
-        assert player._search_syncedlyrics("A", "B") == ""
+        assert lyrics_api.search_syncedlyrics("A", "B") == ""
 
 
 class TestPlaceholderReintento:
-    def test_escribe_placeholder_cuando_no_hay_letras(self, player, tmp_path):
-        player._write_lyrics_file(tmp_path, "A", "B", None)
+    def test_escribe_placeholder_cuando_no_hay_letras(self, tmp_path):
+        lyrics_api.write_lyrics_file(tmp_path, None)
         content = (tmp_path / "lyrics.lrc").read_text(encoding="utf-8")
         # El texto escrito debe coincidir con el que dispara el reintento
         assert LYRICS_NOT_FOUND_TEXT in content
 
-    def test_letras_validas_no_contienen_placeholder(self, player, tmp_path):
-        player._write_lyrics_file(
-            tmp_path, "A", "B", "[00:01.00]hola\n[00:02.00]mundo"
-        )
+    def test_letras_validas_no_contienen_placeholder(self, tmp_path):
+        lyrics_api.write_lyrics_file(tmp_path, "[00:01.00]hola\n[00:02.00]mundo")
         content = (tmp_path / "lyrics.lrc").read_text(encoding="utf-8")
         assert LYRICS_NOT_FOUND_TEXT not in content
         assert "<center>hola</center>" in content
+
+
+class TestNecesitaLetras:
+    """needs_lyrics decide si la cola de fondo vuelve a buscar."""
+
+    def test_sin_archivo(self, tmp_path):
+        assert lyrics_api.needs_lyrics(tmp_path)
+
+    def test_placeholder_reintenta(self, tmp_path):
+        lyrics_api.write_lyrics_file(tmp_path, None)
+        assert lyrics_api.needs_lyrics(tmp_path)
+
+    def test_letras_validas_no(self, tmp_path):
+        lyrics_api.write_lyrics_file(tmp_path, "[00:01.00]hola")
+        assert not lyrics_api.needs_lyrics(tmp_path)
 
 
 class TestAutoUnmuteVoz:

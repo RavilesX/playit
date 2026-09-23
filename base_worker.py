@@ -14,8 +14,24 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from platform_utils import run_silent
+
+
+def start_worker_thread(worker, on_finished, on_error) -> QThread:
+    """Mueve `worker` (con señales finished/error y método run) a un QThread
+    nuevo y lo arranca. El llamador debe guardar referencia al thread y al
+    worker mientras corren: sin ella Python los recoge y el QThread muere."""
+    thread = QThread()
+    worker.moveToThread(thread)
+    thread.started.connect(worker.run)
+    worker.finished.connect(on_finished)
+    worker.error.connect(on_error)
+    worker.finished.connect(thread.quit)
+    worker.finished.connect(worker.deleteLater)
+    thread.finished.connect(thread.deleteLater)
+    thread.start()
+    return thread
 
 
 class BaseInstallWorker(QObject):

@@ -1,17 +1,19 @@
-"""Tests del lote del diálogo de división (dialogs.SplitDialog + process_batch).
+"""Tests del lote del diálogo de división (dialogs.SplitDialog + DemucsQueue).
 
 Lo que se fija aquí: el nombre "Artista - Canción" se resuelve solo, los
 archivos que no cumplen se preguntan ANTES de encolar nada (si no, cada
 diálogo pararía la cola en plena separación) y el lote entra completo a
-`demucs_queue`.
+la cola (`DemucsQueue.add_batch`).
 """
 import time
 
 import pytest
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMessageBox, QWidget
 
-import audio_player
+import demucs_queue
 import dialogs
+from demucs_queue import DemucsQueue
+from demucs_worker import _sanitize_path_component
 from dialogs import (
     BatchNameDialog,
     BatchTimingDialog,
@@ -175,60 +177,67 @@ class TestConfirmDuplicates:
         dialog.deleteLater()
 
 
+@pytest.fixture
+def dq(qtbot, tmp_path):
+    """Cola nueva por test, sin AudioPlayer."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    yield DemucsQueue(parent, tmp_path)  # yield: si `parent` muere, Qt borra la cola
+
+
 class TestProcessBatch:
-    """process_batch encola todo de una vez y arranca el primer trabajo."""
+    """add_batch encola todo de una vez y arranca el primer trabajo."""
 
-    def test_encola_todo_y_arranca_uno(self, player, monkeypatch):
-        player.demucs_queue.clear()
-        player.demucs_active = False
+    def test_encola_todo_y_arranca_uno(self, dq, monkeypatch):
         started = []
-        monkeypatch.setattr(player, "_start_demucs_job", lambda job: started.append(job))
+        monkeypatch.setattr(dq, "_start_job", lambda job: started.append(job))
 
-        player.process_batch([
+        dq.add_batch([
             {"artist": "A", "song": "Uno", "file_path": "/m/1.mp3"},
             {"artist": "B", "song": "Dos", "file_path": "/m/2.mp3"},
             {"artist": "C", "song": "Tres", "file_path": "/m/3.mp3"},
         ])
 
         assert len(started) == 1 and started[0]["song"] == "Uno"
-        assert [j["song"] for j in player.demucs_queue] == ["Dos", "Tres"]
+        assert [j["song"] for j in dq.queue] == ["Dos", "Tres"]
         # silencia los diálogos de error por track en medio del lote
-        assert player.processing_multiple is True
-        assert player.last_in_queue == {"artist": "C", "song": "Tres"}
-        player.demucs_queue.clear()
+        assert dq.processing_multiple is True
+        assert dq.last_in_queue == {"artist": "C", "song": "Tres"}
 
-    def test_con_worker_activo_solo_encola(self, player, monkeypatch):
-        player.demucs_queue.clear()
-        player.demucs_active = True
+    def test_con_worker_activo_solo_encola(self, dq, monkeypatch):
+        dq.active = True
         monkeypatch.setattr(
-            player, "_start_demucs_job", lambda job: pytest.fail("no debió arrancar")
+            dq, "_start_job", lambda job: pytest.fail("no debió arrancar")
         )
-        player.process_batch([{"artist": "A", "song": "Uno", "file_path": "/m/1.mp3"}])
-        assert len(player.demucs_queue) == 1
-        player.demucs_queue.clear()
-        player.demucs_active = False
+        dq.add_batch([{"artist": "A", "song": "Uno", "file_path": "/m/1.mp3"}])
+        assert len(dq.queue) == 1
 
-    def test_lote_vacio_no_hace_nada(self, player, monkeypatch):
-        player.demucs_queue.clear()
-        player.demucs_active = False
+    def test_lote_vacio_no_hace_nada(self, dq, monkeypatch):
         monkeypatch.setattr(
-            player, "_start_demucs_job", lambda job: pytest.fail("no debió arrancar")
+            dq, "_start_job", lambda job: pytest.fail("no debió arrancar")
         )
-        player.process_batch([])
-        assert player.demucs_queue == []
+        dq.add_batch([])
+        assert dq.queue == []
 
-    def test_cronometro_se_propaga_a_cada_trabajo(self, player, monkeypatch):
-        player.demucs_queue.clear()
-        player.demucs_active = True
-        monkeypatch.setattr(player, "_start_demucs_job", lambda job: None)
-        player.process_batch(
+    def test_cronometro_se_propaga_a_cada_trabajo(self, dq, monkeypatch):
+        dq.active = True
+        monkeypatch.setattr(dq, "_start_job", lambda job: None)
+        dq.add_batch(
             [{"artist": "A", "song": "Uno", "file_path": "/m/1.mp3"},
              {"artist": "B", "song": "Dos", "file_path": "/m/2.mp3"}],
             timed=True,
         )
-        assert all(j["timed"] for j in player.demucs_queue)
-        player.demucs_queue.clear()
-        player.demucs_active = False
+        assert all(j["timed"] for j in dq.queue)
+
+
+class TestSongReady:
+    """Al terminar una separación se agrega solo esa carpeta, no la librería."""
+
+    def test_emite_la_carpeta_saneada(self, dq, qtbot):
+        dq._current_job = {"artist": "AC/DC", "song": "Back In Black", "timed": False}
+        with qtbot.waitSignal(dq.song_ready) as sig:
+            dq._on_success()
+        assert sig.args == [dq.library / _sanitize_path_component("AC/DC") / "Back In Black"]
 
 
 class TestFormatElapsed:
@@ -250,108 +259,102 @@ class TestCronometroLote:
         return {"artist": "A", "song": song, "timed": True,
                 "batch_id": batch_id, "t0": time.monotonic() - ago}
 
-    def _quiet(self, player, monkeypatch):
+    def _quiet(self, dq, monkeypatch):
         """Captura los dos diálogos que puede sacar el cronómetro."""
         modals, summaries = [], []
-        monkeypatch.setattr(audio_player, "styled_message_box",
+        monkeypatch.setattr(demucs_queue, "styled_message_box",
                             lambda *a, **k: modals.append(a))
-        monkeypatch.setattr(player, "_show_batch_timing_summary", summaries.append)
-        player.demucs_queue.clear()
-        player._batch_timings.clear()
-        player._current_demucs_job = None
+        monkeypatch.setattr(dq, "_show_batch_timing_summary", summaries.append)
         return modals, summaries
 
-    def test_en_medio_del_lote_solo_anota(self, player, monkeypatch):
-        modals, summaries = self._quiet(player, monkeypatch)
+    def test_en_medio_del_lote_solo_anota(self, dq, monkeypatch):
+        modals, summaries = self._quiet(dq, monkeypatch)
         running, queued = self._job("Dos"), self._job("Tres")
-        player.demucs_queue.append(queued)
-        player._current_demucs_job = running
+        dq.queue.append(queued)
+        dq._current_job = running
 
-        player._finish_timed_job(self._job("Uno"), "CUDA")
+        dq._finish_timed_job(self._job("Uno"), "CUDA")
 
         assert summaries == [] and modals == []
-        assert [r["song"] for r in player._batch_timings[7]] == ["Uno"]
+        assert [r["song"] for r in dq._batch_timings[7]] == ["Uno"]
 
-    def test_el_ultimo_dispara_el_resumen(self, player, monkeypatch):
-        modals, summaries = self._quiet(player, monkeypatch)
+    def test_el_ultimo_dispara_el_resumen(self, dq, monkeypatch):
+        modals, summaries = self._quiet(dq, monkeypatch)
         last = self._job("Dos")
-        player.demucs_queue.append(last)
-        player._current_demucs_job = last
-        player._finish_timed_job(self._job("Uno"), "CUDA")
+        dq.queue.append(last)
+        dq._current_job = last
+        dq._finish_timed_job(self._job("Uno"), "CUDA")
         assert summaries == []
 
         # el último: ya no queda nada de ese lote ni en cola ni corriendo
-        player.demucs_queue.clear()
-        player._current_demucs_job = None
-        player._finish_timed_job(last, "CUDA")
+        dq.queue.clear()
+        dq._current_job = None
+        dq._finish_timed_job(last, "CUDA")
 
         assert summaries == [7]
-        assert [r["song"] for r in player._batch_timings[7]] == ["Uno", "Dos"]
+        assert [r["song"] for r in dq._batch_timings[7]] == ["Uno", "Dos"]
         assert modals == []
 
-    def test_un_trabajo_suelto_en_medio_no_alarga_el_lote(self, player, monkeypatch):
-        _, summaries = self._quiet(player, monkeypatch)
+    def test_un_trabajo_suelto_en_medio_no_alarga_el_lote(self, dq, monkeypatch):
+        _, summaries = self._quiet(dq, monkeypatch)
         # canción agregada a mano mientras corre el lote: sin batch_id
-        player.demucs_queue.append({"artist": "X", "song": "Suelta",
+        dq.queue.append({"artist": "X", "song": "Suelta",
                                     "timed": False, "t0": time.monotonic()})
-        player._finish_timed_job(self._job("Uno"), "CUDA")
+        dq._finish_timed_job(self._job("Uno"), "CUDA")
         assert summaries == [7]
 
-    def test_dos_lotes_no_mezclan_renglones(self, player, monkeypatch):
-        _, summaries = self._quiet(player, monkeypatch)
+    def test_dos_lotes_no_mezclan_renglones(self, dq, monkeypatch):
+        _, summaries = self._quiet(dq, monkeypatch)
         otro = self._job("Otro", batch_id=8)
-        player.demucs_queue.append(otro)
-        player._current_demucs_job = otro
+        dq.queue.append(otro)
+        dq._current_job = otro
 
-        player._finish_timed_job(self._job("Uno", batch_id=7), "CUDA")
+        dq._finish_timed_job(self._job("Uno", batch_id=7), "CUDA")
 
         assert summaries == [7]                      # el 7 ya no tiene pendientes
-        assert 8 not in player._batch_timings        # el 8 sigue corriendo
-        assert [r["song"] for r in player._batch_timings[7]] == ["Uno"]
+        assert 8 not in dq._batch_timings        # el 8 sigue corriendo
+        assert [r["song"] for r in dq._batch_timings[7]] == ["Uno"]
 
-    def test_error_anota_renglon_y_cierra_el_lote(self, player, monkeypatch):
-        _, summaries = self._quiet(player, monkeypatch)
-        player._finish_timed_job(self._job("Uno"), "", failed=True)
+    def test_error_anota_renglon_y_cierra_el_lote(self, dq, monkeypatch):
+        _, summaries = self._quiet(dq, monkeypatch)
+        dq._finish_timed_job(self._job("Uno"), "", failed=True)
         assert summaries == [7]
-        assert player._batch_timings[7][0]["failed"] is True
+        assert dq._batch_timings[7][0]["failed"] is True
 
-    def test_cancion_suelta_saca_su_modal(self, player, monkeypatch):
-        modals, summaries = self._quiet(player, monkeypatch)
+    def test_cancion_suelta_saca_su_modal(self, dq, monkeypatch):
+        modals, summaries = self._quiet(dq, monkeypatch)
         job = self._job("Uno")
         del job["batch_id"]
-        player._finish_timed_job(job, "CUDA")
+        dq._finish_timed_job(job, "CUDA")
         assert len(modals) == 1 and summaries == []
 
-    def test_cancion_suelta_que_falla_no_saca_modal(self, player, monkeypatch):
-        modals, _ = self._quiet(player, monkeypatch)
+    def test_cancion_suelta_que_falla_no_saca_modal(self, dq, monkeypatch):
+        modals, _ = self._quiet(dq, monkeypatch)
         job = self._job("Uno")
         del job["batch_id"]
-        player._finish_timed_job(job, "", failed=True)
+        dq._finish_timed_job(job, "", failed=True)
         assert modals == []
 
-    def test_sin_cronometro_no_hace_nada(self, player, monkeypatch):
-        modals, summaries = self._quiet(player, monkeypatch)
+    def test_sin_cronometro_no_hace_nada(self, dq, monkeypatch):
+        modals, summaries = self._quiet(dq, monkeypatch)
         job = self._job("Uno")
         job["timed"] = False
-        player._finish_timed_job(job, "CUDA")
-        player._finish_timed_job(None, "CUDA")
-        assert modals == [] and summaries == [] and player._batch_timings == {}
+        dq._finish_timed_job(job, "CUDA")
+        dq._finish_timed_job(None, "CUDA")
+        assert modals == [] and summaries == [] and dq._batch_timings == {}
 
-    def test_process_batch_marca_un_id_por_lote(self, player, monkeypatch):
-        player.demucs_queue.clear()
-        player.demucs_active = True
-        monkeypatch.setattr(player, "_start_demucs_job", lambda job: None)
+    def test_add_batch_marca_un_id_por_lote(self, dq, monkeypatch):
+        dq.active = True
+        monkeypatch.setattr(dq, "_start_job", lambda job: None)
 
-        player.process_batch([{"artist": "A", "song": "Uno", "file_path": "/m/1.mp3"},
-                              {"artist": "B", "song": "Dos", "file_path": "/m/2.mp3"}],
-                             timed=True)
-        player.process_batch([{"artist": "C", "song": "Tres", "file_path": "/m/3.mp3"}],
-                             timed=True)
+        dq.add_batch([{"artist": "A", "song": "Uno", "file_path": "/m/1.mp3"},
+                      {"artist": "B", "song": "Dos", "file_path": "/m/2.mp3"}],
+                     timed=True)
+        dq.add_batch([{"artist": "C", "song": "Tres", "file_path": "/m/3.mp3"}],
+                     timed=True)
 
-        ids = [j["batch_id"] for j in player.demucs_queue]
+        ids = [j["batch_id"] for j in dq.queue]
         assert ids[0] == ids[1] and ids[2] != ids[0]
-        player.demucs_queue.clear()
-        player.demucs_active = False
 
 
 class TestBatchTimingDialog:
