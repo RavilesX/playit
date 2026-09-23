@@ -6,7 +6,7 @@
 
 **Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-[![Versión](https://img.shields.io/badge/versión-2.2.0-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Versión](https://img.shields.io/badge/versión-2.3.0-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
 [![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
@@ -181,6 +181,8 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 ```
 
 ## Versión actual
+
+**v2.3.0** — **más fluida y liviana**: la reproducción ya no carga las pistas completas en memoria, las lee del disco mientras suenan. Cambiar de canción pasa de congelar la ventana ~1 s a ser instantáneo, cada canción deja de ocupar ~270 MB de RAM y arrastrar la barra de progreso responde al momento. Al terminar cada separación se agrega solo la canción nueva, sin re-escanear toda la biblioteca (con bibliotecas grandes eso también congelaba la ventana). La barra de estado muestra las operaciones largas —instalar una dependencia, descargar, buscar letras o actualizaciones— **mientras duran**, sin tapar el resto, y la hora ahora avanza sola. En el diálogo de dividir, **un solo botón** sirve para elegir uno o varios archivos (varios arrancan el lote). Por dentro, el código principal se reorganizó en módulos más chicos.
 
 **v2.2.0** — **separación por lote**: el diálogo de dividir suma **"Varios archivos…"** y **"Carpeta…"** (recursiva), para encolar una biblioteca entera de una sentada. El artista y la canción salen solos del nombre de cada archivo (`Artista - Canción`); por los que no cumplen el patrón se pregunta **antes de arrancar**, uno por uno, con la opción de omitir ese archivo o cancelar el lote —así nadie tiene que quedarse frente a la pantalla mientras corre—. Avisa también cuando dos archivos del lote resuelven al mismo nombre, porque uno pisaría al otro. Con **"Cronometrar proceso"** marcado, el lote ya no saca un aviso por canción: al terminar muestra un único resumen con el tiempo de cada una, el total, el promedio y el dispositivo usado. Incluye además el **punto morado** en la playlist para las canciones encoladas y el arreglo del arrastre de la barra de progreso.
 
@@ -367,6 +369,8 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 ```
 
 ## Current version
+
+**v2.3.0** — **smoother and lighter**: playback no longer loads whole stems into memory, it reads them from disk as they play. Switching songs goes from freezing the window for ~1 s to instant, each song no longer takes ~270 MB of RAM, and dragging the progress bar responds right away. When a separation finishes only the new song is added, instead of rescanning the whole library (which also froze the window on large libraries). The status bar shows long operations —installing a dependency, downloading, looking up lyrics or updates— **for as long as they run**, without hiding the rest, and the clock now ticks on its own. In the split dialog, **a single button** picks one or many files (many start a batch). Under the hood, the main code was reorganized into smaller modules.
 
 **v2.2.0** — **batch separation**: the split dialog gains **"Varios archivos…"** and **"Carpeta…"** (recursive), so a whole library can be queued in one sitting. Artist and song are taken from each filename (`Artista - Canción`); the ones that don't match the pattern are asked for **before anything starts**, one by one, with the option to skip that file or cancel the batch —so nobody has to sit in front of the screen while it runs—. It also warns when two files in the batch resolve to the same name, since one would overwrite the other. With **"Cronometrar proceso"** checked, a batch no longer pops a dialog per song: when it finishes it shows a single summary with each song's time, the total, the average and the device used. Also included: the **purple dot** marking queued songs in the playlist, and a fix for dragging the progress bar.
 
