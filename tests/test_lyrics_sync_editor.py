@@ -12,8 +12,8 @@ sintéticamente con soundfile en archivos temporales.
 import numpy as np
 import pytest
 import soundfile as sf
-from PyQt6.QtCore import QEvent, QPointF, Qt
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent, QWheelEvent
 
 import lyrics_sync_editor as lse
 from lyrics_sync_editor import (
@@ -198,6 +198,20 @@ class TestWaveformMapeo:
         w.start_pos = 0.0
         assert w._block_at(300) == 0      # entre 1.0s(x150) y 5.0s(x750)
         assert w._block_at(800) == 1
+
+    @pytest.mark.parametrize("angle", [QPoint(0, -120), QPoint(-120, 0)])
+    def test_rueda_vertical_y_lateral_desplazan(self, app, angle):
+        # La lateral (pulgar del MX Master) llega solo en x.
+        w = WaveformWidget(_synthetic_audio(duration=20.0), [])
+        w.px_per_sec = 150.0
+        w.resize(600, 240)
+        w.start_pos = 0.0
+        w.wheelEvent(QWheelEvent(
+            QPointF(10, 10), QPointF(10, 10), QPoint(), angle,
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase, False,
+        ))
+        assert w.start_pos == pytest.approx(lse.WHEEL_SCROLL_SECONDS)
 
 
 class TestWaveformArrastre:

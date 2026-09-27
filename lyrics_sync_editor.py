@@ -700,7 +700,10 @@ class WaveformWidget(QWidget):
             self.edit_text_requested.emit(block)
 
     def wheelEvent(self, event):
-        delta = event.angleDelta().y()
+        # Rueda vertical o lateral (p. ej. la del pulgar del MX Master):
+        # la lateral llega solo en x.
+        angle = event.angleDelta()
+        delta = angle.y() or angle.x()
         if delta:
             step = (delta / 120.0) * WHEEL_SCROLL_SECONDS
             self.set_start_pos(self.start_pos - step)
@@ -1794,7 +1797,7 @@ class LyricsSyncDialog(BaseDialog):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, 'scroll'):
+        if hasattr(self, 'scrollbar'):
             self._refresh_scroll_range()
             self._sync_scroll_from_view()
         if hasattr(self, '_grips'):
