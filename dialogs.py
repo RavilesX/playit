@@ -240,7 +240,7 @@ class QueueDialog(BaseDialog):
         self._setup_queue_display(audio_player)
 
     def _setup_queue_display(self, audio_player):
-        queue_html = self._generate_queue_html(audio_player.demucs_queue)
+        queue_html = self._generate_queue_html(audio_player.demucs.queue)
 
         queue_edit = QTextEdit()
         queue_edit.setReadOnly(True)
