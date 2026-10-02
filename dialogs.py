@@ -38,7 +38,9 @@ class BaseDialog(QDialog):
     def __init__(self, parent=None, title: str = "", size: tuple[int, int] = (400, 300)):
         super().__init__(parent)
         self.parent_window = parent
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        # Conservar Qt.Dialog: solo FramelessWindowHint lo convertía en widget
+        # hijo, encerrado en los márgenes de la ventana principal.
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
         self.setWindowTitle(title)
         self.setFixedSize(*size)
         self._setup_ui()
@@ -58,10 +60,9 @@ class BaseDialog(QDialog):
         if not self.parent_window:
             return
 
-        parent_geo = self.parent_window.geometry()
-        x = (parent_geo.width() - self.width()) // 2
-        y = (parent_geo.height() - self.height()) // 2
-        self.move(QPoint(x, y))
+        # Coordenadas globales: el diálogo es ventana propia, no hijo.
+        parent_geo = self.parent_window.window().frameGeometry()
+        self.move(parent_geo.center() - self.rect().center())
 
 
 class AboutDialog(BaseDialog):
