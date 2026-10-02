@@ -40,8 +40,10 @@ AUDIO_INPUT_EXTS = (
     "mp3", "wav", "flac", "ogg", "oga", "opus", "m4a", "mp4",
     "aac", "aiff", "aif", "wma", "wv", "alac",
 )
+# Minúsculas y mayúsculas: el diálogo nativo de Linux compara los patrones
+# distinguiendo mayúsculas, y `*.mp3` ocultaba los `.MP3`.
 AUDIO_INPUT_FILTER = (
-    "Audio (" + " ".join(f"*.{e}" for e in AUDIO_INPUT_EXTS) + ")"
+    "Audio (" + " ".join(f"*.{e} *.{e.upper()}" for e in AUDIO_INPUT_EXTS) + ")"
     ";;Todos los archivos (*)"
 )
 
