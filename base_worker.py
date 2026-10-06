@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from i18n import tr
 from platform_utils import run_silent
 
 
@@ -61,7 +62,7 @@ class BaseInstallWorker(QObject):
         try:
             for step in self.get_commands():
                 cmd = step['cmd']
-                error_msg = step.get('error_msg', f"Error ejecutando: {' '.join(cmd)}")
+                error_msg = step.get('error_msg', tr("Error ejecutando: {cmd}").format(cmd=' '.join(cmd)))
                 timeout = step.get('timeout', 300)
                 optional = step.get('optional', False)
                 shell = step.get('shell', False)
@@ -79,4 +80,4 @@ class BaseInstallWorker(QObject):
             self.finished.emit()
 
         except Exception as e:
-            self.error.emit(f"Excepción durante la instalación: {str(e)}")
+            self.error.emit(tr("Excepción durante la instalación: {error}").format(error=e))

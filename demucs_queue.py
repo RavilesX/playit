@@ -28,6 +28,7 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox
 
+from i18n import tr
 from demucs_worker import DemucsWorker, _sanitize_path_component
 from dialogs import BatchTimingDialog, format_elapsed
 from resources import bg_image, styled_message_box
@@ -65,9 +66,10 @@ class DemucsQueue(QObject):
         parts = []
         if self.active:
             filled = int(self.progress / 100 * 10)
-            parts.append(f"Separando: {'■' * filled}{'▢' * (10 - filled)} {self.progress}%")
+            parts.append(tr("Separando: {barra} {pct}%").format(
+                barra='■' * filled + '▢' * (10 - filled), pct=self.progress))
         if self.queue:
-            parts.append(f"En cola: {len(self.queue)}")
+            parts.append(tr("En cola: {n}").format(n=len(self.queue)))
         return " | ".join(parts)
 
     # ── Encolar ──────────────────────────────────────────────────────────
@@ -147,7 +149,7 @@ class DemucsQueue(QObject):
         except Exception as e:
             # _on_error ya avanza la cola; avanzar otra vez aquí
             # arrancaba un trabajo y lo pisaba con el siguiente.
-            self._on_error(f"Error iniciando separación: {e}")
+            self._on_error(tr("Error iniciando separación: {error}").format(error=e))
 
     def cleanup(self):
         """Detiene el trabajo en curso (también al cerrar la ventana)."""
@@ -192,7 +194,7 @@ class DemucsQueue(QObject):
         job = self._current_job
         self._finish_job()
         if not self.processing_multiple:
-            styled_message_box(self.parent(), "Error", error_msg, QMessageBox.Icon.Critical)
+            styled_message_box(self.parent(), tr("Error"), error_msg, QMessageBox.Icon.Critical)
         self._process_next_job()
         # Un track fallido también cierra su renglón: si no, un lote cuyo
         # último trabajo falla nunca mostraría el resumen.
@@ -217,10 +219,10 @@ class DemucsQueue(QObject):
         if batch_id is None:
             if not failed:
                 styled_message_box(
-                    self.parent(), "Tiempo de separación",
+                    self.parent(), tr("Tiempo de separación"),
                     f"{job['artist']} - {job['song']}\n\n"
-                    f"El proceso tomó {format_elapsed(elapsed)}.\n"
-                    f"Procesado con: {device}",
+                    + tr("El proceso tomó {tiempo}.\nProcesado con: {device}").format(
+                        tiempo=format_elapsed(elapsed), device=device),
                     QMessageBox.Icon.Information,
                 )
             return
@@ -260,10 +262,10 @@ class DemucsQueue(QObject):
             self.verification_timer.stop()
             self._verification_attempts = 0
             styled_message_box(
-                self.parent(), "Timeout",
-                f"No se pudieron verificar los archivos de:\n"
-                f"{self.last_in_queue['artist']} - {self.last_in_queue['song']}\n\n"
-                "Verifique manualmente la carpeta separated/",
+                self.parent(), tr("Timeout"),
+                tr("No se pudieron verificar los archivos de:\n{artist} - {song}\n\n"
+                   "Verifique manualmente la carpeta separated/").format(
+                    artist=self.last_in_queue['artist'], song=self.last_in_queue['song']),
                 QMessageBox.Icon.Warning,
             )
             return

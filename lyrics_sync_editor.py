@@ -60,6 +60,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dialogs import BaseDialog
+from i18n import N_, tr
 from resources import (
     FONT_EDITOR,
     FONT_SYMBOLS,
@@ -105,9 +106,9 @@ LYRIC_COLORS = {
 AUTO_UNMUTE_COLOR = "rojo"
 # Texto de ayuda (tooltip) de cada botón de color.
 LYRIC_COLOR_TIPS = {
-    "azul": "Azul: segundo cantante",
-    "blanco": "Blanco: ambos cantantes",
-    "rojo": "Rojo: deja oír esa parte de la voz con el auto-unmute",
+    "azul": N_("Azul: segundo cantante"),
+    "blanco": N_("Blanco: ambos cantantes"),
+    "rojo": N_("Rojo: deja oír esa parte de la voz con el auto-unmute"),
 }
 _FONT_COLOR = re.compile(r'<font\s+color="([^"]+)"', re.IGNORECASE)
 # Color por defecto de la letra (el rosa de la app) para pintar los renglones
@@ -761,7 +762,7 @@ class LyricsSyncDialog(BaseDialog):
         self.saved = False
         self._search_index = -1  # último registro encontrado por el buscador
 
-        super().__init__(parent, "Editor de sincronización", (1100, 560))
+        super().__init__(parent, tr("Editor de sincronización"), (1100, 560))
 
         # BaseDialog fija el tamaño; aquí lo liberamos para poder agrandar
         # manualmente con los SizeGrip (sin maximizar).
@@ -925,17 +926,17 @@ class LyricsSyncDialog(BaseDialog):
         self.play_btn = QPushButton("▶")
         self.play_btn.setFixedSize(44, TOOLBAR_BTN_H)
         bar.addWidget(self.play_btn)
-        self.add_btn = QPushButton("＋ Línea")
+        self.add_btn = QPushButton(tr("＋ Línea"))
         self.add_btn.setToolTip(
-            "Clic: agrega línea en blanco (Ctrl+N)\n"
-            "Mantener presionado 1 s: agrega línea con texto (Ctrl+Shift+N)"
+            tr("Clic: agrega línea en blanco (Ctrl+N)\n"
+               "Mantener presionado 1 s: agrega línea con texto (Ctrl+Shift+N)")
         )
         bar.addWidget(self.add_btn)
-        self.del_btn = QPushButton("－ Línea")
+        self.del_btn = QPushButton(tr("－ Línea"))
         bar.addWidget(self.del_btn)
         # Unir: solo activo con 2+ líneas contiguas seleccionadas.
-        self.merge_btn = QPushButton("⨝ Unir")
-        self.merge_btn.setToolTip("Une las líneas contiguas seleccionadas (Ctrl+A)")
+        self.merge_btn = QPushButton(tr("⨝ Unir"))
+        self.merge_btn.setToolTip(tr("Une las líneas contiguas seleccionadas (Ctrl+A)"))
         self.merge_btn.setEnabled(False)
         bar.addWidget(self.merge_btn)
         # Mismo alto que el resto de la barra (los de color quedan a 22 px).
@@ -947,14 +948,14 @@ class LyricsSyncDialog(BaseDialog):
         # volver a pulsar el color activo regresa al color por defecto (rosa).
         # El rojo va a la derecha; marca líneas que disparan el auto-unmute.
         bar.addSpacing(12)
-        bar.addWidget(QLabel("Color:"))
+        bar.addWidget(QLabel(tr("Color:")))
         self.color_btns = []
         for cname in ("azul", "blanco", "rojo"):
             swatch = QPushButton()
             swatch.setFixedSize(22, 22)
             swatch.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             swatch.setStyleSheet(_color_btn_css(LYRIC_COLORS[cname], False))
-            swatch.setToolTip(LYRIC_COLOR_TIPS[cname])
+            swatch.setToolTip(tr(LYRIC_COLOR_TIPS[cname]))
             swatch.clicked.connect(lambda _=False, c=cname: self._apply_color(c))
             bar.addWidget(swatch)
             self.color_btns.append(swatch)
@@ -968,7 +969,7 @@ class LyricsSyncDialog(BaseDialog):
         bar2.setSpacing(6)
 
         # Offset global: desplaza TODAS las líneas el valor elegido.
-        bar2.addWidget(QLabel("Offset:"))
+        bar2.addWidget(QLabel(tr("Offset:")))
         self.offset_spin = QDoubleSpinBox()
         self.offset_spin.setRange(0.1, 2.0)
         self.offset_spin.setSingleStep(0.1)
@@ -980,20 +981,20 @@ class LyricsSyncDialog(BaseDialog):
         bar2.addWidget(self.offset_spin)
         # Solo el símbolo, compactos: ahorran ancho en la fila
         self.back_btn = QPushButton("«")
-        self.back_btn.setToolTip("Mover líneas hacia antes (resta el offset)")
+        self.back_btn.setToolTip(tr("Mover líneas hacia antes (resta el offset)"))
         self.fwd_btn = QPushButton("»")
-        self.fwd_btn.setToolTip("Mover líneas hacia después (suma el offset)")
+        self.fwd_btn.setToolTip(tr("Mover líneas hacia después (suma el offset)"))
         for b in (self.back_btn, self.fwd_btn):
             b.setFixedSize(TOOLBAR_BTN_H, TOOLBAR_BTN_H)
             b.setStyleSheet(self._symbol_btn_css())
         bar2.addWidget(self.back_btn)
         bar2.addWidget(self.fwd_btn)
         # Si está marcado, el offset solo afecta líneas desde el cursor.
-        self.from_cursor_chk = QCheckBox("Desde el cursor")
+        self.from_cursor_chk = QCheckBox(tr("Desde el cursor"))
         self.from_cursor_chk.setToolTip(
-            "Marcado: « » mueven las líneas desde el cursor, y Ctrl+arrastrar un "
-            "borde mueve esa línea y las siguientes.\n"
-            "Sin marcar: ambos mueven todas las líneas de la letra."
+            tr("Marcado: « » mueven las líneas desde el cursor, y Ctrl+arrastrar un "
+               "borde mueve esa línea y las siguientes.\n"
+               "Sin marcar: ambos mueven todas las líneas de la letra.")
         )
         self.from_cursor_chk.setChecked(True)
         self.from_cursor_chk.setStyleSheet(self._checkbox_css())
@@ -1003,8 +1004,8 @@ class LyricsSyncDialog(BaseDialog):
         # Buscador de texto: Enter salta al siguiente registro coincidente,
         # en bucle. Sin coincidencias → fondo rojo.
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Buscar")
-        self.search_box.setToolTip("Buscar en la letra (Ctrl+F)")
+        self.search_box.setPlaceholderText(tr("Buscar"))
+        self.search_box.setToolTip(tr("Buscar en la letra (Ctrl+F)"))
         self.search_box.setFixedSize(160, 28)
         self.search_box.setClearButtonEnabled(True)
         self.search_box.setStyleSheet(self._SEARCH_NORMAL)
@@ -1012,13 +1013,13 @@ class LyricsSyncDialog(BaseDialog):
         # Navegación: inicio / resultado anterior / siguiente / final.
         # Anterior y Siguiente solo se activan cuando hay texto en el buscador.
         self.goto_start_btn = QPushButton("l<")
-        self.goto_start_btn.setToolTip("Ir al inicio de la pista (Ctrl+Inicio)")
+        self.goto_start_btn.setToolTip(tr("Ir al inicio de la pista (Ctrl+Inicio)"))
         self.search_prev_btn = QPushButton("<")
-        self.search_prev_btn.setToolTip("Resultado anterior (Ctrl+←)")
+        self.search_prev_btn.setToolTip(tr("Resultado anterior (Ctrl+←)"))
         self.search_next_btn = QPushButton(">")
-        self.search_next_btn.setToolTip("Resultado siguiente (Ctrl+→)")
+        self.search_next_btn.setToolTip(tr("Resultado siguiente (Ctrl+→)"))
         self.goto_end_btn = QPushButton(">l")
-        self.goto_end_btn.setToolTip("Ir a la última línea de la letra (Ctrl+Fin)")
+        self.goto_end_btn.setToolTip(tr("Ir a la última línea de la letra (Ctrl+Fin)"))
         for b in (self.goto_start_btn, self.search_prev_btn,
                   self.search_next_btn, self.goto_end_btn):
             b.setFixedSize(TOOLBAR_BTN_H, TOOLBAR_BTN_H)
@@ -1036,12 +1037,12 @@ class LyricsSyncDialog(BaseDialog):
         actions = QHBoxLayout()
         actions.setContentsMargins(6, 4, 6, 6)
         actions.setSpacing(6)
-        self.hint = QLabel("Espacio: play/pausa · Supr: borrar · Ctrl+Z/Ctrl+Shift+Z: deshacer/rehacer · Ctrl/Shift: multi-selección · arrastra el borde (Ctrl: en bloque) · doble-click edita")
+        self.hint = QLabel(tr("Espacio: play/pausa · Supr: borrar · Ctrl+Z/Ctrl+Shift+Z: deshacer/rehacer · Ctrl/Shift: multi-selección · arrastra el borde (Ctrl: en bloque) · doble-click edita"))
         self.hint.setStyleSheet("color:#9aa; background: transparent; border: none;")
         actions.addWidget(self.hint)
         actions.addStretch(1)
-        self.save_btn = QPushButton("Guardar")
-        self.cancel_btn = QPushButton("Cancelar")
+        self.save_btn = QPushButton(tr("Guardar"))
+        self.cancel_btn = QPushButton(tr("Cancelar"))
         for b in (self.save_btn, self.cancel_btn):
             b.setFixedHeight(TOOLBAR_BTN_H)
         actions.addWidget(self.cancel_btn)
@@ -1190,11 +1191,11 @@ class LyricsSyncDialog(BaseDialog):
         Refleja y actualiza `self._auto_format`, así que la elección se
         mantiene entre diálogos mientras el editor esté abierto.
         """
-        chk = QCheckBox("Formato automático", dlg)
+        chk = QCheckBox(tr("Formato automático"), dlg)
         chk.setToolTip(
-            "Al guardar, deja la primera letra de cada renglón en mayúscula\n"
-            "y el resto en minúsculas. Desactívalo para conservar nombres\n"
-            "propios y siglas tal como los escribiste."
+            tr("Al guardar, deja la primera letra de cada renglón en mayúscula\n"
+               "y el resto en minúsculas. Desactívalo para conservar nombres\n"
+               "propios y siglas tal como los escribiste.")
         )
         chk.setChecked(self._auto_format)
         chk.setStyleSheet(self._checkbox_css())
@@ -1237,8 +1238,8 @@ class LyricsSyncDialog(BaseDialog):
         # letra y el autowrap, igual que el de editar.
         dlg = QInputDialog(self)
         dlg.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, True)
-        dlg.setWindowTitle("Nueva línea")
-        dlg.setLabelText(f"Texto (inicio en {pos:.3f}s)")
+        dlg.setWindowTitle(tr("Nueva línea"))
+        dlg.setLabelText(tr("Texto (inicio en {pos:.3f}s)").format(pos=pos))
         editor = dlg.findChild(QPlainTextEdit)
         if editor is not None:
             editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
@@ -1505,8 +1506,8 @@ class LyricsSyncDialog(BaseDialog):
         # línea horizontal.
         dlg = QInputDialog(self)
         dlg.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, True)
-        dlg.setWindowTitle("Editar texto")
-        dlg.setLabelText(f"Línea #{index + 1}")
+        dlg.setWindowTitle(tr("Editar texto"))
+        dlg.setLabelText(tr("Línea #{n}").format(n=index + 1))
         dlg.setTextValue(clean)
         editor = dlg.findChild(QPlainTextEdit)
         if editor is not None:
@@ -1580,7 +1581,7 @@ class LyricsSyncDialog(BaseDialog):
                 if b is not None:
                     b.setFixedSize(22, 22)
                     b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-                    b.setToolTip(LYRIC_COLOR_TIPS[cname])
+                    b.setToolTip(tr(LYRIC_COLOR_TIPS[cname]))
                     b.clicked.connect(lambda _=False, c=cname: _toggle(c))
                     color_btns[cname] = b
 
@@ -1598,7 +1599,7 @@ class LyricsSyncDialog(BaseDialog):
         split = {"do": False, "after": ""}
         if bbox is not None and editor is not None:
             split_btn = bbox.addButton(
-                "Separar línea", QDialogButtonBox.ButtonRole.ActionRole,
+                tr("Separar línea"), QDialogButtonBox.ButtonRole.ActionRole,
             )
 
             def _do_split():
@@ -1615,7 +1616,7 @@ class LyricsSyncDialog(BaseDialog):
 
             if split_btn is not None:
                 split_btn.clicked.connect(_do_split)
-                split_btn.setToolTip("Separar línea en el cursor (Ctrl+D)")
+                split_btn.setToolTip(tr("Separar línea en el cursor (Ctrl+D)"))
 
             # Atajo Ctrl+D solo dentro de este diálogo: con parent `dlg` y
             # contexto WindowShortcut se destruye al cerrar y no interfiere
@@ -1634,7 +1635,7 @@ class LyricsSyncDialog(BaseDialog):
             if isinstance(lay, QBoxLayout):
                 idx = lay.indexOf(color_btns["azul"])
                 if idx >= 0:
-                    lbl = QLabel("Color:")
+                    lbl = QLabel(tr("Color:"))
                     lbl.setStyleSheet("color:#cfcfe0; background:transparent;")
                     lay.insertWidget(idx, lbl)
                 bidx = lay.indexOf(color_btns["rojo"])
@@ -1731,7 +1732,7 @@ class LyricsSyncDialog(BaseDialog):
             self.accept()
             return
         resp = styled_message_box(
-            self, "Guardar", "¿Guardar los cambios en las letras?",
+            self, tr("Guardar"), tr("¿Guardar los cambios en las letras?"),
             QMessageBox.Icon.Question,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -1743,7 +1744,7 @@ class LyricsSyncDialog(BaseDialog):
             self.accept()
         except Exception as e:
             styled_message_box(
-                self, "Error", f"No se pudo guardar: {e}",
+                self, tr("Error"), tr("No se pudo guardar: {error}").format(error=e),
             )
 
     # ── Cierre ─────────────────────────────────────────────────────────
@@ -1762,7 +1763,7 @@ class LyricsSyncDialog(BaseDialog):
     def reject(self):
         if self._has_changes():
             resp = styled_message_box(
-                self, "Cancelar", "Hay cambios sin guardar. ¿Descartarlos?",
+                self, tr("Cancelar"), tr("Hay cambios sin guardar. ¿Descartarlos?"),
                 QMessageBox.Icon.Warning,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )

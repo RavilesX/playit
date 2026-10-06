@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QMenu, QWidget, QCompleter,
 )
 from demucs_worker import AUDIO_INPUT_EXTS, AUDIO_INPUT_FILTER
+from i18n import N_, tr
 from resources import resource_path, bg_image, styled_message_box, style_url
 from ui_components import DialogTitleBar, StyledButtons
 from version import __version__
@@ -66,10 +67,12 @@ class BaseDialog(QDialog):
 
 
 class AboutDialog(BaseDialog):
+    LEGAL = N_("ESTE SOFTWARE SE PROPORCIONA 'TAL CUAL', SIN GARANTÍAS DE NINGÚN TIPO, YA SEAN EXPRESAS O IMPLÍCITAS, INCLUYENDO, PERO NO LIMITADO A, GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO, LOS AUTORES O COLABORADORES SERÁN RESPONSABLES DE DAÑOS DIRECTOS, INDIRECTOS, INCIDENTALES, ESPECIALES, EJEMPLARES O CONSECUENTES (INCLUYENDO, PERO NO LIMITADO A, LA ADQUISICIÓN DE BIENES O SERVICIOS SUSTITUTOS; LA PÉRDIDA DE USO, DATOS O BENEFICIOS; O LA INTERRUPCIÓN DEL NEGOCIO) DE CUALQUIER MANERA CAUSADOS Y BAJO CUALQUIER TEORÍA DE RESPONSABILIDAD, YA SEA POR CONTRATO, RESPONSABILIDAD ESTRICTA O AGRAVIO (INCLUYENDO NEGLIGENCIA O DE OTRA MANERA) QUE SURJA DE CUALQUIER FORMA DEL USO DE ESTE SOFTWARE, INCLUSO SI SE HA AVISADO DE LA POSIBILIDAD DE TALES DAÑOS. Mire la Licencia pública general GNU para obtener más detalles.Debería haber recibido una copia de la Licencia Pública General GNU junto con este programa. En caso contrario, consulte: https://www.gnu.org/licenses/.")
+    # (ver locales: aviso de garantía de la GPL)
     PAYPAL_URL = "https://www.paypal.com/donate/?business=TULUZ868SK2BG&no_recurring=0&item_name=Desarrollo+apps+sin+fines+de+lucro%2C+no+necesitas+donar+para+usarlas%2C+pero+me+ayuda+y+me+inspira+a+seguir+creando+soluciones.&currency_code=USD"
 
     def __init__(self, parent=None):
-        super().__init__(parent, "Sobre Playit", (450, 550))
+        super().__init__(parent, tr("Sobre Playit"), (450, 550))
         self._setup_content()
 
     def _setup_content(self):
@@ -80,7 +83,7 @@ class AboutDialog(BaseDialog):
         # Layout
         self.main_layout.addWidget(text_edit)
         self.main_layout.addWidget(
-            QLabel("Se aceptan donaciones"),
+            QLabel(tr("Se aceptan donaciones")),
             alignment=Qt.AlignmentFlag.AlignCenter
         )
         self.main_layout.addWidget(paypal_btn, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -128,10 +131,10 @@ class AboutDialog(BaseDialog):
         sub{{color:#c5c6c8;font-family: Arial, Helvetica, sans-serif;}}
         </style>
         <center><img src="{version_path}" width="100" height="100"></center>
-        <center><sub>Versión {__version__}</sub></center>
-        <p>Reproductor de Audio con separación de pistas.</p>
-        <sub>ESTE SOFTWARE SE PROPORCIONA 'TAL CUAL', SIN GARANTÍAS DE NINGÚN TIPO, YA SEAN EXPRESAS O IMPLÍCITAS, INCLUYENDO, PERO NO LIMITADO A, GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO, LOS AUTORES O COLABORADORES SERÁN RESPONSABLES DE DAÑOS DIRECTOS, INDIRECTOS, INCIDENTALES, ESPECIALES, EJEMPLARES O CONSECUENTES (INCLUYENDO, PERO NO LIMITADO A, LA ADQUISICIÓN DE BIENES O SERVICIOS SUSTITUTOS; LA PÉRDIDA DE USO, DATOS O BENEFICIOS; O LA INTERRUPCIÓN DEL NEGOCIO) DE CUALQUIER MANERA CAUSADOS Y BAJO CUALQUIER TEORÍA DE RESPONSABILIDAD, YA SEA POR CONTRATO, RESPONSABILIDAD ESTRICTA O AGRAVIO (INCLUYENDO NEGLIGENCIA O DE OTRA MANERA) QUE SURJA DE CUALQUIER FORMA DEL USO DE ESTE SOFTWARE, INCLUSO SI SE HA AVISADO DE LA POSIBILIDAD DE TALES DAÑOS. Mire la Licencia pública general GNU para obtener más detalles.Debería haber recibido una copia de la Licencia Pública General GNU junto con este programa. En caso contrario, consulte: https://www.gnu.org/licenses/.</sub>
-        <p>Desarrollado por: RavilesX</p><p>Email: ravilesx@gmail.com</p>
+        <center><sub>{tr('Versión')} {__version__}</sub></center>
+        <p>{tr('Reproductor de Audio con separación de pistas.')}</p>
+        <sub>{tr(self.LEGAL)}</sub>
+        <p>{tr('Desarrollado por')}: RavilesX</p><p>Email: ravilesx@gmail.com</p>
         """
 
 
@@ -139,12 +142,12 @@ class SearchDialog(BaseDialog):
     search_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
-        super().__init__(parent, "Buscar en Playlist", (300, 150))
+        super().__init__(parent, tr("Buscar en Playlist"), (300, 150))
         self._setup_search_ui()
 
     def _setup_search_ui(self):
         self.search_text = QLineEdit()
-        self.search_text.setPlaceholderText("Introduce texto a buscar...")
+        self.search_text.setPlaceholderText(tr("Introduce texto a buscar..."))
         # Enter siempre dispara la búsqueda, sin depender del botón default
         self.search_text.returnPressed.connect(self._accept_search)
 
@@ -198,7 +201,7 @@ class SearchDialog(BaseDialog):
 
 class UpdateDialog(BaseDialog):
     def __init__(self, parent=None, message: str = "", show_cancel: bool = False):
-        super().__init__(parent, "Buscar actualizaciones", (320, 180))
+        super().__init__(parent, tr("Buscar actualizaciones"), (320, 180))
         self._setup_update_ui(message, show_cancel)
 
     def _setup_update_ui(self, message: str, show_cancel: bool):
@@ -237,7 +240,7 @@ class UpdateDialog(BaseDialog):
 
 class QueueDialog(BaseDialog):
     def __init__(self, audio_player, parent=None):
-        super().__init__(parent, "Canciones en Cola", (400, 550))
+        super().__init__(parent, tr("Canciones en Cola"), (400, 550))
         self._setup_queue_display(audio_player)
 
     def _setup_queue_display(self, audio_player):
@@ -263,11 +266,11 @@ class QueueDialog(BaseDialog):
         self.main_layout.addWidget(queue_edit)
 
     def _generate_queue_html(self, queue: list) -> str:
-        html = """
-        <H1 style='color: #3AABEF;'><center>Artista - Canción</center></H1>
+        html = f"""
+        <H1 style='color: #3AABEF;'><center>{tr('Artista - Canción')}</center></H1>
         <style>
-        li{color:#b23c56;}
-        sub{color:#c5c6c8;font-family: Arial, Helvetica, sans-serif;}
+        li{{color:#b23c56;}}
+        sub{{color:#c5c6c8;font-family: Arial, Helvetica, sans-serif;}}
         </style><ul>
         """
 
@@ -546,7 +549,7 @@ class _AddTagChip(QWidget):
     # Mismo vocabulario que _TAG_TRACK_ALIASES en audio_player.py — no se
     # importa de ahí para no crear un import circular (audio_player ya
     # importa este módulo).
-    TRACK_SUGGESTIONS = ["Batería", "Bajo", "Voz", "Otros"]
+    TRACK_SUGGESTIONS = [N_("Batería"), N_("Bajo"), N_("Voz"), N_("Otros")]
 
     added = pyqtSignal(str)
 
@@ -574,17 +577,17 @@ class _AddTagChip(QWidget):
 
         self._editing = False
 
-        self.label = QLabel("+ tag")
+        self.label = QLabel(tr("+ tag"))
         self.label.setObjectName("tag_add_label")
         self.edit = _TagLineEdit()
         self.edit.setObjectName("tag_edit")
         self.edit.setFixedWidth(90)
-        self.edit.setPlaceholderText("nueva tag")
+        self.edit.setPlaceholderText(tr("nueva tag"))
         self.edit.hide()
         self.edit.returnPressed.connect(self._commit)
         self.edit.focus_lost.connect(self._cancel)
 
-        completer = QCompleter(self.TRACK_SUGGESTIONS, self.edit)
+        completer = QCompleter([tr(t) for t in self.TRACK_SUGGESTIONS], self.edit)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         # activated (no highlighted): un clic en una opción agrega esa tag
         # de una, no solo la escribe y espera a que el usuario confirme.
@@ -724,16 +727,16 @@ class PlaybackQueueDialog(BaseDialog):
 
     def __init__(self, audio_player, parent=None):
         self.audio_player = audio_player
-        super().__init__(parent, "Administración de cola", (840, 525))
+        super().__init__(parent, tr("Administración de cola"), (840, 525))
         self._setup_queue_ui()
 
     def _setup_queue_ui(self):
         hint = QLabel(
-            "Arrastra una fila para reordenar. Supr o clic derecho para quitar "
-            "de la cola. Doble clic en un tag lo edita (vacío al confirmar lo "
-            "elimina), o en \"+ tag\" agregas uno nuevo: elige una pista del "
-            "desplegable o escribe lo que quieras; Enter confirma, clic afuera "
-            "cancela."
+            tr("Arrastra una fila para reordenar. Supr o clic derecho para quitar "
+               "de la cola. Doble clic en un tag lo edita (vacío al confirmar lo "
+               "elimina), o en \"+ tag\" agregas uno nuevo: elige una pista del "
+               "desplegable o escribe lo que quieras; Enter confirma, clic afuera "
+               "cancela.")
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #cfcfe0; font-size: 12px;")
@@ -744,7 +747,7 @@ class PlaybackQueueDialog(BaseDialog):
         export_btn.setObjectName("queue_export_btn")
         export_btn.setFixedSize(28, 28)
         export_btn.setToolTip(
-            "Crear una playlist (Music List) a partir de las canciones en la cola"
+            tr("Crear una playlist (Music List) a partir de las canciones en la cola")
         )
         export_btn.setStyleSheet("""
             QPushButton#queue_export_btn {
@@ -765,7 +768,7 @@ class PlaybackQueueDialog(BaseDialog):
         self.table = _QueueTable(on_change=self._sync_order)
         self.table.setObjectName("queue_table")
         self.table.setStyleSheet(self.TABLE_QSS)
-        self.table.setHorizontalHeaderLabels(["Canción", "Duración", "Tags"])
+        self.table.setHorizontalHeaderLabels([tr("Canción"), tr("Duración"), tr("Tags")])
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(34)
         header = self.table.horizontalHeader()
@@ -877,7 +880,7 @@ class SplitDialog(BaseDialog):
         # 560 de alto: los widgets nativos de macOS son más altos y con 440
         # el botón MP3 quedaba pegado al textbox; la nota del lote y el botón
         # de carpeta suman otras dos filas
-        super().__init__(parent, "Dividir Canción", (360, 560))
+        super().__init__(parent, tr("Dividir Canción"), (360, 560))
         self._setup_split_ui()
 
     def _setup_split_ui(self):
@@ -885,7 +888,7 @@ class SplitDialog(BaseDialog):
         self.song = QLineEdit()
         self.song.setObjectName("SongText")
         self.file_path = QLineEdit()
-        self.file_path.setPlaceholderText("Presiona 'Enter'...")
+        self.file_path.setPlaceholderText(tr("Presiona 'Enter'..."))
 
         file_btn = self._create_file_button()
         extract_btn = self._create_extract_button()
@@ -899,9 +902,9 @@ class SplitDialog(BaseDialog):
         self.main_layout.addSpacing(20)
         self.main_layout.addWidget(self.file_path)
         self.main_layout.addWidget(extract_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.main_layout.addWidget(QLabel("Artista*"))
+        self.main_layout.addWidget(QLabel(tr("Artista*")))
         self.main_layout.addWidget(self.artist)
-        self.main_layout.addWidget(QLabel("Canción*"))
+        self.main_layout.addWidget(QLabel(tr("Canción*")))
         self.main_layout.addWidget(self.song)
         self.main_layout.addWidget(self._create_timing_checkbox())
 
@@ -911,10 +914,10 @@ class SplitDialog(BaseDialog):
 
     def _create_timing_checkbox(self) -> QCheckBox:
         """Checkbox para medir cuánto tarda la separación (benchmark de hardware)."""
-        self.timing_chk = QCheckBox("Cronometrar proceso")
+        self.timing_chk = QCheckBox(tr("Cronometrar proceso"))
         self.timing_chk.setChecked(False)
         self.timing_chk.setToolTip(
-            "Al terminar la separación muestra el tiempo total que tomó el proceso"
+            tr("Al terminar la separación muestra el tiempo total que tomó el proceso")
         )
         # Mismos assets de checkbox que el resto de la app (incluyen la
         # palomita); el indicador default pierde la marca sobre el tema oscuro.
@@ -933,14 +936,14 @@ class SplitDialog(BaseDialog):
 
     def _create_folder_button(self) -> QPushButton:
         """La otra entrada al lote es el propio botón MP3 (ver _select_file)."""
-        btn = QPushButton("Carpeta…")
+        btn = QPushButton(tr("Carpeta…"))
         btn.setObjectName("playlistToolBtn")
-        btn.setToolTip("Agrega a la cola el audio de una carpeta y sus subcarpetas")
+        btn.setToolTip(tr("Agrega a la cola el audio de una carpeta y sus subcarpetas"))
         btn.clicked.connect(self._select_batch_folder)
         return btn
 
     def _select_batch_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta con audio")
+        folder = QFileDialog.getExistingDirectory(self, tr("Seleccionar carpeta con audio"))
         if not folder:
             return
         # Recursivo: las bibliotecas suelen venir en carpetas por álbum.
@@ -951,8 +954,8 @@ class SplitDialog(BaseDialog):
         )
         if not paths:
             styled_message_box(
-                self, "Sin archivos",
-                "La carpeta no contiene archivos de audio compatibles.",
+                self, tr("Sin archivos"),
+                tr("La carpeta no contiene archivos de audio compatibles."),
                 QMessageBox.Icon.Warning,
             )
             return
@@ -961,10 +964,10 @@ class SplitDialog(BaseDialog):
     def _start_batch(self, paths: list[str]):
         reply = styled_message_box(
             self,
-            "Separación por lote",
-            f"Se agregarán {len(paths)} canciones a la cola.\n\n"
-            "Dependiendo de su hardware, el proceso puede demorar varias horas. "
-            "¿Continuar?",
+            tr("Separación por lote"),
+            tr("Se agregarán {n} canciones a la cola.\n\n"
+               "Dependiendo de su hardware, el proceso puede demorar varias horas. "
+               "¿Continuar?").format(n=len(paths)),
             QMessageBox.Icon.Question,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -998,12 +1001,13 @@ class SplitDialog(BaseDialog):
 
         listed = "\n".join(f"• {d}" for d in dupes[:10])
         if len(dupes) > 10:
-            listed += f"\n… y {len(dupes) - 10} más"
+            listed += "\n" + tr("… y {n} más").format(n=len(dupes) - 10)
         reply = styled_message_box(
             self,
-            "Nombres repetidos",
-            "Estas canciones se repiten dentro del lote y la última "
-            f"sobrescribirá a la anterior:\n\n{listed}\n\n¿Continuar de todos modos?",
+            tr("Nombres repetidos"),
+            tr("Estas canciones se repiten dentro del lote y la última "
+               "sobrescribirá a la anterior:\n\n{listed}\n\n¿Continuar de todos modos?"
+               ).format(listed=listed),
             QMessageBox.Icon.Warning,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -1042,16 +1046,15 @@ class SplitDialog(BaseDialog):
         btn = QPushButton()
         btn.setObjectName("file_btn")
         btn.setFixedSize(200, 100)
-        btn.setToolTip("Un archivo llena el formulario; varios arrancan el lote")
+        btn.setToolTip(tr("Un archivo llena el formulario; varios arrancan el lote"))
         bg_image(btn, "images/split_dialog/mp3.png")
         btn.clicked.connect(self._select_file)
         return btn
 
     def _create_extract_button(self) -> QPushButton:
-        btn = QPushButton()
-        btn.setFixedSize(120, 60)
-        btn.setObjectName("extract_name_btn")
-        bg_image(btn, "images/split_dialog/extract_name_btn.png")
+        btn = QPushButton(tr("Autollenado"))
+        btn.setFixedSize(120, 34)
+        btn.setObjectName("playlistToolBtn")
         btn.clicked.connect(self._extract_name_from_file)
         return btn
 
@@ -1109,7 +1112,8 @@ class SplitDialog(BaseDialog):
         de selección múltiple siempre se puede elegir uno solo.
         """
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Seleccionar archivos de audio", "", AUDIO_INPUT_FILTER
+            self, tr("Seleccionar archivos de audio"), "",
+            AUDIO_INPUT_FILTER.replace("Todos los archivos", tr("Todos los archivos"))
         )
         if not paths:
             return
@@ -1132,15 +1136,15 @@ class SplitDialog(BaseDialog):
     def _validate_and_start(self):
         if not Path(self.file_path.text()).exists():
             styled_message_box(
-                self, "Error", "Archivo inválido",
+                self, tr("Error"), tr("Archivo inválido"),
                 QMessageBox.Icon.Critical
             )
             return
 
         reply = styled_message_box(
             self,
-            "Advertencia",
-            "Dependiendo de su hardware, el proceso puede demorar varios minutos. ¿Continuar?",
+            tr("Advertencia"),
+            tr("Dependiendo de su hardware, el proceso puede demorar varios minutos. ¿Continuar?"),
             QMessageBox.Icon.Question,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -1183,11 +1187,11 @@ class BatchNameDialog(BaseDialog):
     SKIP = 2
 
     def __init__(self, parent=None, file_path: str = "", index: int = 1, total: int = 1):
-        super().__init__(parent, "Nombrar archivo", (380, 360))
+        super().__init__(parent, tr("Nombrar archivo"), (380, 360))
         self._setup_name_ui(file_path, index, total)
 
     def _setup_name_ui(self, file_path: str, index: int, total: int):
-        counter = QLabel(f"Archivo {index} de {total} sin \"-\" en el nombre")
+        counter = QLabel(tr('Archivo {index} de {total} sin "-" en el nombre').format(index=index, total=total))
         counter.setStyleSheet("color: #9a9aad; font-size: 11px;")
 
         name_label = QLabel(os.path.basename(file_path))
@@ -1201,9 +1205,9 @@ class BatchNameDialog(BaseDialog):
 
         self.main_layout.addWidget(counter)
         self.main_layout.addWidget(name_label)
-        self.main_layout.addWidget(QLabel("Artista*"))
+        self.main_layout.addWidget(QLabel(tr("Artista*")))
         self.main_layout.addWidget(self.artist)
-        self.main_layout.addWidget(QLabel("Canción*"))
+        self.main_layout.addWidget(QLabel(tr("Canción*")))
         self.main_layout.addWidget(self.song)
         self.main_layout.addStretch()
         self.main_layout.addLayout(self._create_action_buttons())
@@ -1217,14 +1221,14 @@ class BatchNameDialog(BaseDialog):
         cancel_btn = QPushButton()
         cancel_btn.setObjectName("cancelar_btn")
         cancel_btn.setFixedSize(70, 70)
-        cancel_btn.setToolTip("Cancelar el lote completo")
+        cancel_btn.setToolTip(tr("Cancelar el lote completo"))
         bg_image(cancel_btn, "images/split_dialog/cancelar_btn.png")
         cancel_btn.clicked.connect(self.reject)
 
-        skip_btn = QPushButton("Omitir")
+        skip_btn = QPushButton(tr("Omitir"))
         skip_btn.setObjectName("playlistToolBtn")
         skip_btn.setFixedSize(110, 34)
-        skip_btn.setToolTip("No separar este archivo y seguir con el resto del lote")
+        skip_btn.setToolTip(tr("No separar este archivo y seguir con el resto del lote"))
         skip_btn.clicked.connect(lambda: self.done(self.SKIP))
 
         self.accept_btn = QPushButton()
@@ -1276,7 +1280,7 @@ class BatchTimingDialog(BaseDialog):
     """
 
     def __init__(self, parent=None, rows: list[dict] | None = None):
-        super().__init__(parent, "Tiempo de separación", (460, 520))
+        super().__init__(parent, tr("Tiempo de separación"), (460, 520))
         self._setup_summary(rows or [])
 
     def _setup_summary(self, rows: list[dict]):
@@ -1310,7 +1314,7 @@ class BatchTimingDialog(BaseDialog):
         for row in rows:
             name = html.escape(f"{row['artist']} - {row['song']}")
             if row.get('failed'):
-                value = "<span style='color:#ff6b6b;'>Error</span>"
+                value = f"<span style='color:#ff6b6b;'>{tr('Error')}</span>"
             else:
                 value = html.escape(format_elapsed(row['elapsed']))
             body.append(
@@ -1318,19 +1322,22 @@ class BatchTimingDialog(BaseDialog):
                 f"<td align='right' style='color:#F88FFF;'>&nbsp;&nbsp;{value}</td></tr>"
             )
 
-        footer = [f"<b>Total: {html.escape(format_elapsed(total))}</b>"]
+        footer = [f"<b>{tr('Total')}: {html.escape(format_elapsed(total))}</b>"]
         if len(done) > 1:
-            footer.append(f"Promedio por canción: "
+            footer.append(f"{tr('Promedio por canción')}: "
                           f"{html.escape(format_elapsed(total / len(done)))}")
         if devices:
-            footer.append(f"Procesado con: {html.escape(', '.join(devices))}")
+            footer.append(f"{tr('Procesado con')}: {html.escape(', '.join(devices))}")
         if failed:
-            footer.append(f"<span style='color:#ff6b6b;'>"
-                          f"{failed} con error (no suman al total)</span>")
+            footer.append(
+                "<span style='color:#ff6b6b;'>"
+                + tr("{n} con error (no suman al total)").format(n=failed) + "</span>")
 
         return (
-            f"<h2 style='color:#3AABEF;'><center>Lote de {len(rows)} "
-            f"{'canción' if len(rows) == 1 else 'canciones'}</center></h2>"
+            "<h2 style='color:#3AABEF;'><center>"
+            + (tr("Lote de {n} canción") if len(rows) == 1
+               else tr("Lote de {n} canciones")).format(n=len(rows))
+            + "</center></h2>"
             f"<table width='100%' cellspacing='4'>{''.join(body)}</table>"
             f"<hr><center>{'<br>'.join(footer)}</center>"
         )
@@ -1338,7 +1345,7 @@ class BatchTimingDialog(BaseDialog):
 
 class CorrectSongDialog(BaseDialog):
     def __init__(self, parent=None, artist: str = "", song: str = ""):
-        super().__init__(parent, "Corregir Artista/Canción", (360, 260))
+        super().__init__(parent, tr("Corregir Artista/Canción"), (360, 260))
         self._setup_correct_ui(artist, song)
 
     def _setup_correct_ui(self, artist: str, song: str):
@@ -1348,9 +1355,9 @@ class CorrectSongDialog(BaseDialog):
 
         btn_layout = self._create_action_buttons()
 
-        self.main_layout.addWidget(QLabel("Artista*"))
+        self.main_layout.addWidget(QLabel(tr("Artista*")))
         self.main_layout.addWidget(self.artist)
-        self.main_layout.addWidget(QLabel("Canción*"))
+        self.main_layout.addWidget(QLabel(tr("Canción*")))
         self.main_layout.addWidget(self.song)
         self.main_layout.addStretch()
         self.main_layout.addLayout(btn_layout)
@@ -1422,12 +1429,12 @@ class SongInfoDialog(BaseDialog):
     existiera no lo tienen: se muestran como "Desconocido".
     """
 
-    UNKNOWN = "Desconocido"
+    UNKNOWN = N_("Desconocido")
     FIELDS = (
-        ("Álbum", "album"),
-        ("Año", "anio"),
-        ("Género", "genero"),
-        ("Formato", "formato"),
+        (N_("Álbum"), "album"),
+        (N_("Año"), "anio"),
+        (N_("Género"), "genero"),
+        (N_("Formato"), "formato"),
         ("Kbps", "kbps"),
     )
 
@@ -1436,7 +1443,7 @@ class SongInfoDialog(BaseDialog):
         self._artist = artist
         self._song = song
         self._metadata = metadata or {}
-        super().__init__(parent, "Información", (400, 390))
+        super().__init__(parent, tr("Información"), (400, 390))
         self._setup_info_ui()
 
     def _setup_info_ui(self):
@@ -1471,9 +1478,9 @@ class SongInfoDialog(BaseDialog):
         # etiqueta, su línea base quedaba unos píxeles más abajo que el valor.
         cell = "padding:4px 0;"
         pairs = [
-            ("Artista", self._escape(self._artist)),
-            ("Canción", self._escape(self._song)),
-            *((label, self._value(key)) for label, key in self.FIELDS),
+            (tr("Artista"), self._escape(self._artist)),
+            (tr("Canción"), self._escape(self._song)),
+            *((tr(label), self._value(key)) for label, key in self.FIELDS),
         ]
         rows = "".join(
             f'<tr><td style="color:#F88FFF;{cell}padding-right:12px;">{label}</td>'
@@ -1489,21 +1496,21 @@ class SongInfoDialog(BaseDialog):
         """Valor escapado, o "Desconocido" si viene vacío: los tags del archivo
         son texto libre ('AT&T', '<sic>') y el QLabel los renderiza como HTML."""
         text = str(value).strip()
-        return html.escape(text) if text else self.UNKNOWN
+        return html.escape(text) if text else tr(self.UNKNOWN)
 
 
 class DownloadDialog(BaseDialog):
     download_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
-        super().__init__(parent, "Descargar MP3 de YouTube", (400, 200))
+        super().__init__(parent, tr("Descargar MP3 de YouTube"), (400, 200))
         self._setup_validation()
 
     def _setup_ui(self):
         super()._setup_ui()
 
         # Ahora agregar nuestros widgets
-        label = QLabel("Youtube URL:")
+        label = QLabel(tr("Youtube URL:"))
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet("color: #3AABEF; font-size: 14px; font-weight: bold;")
 
@@ -1574,7 +1581,7 @@ class RemotePairDialog(BaseDialog):
 
     regenerate_requested = pyqtSignal()
 
-    AVISO = (
+    AVISO = N_(
         "Sólo funciona con el teléfono en la misma red Wi-Fi.\n"
         "Si Windows pregunta por el firewall (puede preguntar dos veces, por "
         "TCP y por UDP), hay que permitir el acceso en redes privadas.\n"
@@ -1586,7 +1593,7 @@ class RemotePairDialog(BaseDialog):
     def __init__(self, parent=None, ip: str = "", port: int = 0, token: str = "",
                  name: str = ""):
         # Alto ≤ 600: split.png mide 960x600 y el fondo se repetiría al pasarse
-        super().__init__(parent, "Modo remoto", (420, 600))
+        super().__init__(parent, tr("Modo remoto"), (420, 600))
         # IP del teléfono que se emparejó, "" si el diálogo se cerró a mano
         self.paired_with = ""
         self._setup_pair_ui()
@@ -1614,17 +1621,17 @@ class RemotePairDialog(BaseDialog):
             self.token_label.styleSheet() + " font-family: monospace;"
         )
 
-        aviso = QLabel(self.AVISO)
+        aviso = QLabel(tr(self.AVISO))
         aviso.setWordWrap(True)
         aviso.setAlignment(Qt.AlignmentFlag.AlignCenter)
         aviso.setStyleSheet("color: #F88FFF; font-size: 11px;")
 
-        self.regen_btn = QPushButton("Generar nuevo código")
+        self.regen_btn = QPushButton(tr("Generar nuevo código"))
         self.regen_btn.setObjectName("playlistToolBtn")
         self.regen_btn.setAutoDefault(False)
         self.regen_btn.setToolTip(
-            "Reinicia el servidor con otro código: desempareja cualquier "
-            "teléfono ya conectado"
+            tr("Reinicia el servidor con otro código: desempareja cualquier "
+               "teléfono ya conectado")
         )
         self.regen_btn.clicked.connect(self.regenerate_requested)
 
@@ -1636,9 +1643,9 @@ class RemotePairDialog(BaseDialog):
         close_btn.clicked.connect(self.accept)
 
         self.main_layout.addWidget(self.qr_label)
-        self.main_layout.addWidget(self._caption("Dirección"))
+        self.main_layout.addWidget(self._caption(tr("Dirección")))
         self.main_layout.addWidget(self.address_label)
-        self.main_layout.addWidget(self._caption("Código"))
+        self.main_layout.addWidget(self._caption(tr("Código")))
         self.main_layout.addWidget(self.token_label)
         self.main_layout.addWidget(aviso)
         self.main_layout.addStretch()
@@ -1670,8 +1677,8 @@ class RemotePairDialog(BaseDialog):
         pixmap = qr_pixmap(pairing_payload(ip, port, token, name))
         if pixmap is None:
             self.qr_label.setText(
-                "QR no disponible (falta el módulo qrcode).\n"
-                "Emparejá escribiendo la dirección y el código."
+                tr("QR no disponible (falta el módulo qrcode).\n"
+                   "Emparejá escribiendo la dirección y el código.")
             )
             self.qr_label.setWordWrap(True)
         else:

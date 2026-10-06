@@ -23,7 +23,7 @@ import json
 from datetime import datetime
 import time
 from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QPoint, QEvent, QUrl
-from PyQt6.QtGui import (QAction, QPixmap, QKeySequence, QColor, QPainter,
+from PyQt6.QtGui import (QAction, QActionGroup, QPixmap, QKeySequence, QColor, QPainter,
                          QIcon, QImage, QShortcut, QDesktopServices)
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
@@ -45,6 +45,8 @@ from dependencies import DependencyManager
 from ytdlp_download_worker import YTDLPDownloadWorker
 from update_check_worker import UpdateCheckWorker
 from version import __version__
+from i18n import N_, SUPPORTED, current_language, qlocale, tr
+from settings import save_setting
 from resources import styled_message_box, bg_image, resource_path, style_url
 from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
 from dialogs import (
@@ -123,8 +125,8 @@ class AudioPlayer(QMainWindow):
                 self.setStyleSheet(f.read())
         except FileNotFoundError:
             styled_message_box(
-                self, "Error de estilos",
-                "Archivo de estilos no encontrado",
+                self, tr("Error de estilos"),
+                tr("Archivo de estilos no encontrado"),
                 QMessageBox.Icon.Critical,
             )
 
@@ -368,8 +370,8 @@ class AudioPlayer(QMainWindow):
             if w is not None:
                 w.installEventFilter(self)
 
-        self.tabs.addTab(self.lyrics_container, "Letras")
-        self.tabs.addTab(self.cover_label, "Portada")
+        self.tabs.addTab(self.lyrics_container, tr("Letras"))
+        self.tabs.addTab(self.cover_label, tr("Portada"))
         # Portada visible al iniciar; al reproducir una canción se
         # cambia automáticamente a Letras (ver play_current)
         self.tabs.setCurrentWidget(self.cover_label)
@@ -395,11 +397,11 @@ class AudioPlayer(QMainWindow):
 
     # Modos de ordenamiento que recorre el botón toggle (key, reverse, etiqueta)
     _SORT_MODES = (
-        ("artist", False, "Artista A-Z"),
-        ("artist", True, "Artista Z-A"),
-        ("song", False, "Título A-Z"),
-        ("song", True, "Título Z-A"),
-        ("random", False, "Aleatorio"),
+        ("artist", False, N_("Artista A-Z")),
+        ("artist", True, N_("Artista Z-A")),
+        ("song", False, N_("Título A-Z")),
+        ("song", True, N_("Título Z-A")),
+        ("random", False, N_("Aleatorio")),
     )
 
     def _create_playlist_dock(self):
@@ -431,23 +433,23 @@ class AudioPlayer(QMainWindow):
 
         self._sort_mode = -1  # -1 = sin orden (carpeta recién cargada)
 
-        folder_btn = QPushButton("Seleccionar carpeta")
+        folder_btn = QPushButton(tr("Seleccionar carpeta"))
         folder_btn.setObjectName("playlistToolBtn")
         folder_btn.clicked.connect(lambda: self.load_folder())
 
-        load_btn = QPushButton("Cargar playlist")
+        load_btn = QPushButton(tr("Cargar playlist"))
         load_btn.setObjectName("playlistToolBtn")
         load_btn.clicked.connect(self.load_playlist_mlst)
 
-        clear_btn = QPushButton("Limpiar")
+        clear_btn = QPushButton(tr("Limpiar"))
         clear_btn.setObjectName("playlistToolBtn")
         clear_btn.clicked.connect(self.clear_playlist)
 
-        self.sort_toggle_btn = QPushButton("Ordenar")
+        self.sort_toggle_btn = QPushButton(tr("Ordenar"))
         self.sort_toggle_btn.setObjectName("playlistToolBtn")
         self.sort_toggle_btn.clicked.connect(self._cycle_sort)
 
-        self.sort_label = QLabel("Sin orden")
+        self.sort_label = QLabel(tr("Sin orden"))
         self.sort_label.setObjectName("playlistSortLabel")
 
         for w in (folder_btn, load_btn, clear_btn, self.sort_toggle_btn):
@@ -458,7 +460,7 @@ class AudioPlayer(QMainWindow):
 
     def _reset_sort_label(self):
         self._sort_mode = -1
-        self.sort_label.setText("Sin orden")
+        self.sort_label.setText(tr("Sin orden"))
 
     def _cycle_sort(self):
         next_mode = (self._sort_mode + 1) % len(self._SORT_MODES)
@@ -533,20 +535,20 @@ class AudioPlayer(QMainWindow):
             return
 
         menu = QMenu(self.playlist_widget)
-        open_folder_action = menu.addAction("Ir a la carpeta")
-        correct_action = menu.addAction("Corregir")
+        open_folder_action = menu.addAction(tr("Ir a la carpeta"))
+        correct_action = menu.addAction(tr("Corregir"))
         # Solo para mostrar "F2" en el menú: el atajo real lo maneja
         # keyPressEvent (el QMenu es temporal y muere con el exec()).
         correct_action.setShortcut(QKeySequence("F2"))
         correct_action.setShortcutVisibleInContextMenu(True)
-        refetch_lyrics_action = menu.addAction("Buscar letras de nuevo")
-        info_action = menu.addAction("Información")
+        refetch_lyrics_action = menu.addAction(tr("Buscar letras de nuevo"))
+        info_action = menu.addAction(tr("Información"))
 
-        copy_menu = menu.addMenu("Copiar")
-        copy_artist_action = copy_menu.addAction("Artista")
-        copy_song_action = copy_menu.addAction("Canción")
-        copy_artist_song_action = copy_menu.addAction("Artista - Canción")
-        copy_path_action = copy_menu.addAction("Ruta")
+        copy_menu = menu.addMenu(tr("Copiar"))
+        copy_artist_action = copy_menu.addAction(tr("Artista"))
+        copy_song_action = copy_menu.addAction(tr("Canción"))
+        copy_artist_song_action = copy_menu.addAction(tr("Artista - Canción"))
+        copy_path_action = copy_menu.addAction(tr("Ruta"))
 
         menu.addSeparator()
         # Con selección múltiple, "Agregar/Eliminar de la cola" actúa sobre
@@ -554,9 +556,9 @@ class AudioPlayer(QMainWindow):
         target_songs = self._queue_action_targets(item)
         add_mode = not (target_songs and all(self._is_queued(s) for s in target_songs))
         queue_action = menu.addAction(
-            "Agregar a la cola" if add_mode else "Eliminar de la cola"
+            tr("Agregar a la cola") if add_mode else tr("Eliminar de la cola")
         )
-        manage_queue_action = menu.addAction("Administrar cola")
+        manage_queue_action = menu.addAction(tr("Administrar cola"))
 
         action = menu.exec(self.playlist_widget.mapToGlobal(pos))
 
@@ -674,8 +676,8 @@ class AudioPlayer(QMainWindow):
         folder = item.data(PlaylistItemDelegate.PATH_ROLE)
         if not folder or not Path(folder).is_dir():
             styled_message_box(
-                self, "Carpeta no encontrada",
-                "No se encontró la carpeta de esta canción.",
+                self, tr("Carpeta no encontrada"),
+                tr("No se encontró la carpeta de esta canción."),
                 QMessageBox.Icon.Warning,
             )
             return
@@ -685,8 +687,8 @@ class AudioPlayer(QMainWindow):
         # no hace nada en binarios empaquetados.
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(folder).resolve()))):
             styled_message_box(
-                self, "Error",
-                "No se pudo abrir la carpeta con el explorador de archivos.",
+                self, tr("Error"),
+                tr("No se pudo abrir la carpeta con el explorador de archivos."),
                 QMessageBox.Icon.Warning,
             )
 
@@ -704,8 +706,8 @@ class AudioPlayer(QMainWindow):
         old_path = Path(song_data['path'])
         if not old_path.is_dir():
             styled_message_box(
-                self, "Carpeta no encontrada",
-                "No se encontró la carpeta de esta canción.",
+                self, tr("Carpeta no encontrada"),
+                tr("No se encontró la carpeta de esta canción."),
                 QMessageBox.Icon.Warning,
             )
             return
@@ -731,9 +733,10 @@ class AudioPlayer(QMainWindow):
 
         if new_path != old_path and new_path.exists():
             reply = styled_message_box(
-                self, "Carpeta existente",
-                f'Ya existe una carpeta para "{new_artist} - {new_song}".\n'
-                "¿Combinar y sobrescribir los archivos con el mismo nombre?",
+                self, tr("Carpeta existente"),
+                tr('Ya existe una carpeta para "{artist} - {song}".\n'
+                   "¿Combinar y sobrescribir los archivos con el mismo nombre?"
+                   ).format(artist=new_artist, song=new_song),
                 QMessageBox.Icon.Question,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
@@ -751,7 +754,7 @@ class AudioPlayer(QMainWindow):
             json_data = self._write_song_metadata(new_path, new_artist, new_song)
         except Exception as e:
             styled_message_box(
-                self, "Error", f"No se pudo corregir la canción:\n{e}",
+                self, tr("Error"), tr("No se pudo corregir la canción:\n{error}").format(error=e),
                 QMessageBox.Icon.Critical,
             )
             return
@@ -767,7 +770,8 @@ class AudioPlayer(QMainWindow):
         item.setData(PlaylistItemDelegate.PATH_ROLE, str(new_path))
 
         self._bump_playlist_rev()
-        self.show_status_message(f"Corregido: {new_artist} - {new_song}")
+        self.show_status_message(
+            tr("Corregido: {artist} - {song}").format(artist=new_artist, song=new_song))
 
     def _force_fetch_lyrics(self, item: QListWidgetItem):
         """Vuelve a buscar letras en la API ignorando el lyrics.lrc existente.
@@ -783,8 +787,8 @@ class AudioPlayer(QMainWindow):
         path = Path(song_data['path'])
         if not path.is_dir():
             styled_message_box(
-                self, "Carpeta no encontrada",
-                "No se encontró la carpeta de esta canción.",
+                self, tr("Carpeta no encontrada"),
+                tr("No se encontró la carpeta de esta canción."),
                 QMessageBox.Icon.Warning,
             )
             return
@@ -792,10 +796,11 @@ class AudioPlayer(QMainWindow):
         # Confirmar: sobrescribe cualquier ajuste hecho en el editor de sync.
         if (path / "lyrics.lrc").exists():
             reply = styled_message_box(
-                self, "Sobrescribir letras",
-                f'Se reemplazarán las letras actuales de "{song_data["artist"]} - '
-                f'{song_data["song"]}" con las que devuelva la búsqueda.\n'
-                "Se perderán los ajustes de sincronización hechos a mano. ¿Continuar?",
+                self, tr("Sobrescribir letras"),
+                tr('Se reemplazarán las letras actuales de "{artist} - {song}" '
+                   "con las que devuelva la búsqueda.\n"
+                   "Se perderán los ajustes de sincronización hechos a mano. ¿Continuar?"
+                   ).format(artist=song_data['artist'], song=song_data['song']),
                 QMessageBox.Icon.Question,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
@@ -803,7 +808,9 @@ class AudioPlayer(QMainWindow):
                 return
 
         artist, song = song_data['artist'], song_data['song']
-        self.begin_status(f"lyrics:{path}", f"Buscando letras: {artist} - {song}...")
+        self.begin_status(
+            f"lyrics:{path}",
+            tr("Buscando letras: {artist} - {song}...").format(artist=artist, song=song))
 
         def worker():
             found = False
@@ -834,7 +841,7 @@ class AudioPlayer(QMainWindow):
             self.update_lyrics_menu_state()
 
         self.end_status(f"lyrics:{path}",
-                        "Letras actualizadas" if found else "No se encontraron letras")
+                        tr("Letras actualizadas") if found else tr("No se encontraron letras"))
 
     @staticmethod
     def _move_song_folder(old_path: Path, new_path: Path):
@@ -1028,7 +1035,9 @@ class AudioPlayer(QMainWindow):
             return
 
     def _on_playlist_loaded(self):
-        self.end_status("playlist", f"Playlist cargada: {len(self.playlist)} canciones")
+        self.end_status(
+            "playlist",
+            tr("Playlist cargada: {n} canciones").format(n=len(self.playlist)))
         self.update_status()
 
     def _handle_cover_loaded(self, image: QImage):
@@ -1053,10 +1062,10 @@ class AudioPlayer(QMainWindow):
         self.lyrics_timer.start(100)
 
     def _handle_lyrics_error(self, error_msg: str):
-        self.lyrics_current.setHtml(f'<center>Error: {error_msg}</center>')
+        self.lyrics_current.setHtml(f'<center>{tr("Error")}: {error_msg}</center>')
 
     def _handle_lyrics_not_found(self):
-        self.lyrics_current.setHtml('<center>No hay letras disponibles</center>')
+        self.lyrics_current.setHtml(f'<center>{tr("No hay letras disponibles")}</center>')
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Controles de reproducción ────────────────────────────────────────
@@ -1482,9 +1491,9 @@ class AudioPlayer(QMainWindow):
             track_paths = self.lazy_audio.load_audio_lazy(path)
             if not track_paths:
                 styled_message_box(
-                    self, "Error de Audio",
-                    f"No se encontraron las pistas separadas para:\n"
-                    f"{song['artist']} - {song['song']}",
+                    self, tr("Error de Audio"),
+                    tr("No se encontraron las pistas separadas para:\n{artist} - {song}"
+                       ).format(artist=song['artist'], song=song['song']),
                     QMessageBox.Icon.Warning,
                 )
                 return False
@@ -1511,7 +1520,7 @@ class AudioPlayer(QMainWindow):
 
         except Exception as e:
             styled_message_box(
-                self, "Error", f"Error cargando audio: {str(e)}",
+                self, tr("Error"), tr("Error cargando audio: {error}").format(error=e),
                 QMessageBox.Icon.Critical,
             )
             return False
@@ -1628,6 +1637,9 @@ class AudioPlayer(QMainWindow):
         "voz": "vocals", "vocal": "vocals", "vocales": "vocals",
         "bajo": "bass",
         "otros": "other", "otro": "other",
+        # Sugerencias de la cola en inglés y portugués (bateria/voz ya valen)
+        "drums": "drums", "vocals": "vocals", "bass": "bass", "other": "other",
+        "baixo": "bass", "outros": "other", "outro": "other",
     }
 
     def _apply_tag_mutes(self, song_data: dict):
@@ -1658,7 +1670,8 @@ class AudioPlayer(QMainWindow):
         if track_name:
             self.set_mute(track_name, not self.mute_states[track_name])
 
-    _TRACK_LABELS = {"drums": "Batería", "vocals": "Vocal", "bass": "Bajo", "other": "Otros"}
+    _TRACK_LABELS = {"drums": N_("Batería"), "vocals": N_("Vocal"),
+                     "bass": N_("Bajo"), "other": N_("Otros")}
 
     def _show_fs_track_toast(self, track_name: str, muted: bool):
         """Mensaje momentáneo (esquina superior derecha) al togglear una pista
@@ -1673,8 +1686,8 @@ class AudioPlayer(QMainWindow):
             self._fs_toast_timer = QTimer(self)
             self._fs_toast_timer.setSingleShot(True)
             self._fs_toast_timer.timeout.connect(self._fs_toast.hide)
-        label = self._TRACK_LABELS.get(track_name, track_name)
-        state = "Silenciada" if muted else "Activada"
+        label = tr(self._TRACK_LABELS.get(track_name, track_name))
+        state = tr("Silenciada") if muted else tr("Activada")
         self._fs_toast.setText(f"{label}: {state}")
         self._fs_toast.adjustSize()
         margin = 24
@@ -1794,6 +1807,14 @@ class AudioPlayer(QMainWindow):
         except Exception:
             self.stop_playback()
 
+    # playback_state es contrato con el móvil (queda en español): solo se
+    # traduce el texto que se muestra.
+    _STATE_LABELS = {"Activa": N_("Activa"), "Pausada": N_("Pausada"),
+                     "Detenido": N_("Detenido")}
+
+    def _state_text(self) -> str:
+        return tr(self._STATE_LABELS.get(self.playback_state, self.playback_state))
+
     def update_status(self):
         if self._status_msg_timer.isActive():  # hay un show_status_message vigente
             return
@@ -1805,18 +1826,21 @@ class AudioPlayer(QMainWindow):
 
             parts = [
                 *self._status_ops.values(),
-                f"Canciones: {len(self.playlist)}",
-                f"Reproducción: {self.playback_state.capitalize()}",
-                "Remoto: activo" if self._remote_server is not None else "",
+                tr("Canciones: {n}").format(n=len(self.playlist)),
+                tr("Reproducción: {estado}").format(estado=self._state_text()),
+                tr("Remoto: activo") if self._remote_server is not None else "",
                 self.demucs.status_text(),
-                f"Cache: {self._cached_stats.get('total_cached_items', 0)} elementos",
-                f"Fecha: {datetime.now().strftime('%A - %d/%m/%Y')}",
-                f"Hora: {datetime.now().strftime('%H:%M')}",
+                tr("Cache: {n} elementos").format(
+                    n=self._cached_stats.get('total_cached_items', 0)),
+                tr("Fecha: {fecha}").format(
+                    fecha=qlocale().toString(datetime.now(), 'dddd - dd/MM/yyyy')),
+                tr("Hora: {hora}").format(hora=datetime.now().strftime('%H:%M')),
             ]
             self.status_label.setText(" | ".join(p for p in parts if p))
         except Exception:
             self.status_label.setText(
-                f"Canciones: {len(self.playlist)} | Estado: {self.playback_state}"
+                tr("Canciones: {n}").format(n=len(self.playlist))
+                + " | " + tr("Estado: {estado}").format(estado=self._state_text())
             )
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1877,7 +1901,7 @@ class AudioPlayer(QMainWindow):
                 self.auto_unmute_check = QCheckBox("Auto-unmute")
                 self.auto_unmute_check.setObjectName("auto_unmute_check")
                 self.auto_unmute_check.setToolTip(
-                    "Desmutea la voz en las secciones sin letra (con fundido)"
+                    tr("Desmutea la voz en las secciones sin letra (con fundido)")
                 )
                 # Mismos assets de checkbox que el editor de letras (incluyen
                 # la palomita); el estilizado custom perdía la marca al activar.
@@ -1952,21 +1976,21 @@ class AudioPlayer(QMainWindow):
         if not path:
             from os.path import expanduser
             path = QFileDialog.getExistingDirectory(
-                self, "Seleccionar Carpeta", expanduser("~/Music")
+                self, tr("Seleccionar Carpeta"), expanduser("~/Music")
             )
         if not path:
             return
         # Carpeta nueva: items sin ordenar
         self._reset_sort_label()
-        self.begin_status("playlist", "Cargando playlist...")
+        self.begin_status("playlist", tr("Cargando playlist..."))
         try:
             self.lazy_playlist.load_playlist_lazy(Path(path))
         except Exception as e:
             styled_message_box(
-                self, "Error", f"Error iniciando carga: {str(e)}",
+                self, tr("Error"), tr("Error iniciando carga: {error}").format(error=e),
                 QMessageBox.Icon.Critical,
             )
-            self.end_status("playlist", "Error cargando playlist")
+            self.end_status("playlist", tr("Error cargando playlist"))
 
     def clear_playlist(self):
         self.stop_playback()
@@ -2000,8 +2024,8 @@ class AudioPlayer(QMainWindow):
                         })
             except Exception as e:
                 styled_message_box(
-                    self, "Error",
-                    f"Error cargando {json_file}: {str(e)}",
+                    self, tr("Error"),
+                    tr("Error cargando {file}: {error}").format(file=json_file, error=e),
                     QMessageBox.Icon.Critical,
                 )
         self._on_songs_loaded(songs_found)
@@ -2043,7 +2067,7 @@ class AudioPlayer(QMainWindow):
         for i, (k, r, label) in enumerate(self._SORT_MODES):
             if k == key and r == reverse:
                 self._sort_mode = i
-                self.sort_label.setText(label)
+                self.sort_label.setText(tr(label))
                 break
 
         # Recordar la canción en reproducción para restaurar su índice
@@ -2085,8 +2109,8 @@ class AudioPlayer(QMainWindow):
     def save_playlist_mlst(self):
         if not self.playlist:
             styled_message_box(
-                self, "Playlist vacía",
-                "No hay canciones en la playlist para guardar.",
+                self, tr("Playlist vacía"),
+                tr("No hay canciones en la playlist para guardar."),
                 QMessageBox.Icon.Information,
             )
             return
@@ -2101,8 +2125,8 @@ class AudioPlayer(QMainWindow):
         canciones actualmente encoladas (no toda la playlist) a un .mlst."""
         if not self.play_queue:
             styled_message_box(
-                self, "Cola vacía",
-                "No hay canciones en la cola para exportar.",
+                self, tr("Cola vacía"),
+                tr("No hay canciones en la cola para exportar."),
                 QMessageBox.Icon.Information,
             )
             return
@@ -2113,7 +2137,7 @@ class AudioPlayer(QMainWindow):
 
     def _prompt_mlst_path(self) -> str:
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Guardar Playlist",
+            self, tr("Guardar Playlist"),
             str(Path.home() / "Music"),
             "Music List (*.mlst)",
         )
@@ -2127,20 +2151,21 @@ class AudioPlayer(QMainWindow):
         try:
             write_mlst(songs, file_path)
             styled_message_box(
-                self, "Playlist guardada",
-                f"Se guardaron {len(songs)} canciones en:\n{Path(file_path).name}",
+                self, tr("Playlist guardada"),
+                tr("Se guardaron {n} canciones en:\n{name}").format(
+                    n=len(songs), name=Path(file_path).name),
             )
             return True
         except Exception as e:
             styled_message_box(
-                self, "Error", f"No se pudo guardar: {e}",
+                self, tr("Error"), tr("No se pudo guardar: {error}").format(error=e),
                 QMessageBox.Icon.Critical,
             )
             return False
 
     def load_playlist_mlst(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Cargar Playlist",
+            self, tr("Cargar Playlist"),
             str(Path.home() / "Music"),
             "Music List (*.mlst)",
         )
@@ -2151,8 +2176,8 @@ class AudioPlayer(QMainWindow):
             name, songs = read_mlst(file_path)
             if not songs:
                 styled_message_box(
-                    self, "Playlist vacía",
-                    "El archivo no contiene canciones.",
+                    self, tr("Playlist vacía"),
+                    tr("El archivo no contiene canciones."),
                     QMessageBox.Icon.Warning,
                 )
                 return
@@ -2187,13 +2212,14 @@ class AudioPlayer(QMainWindow):
                 self._reset_sort_label()
                 self._bump_playlist_rev()
             self.show_status_message(
-                f"Playlist cargada: {name} ({added} nuevas canciones)"
+                tr("Playlist cargada: {name} ({n} nuevas canciones)").format(
+                    name=name, n=added)
             )
             self.update_status()
 
         except Exception as e:
             styled_message_box(
-                self, "Error", f"No se pudo cargar: {e}",
+                self, tr("Error"), tr("No se pudo cargar: {error}").format(error=e),
                 QMessageBox.Icon.Critical,
             )
 
@@ -2387,7 +2413,7 @@ class AudioPlayer(QMainWindow):
             self._remote_bridge = self._remote_server = None
             self.remote_action.setChecked(False)
             styled_message_box(
-                self, "Modo remoto", f"No se pudo abrir el puerto:\n{exc}",
+                self, tr("Modo remoto"), tr("No se pudo abrir el puerto:\n{error}").format(error=exc),
                 QMessageBox.Icon.Critical,
             )
             return
@@ -2415,7 +2441,7 @@ class AudioPlayer(QMainWindow):
             bridge.paired.disconnect(dialog.on_paired)
         if dialog.paired_with:
             self.show_status_message(
-                f"PlayIt Mobile conectado desde {dialog.paired_with}")
+                tr("PlayIt Mobile conectado desde {host}").format(host=dialog.paired_with))
 
     def _regenerate_remote_token(self, dialog):
         """Reinicia el servidor con otro token: desempareja lo ya conectado."""
@@ -2430,7 +2456,7 @@ class AudioPlayer(QMainWindow):
             self.update_status()
             dialog.reject()
             styled_message_box(
-                self, "Modo remoto", f"No se pudo abrir el puerto:\n{exc}",
+                self, tr("Modo remoto"), tr("No se pudo abrir el puerto:\n{error}").format(error=exc),
                 QMessageBox.Icon.Critical,
             )
             return
@@ -2465,6 +2491,9 @@ class AudioPlayer(QMainWindow):
         # Los bloques multilínea del .lrc (líneas de continuación) llegan con
         # '\n', que setHtml colapsa en un espacio: convertir a <br> al
         # renderizar para que el salto de línea sí se muestre.
+        # El placeholder en disco queda en español (needs_lyrics lo busca);
+        # solo se traduce lo que se muestra.
+        current_html = current_html.replace(LYRICS_NOT_FOUND_TEXT, tr("Letras no encontradas"))
         current_html = current_html.replace('\n', '<br>')
         next_html = next_html.replace('\n', '<br>')
         self.lyrics_current.setHtml(current_html)
@@ -2571,7 +2600,7 @@ class AudioPlayer(QMainWindow):
             self._handle_lyrics_loaded(self.lazy_lyrics.load_lyrics_lazy(path))
         except Exception as e:
             styled_message_box(
-                self, "Error", f"No se pudo ajustar: {str(e)}",
+                self, tr("Error"), tr("No se pudo ajustar: {error}").format(error=e),
                 QMessageBox.Icon.Warning,
             )
 
@@ -2684,9 +2713,9 @@ class AudioPlayer(QMainWindow):
     def show_split_dialog(self):
         if not self.deps.demucs_available:
             styled_message_box(
-                self, "Funcionalidad no disponible",
-                "La separación de pistas requiere Demucs, pero no está instalado.\n\n"
-                "Puede instalar Demucs y demás dependencias desde las opciones del menú.",
+                self, tr("Funcionalidad no disponible"),
+                tr("La separación de pistas requiere Demucs, pero no está instalado.\n\n"
+                   "Puede instalar Demucs y demás dependencias desde las opciones del menú."),
                 QMessageBox.Icon.Warning,
             )
             return
@@ -2712,8 +2741,8 @@ class AudioPlayer(QMainWindow):
     def download_mp3(self):
         if not self.deps.ytdlp_available:
             styled_message_box(
-                self, "yt-dlp no instalado",
-                "Debe instalar yt-dlp primero desde Opciones > Dependencias.",
+                self, tr("yt-dlp no instalado"),
+                tr("Debe instalar yt-dlp primero desde Opciones > Dependencias."),
                 QMessageBox.Icon.Warning,
             )
             return
@@ -2726,16 +2755,16 @@ class AudioPlayer(QMainWindow):
         self._start_worker_thread(
             YTDLPDownloadWorker(url), 'download_thread', 'download_worker',
             self._on_download_finished, self._on_download_error,
-            "Descargando MP3...",
+            tr("Descargando MP3..."),
         )
 
     def _on_download_finished(self, message: str):
-        self.end_status('download_thread', "Descarga completada.")
-        styled_message_box(self, "Descarga finalizada", message, QMessageBox.Icon.Information)
+        self.end_status('download_thread', tr("Descarga completada."))
+        styled_message_box(self, tr("Descarga finalizada"), message, QMessageBox.Icon.Information)
 
     def _on_download_error(self, msg: str):
-        self.end_status('download_thread', "Error en descarga.")
-        styled_message_box(self, "Error de descarga", msg, QMessageBox.Icon.Critical)
+        self.end_status('download_thread', tr("Error en descarga."))
+        styled_message_box(self, tr("Error de descarga"), msg, QMessageBox.Icon.Critical)
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Menú ─────────────────────────────────────────────────────────────
@@ -2763,119 +2792,136 @@ class AudioPlayer(QMainWindow):
         menu.addAction(action)
         return action
 
+    def _set_language(self, code: str):
+        if code == current_language():
+            return
+        save_setting("language", code)
+        styled_message_box(
+            self, tr("Idioma"),
+            tr("El idioma se aplicará al reiniciar PlayIt."))
+
     def init_menu(self):
         bar = self.menuBar()
         assert bar is not None
-        file_menu = self._submenu(bar, "Archivo")
-        options_menu = self._submenu(bar, "Opciones")
-        help_menu = self._submenu(bar, "Ayuda")
+        file_menu = self._submenu(bar, tr("Archivo"))
+        options_menu = self._submenu(bar, tr("Opciones"))
+        help_menu = self._submenu(bar, tr("Ayuda"))
         add = self._add_action
 
         # Archivo
-        add(file_menu, "Seleccionar Carpeta", self.load_folder, "Ctrl+O")
-        playlist_menu = self._submenu(file_menu, "Playlists")
-        add(playlist_menu, "Cargar playlist...", self.load_playlist_mlst)
-        add(playlist_menu, "Guardar playlist como...", self.save_playlist_mlst)
+        add(file_menu, tr("Seleccionar Carpeta"), self.load_folder, "Ctrl+O")
+        playlist_menu = self._submenu(file_menu, tr("Playlists"))
+        add(playlist_menu, tr("Cargar playlist..."), self.load_playlist_mlst)
+        add(playlist_menu, tr("Guardar playlist como..."), self.save_playlist_mlst)
         file_menu.addSeparator()
-        self.split_action = add(file_menu, "Dividir...", self.show_split_dialog, "Ctrl+D")
+        self.split_action = add(file_menu, tr("Dividir..."), self.show_split_dialog, "Ctrl+D")
         file_menu.addSeparator()
-        add(file_menu, "Remover de PlayList", self.remove_selected)
-        add(file_menu, "Limpiar Playlist", self.clear_playlist)
-        sort_menu = self._submenu(file_menu, "Ordenar Playlist")
+        add(file_menu, tr("Remover de PlayList"), self.remove_selected)
+        add(file_menu, tr("Limpiar Playlist"), self.clear_playlist)
+        sort_menu = self._submenu(file_menu, tr("Ordenar Playlist"))
         for key, reverse, label in self._SORT_MODES:
-            add(sort_menu, label,
+            add(sort_menu, tr(label),
                 lambda _=False, k=key, r=reverse: self.sort_playlist(k, reverse=r))
         file_menu.addSeparator()
-        add(file_menu, "&Salir", self.close_application, "Ctrl+Q")
+        add(file_menu, tr("&Salir"), self.close_application, "Ctrl+Q")
 
         # Opciones
         self.show_playlist_action = add(
-            options_menu, "Mostrar lista", self._toggle_playlist_visibility,
+            options_menu, tr("Mostrar lista"), self._toggle_playlist_visibility,
             checkable=True, checked=True)
         self.show_visualizer_action = add(
-            options_menu, "Visualizador de audio", self._toggle_visualizer,
+            options_menu, tr("Visualizador de audio"), self._toggle_visualizer,
             checkable=True, checked=True)
 
         # Estilo del visualizador circular del fullscreen de letras
         # (también se cicla con V dentro del fullscreen).
-        fs_viz_menu = self._submenu(options_menu, "Visualizador en pantalla completa")
+        fs_viz_menu = self._submenu(options_menu, tr("Visualizador en pantalla completa"))
         self._fs_viz_style_actions = []
-        for key, label in (("bars", "Barras circulares"),
-                           ("wave", "Onda"),
-                           ("electric", "Electricidad"),
-                           ("hbars", "Barras horizontales"),
-                           ("none", "Ninguno")):
+        for key, label in (("bars", tr("Barras circulares")),
+                           ("wave", tr("Onda")),
+                           ("electric", tr("Electricidad")),
+                           ("hbars", tr("Barras horizontales")),
+                           ("none", tr("Ninguno"))):
             act = add(fs_viz_menu, label, lambda _=False, k=key: self._set_fs_viz_style(k),
                       checkable=True, checked=key == self._fs_viz_style)
             act.setData(key)
             self._fs_viz_style_actions.append(act)
 
-        self.search_action = add(options_menu, "Buscar canción...",
+        self.search_action = add(options_menu, tr("Buscar canción..."),
                                  self.show_search_dialog, "Ctrl+Shift+F")
-        self.lyrics_fullscreen_action = add(options_menu, "Letras en pantalla completa",
+        self.lyrics_fullscreen_action = add(options_menu, tr("Letras en pantalla completa"),
                                             self._enter_lyrics_fullscreen, "Ctrl+F")
 
-        lyrics_menu = self._submenu(options_menu, "Modificar Lyrics")
-        self.advance_action = add(lyrics_menu, ">> Mostrar Después 0.5s",
+        lyrics_menu = self._submenu(options_menu, tr("Modificar Lyrics"))
+        self.advance_action = add(lyrics_menu, tr(">> Mostrar Después 0.5s"),
                                   lambda: self.adjust_lyrics_timing(0.5),
                                   "Ctrl+Shift+Right", enabled=False)
-        self.delay_action = add(lyrics_menu, "<< Mostrar Antes 0.5s",
+        self.delay_action = add(lyrics_menu, tr("<< Mostrar Antes 0.5s"),
                                 lambda: self.adjust_lyrics_timing(-0.5),
                                 "Ctrl+Shift+Left", enabled=False)
         lyrics_menu.addSeparator()
-        self.increase_font_action = add(lyrics_menu, "Incrementar tamaño",
+        self.increase_font_action = add(lyrics_menu, tr("Incrementar tamaño"),
                                         self.increase_lyrics_font, "Ctrl+Shift+Up")
-        self.decrease_font_action = add(lyrics_menu, "Disminuir tamaño",
+        self.decrease_font_action = add(lyrics_menu, tr("Disminuir tamaño"),
                                         self.decrease_lyrics_font, "Ctrl+Shift+Down")
         lyrics_menu.addSeparator()
-        self.sync_editor_action = add(lyrics_menu, "Editor de sincronización (onda)…",
+        self.sync_editor_action = add(lyrics_menu, tr("Editor de sincronización (onda)…"),
                                       self.open_lyrics_sync_editor, "Ctrl+Shift+E",
                                       enabled=False)
 
-        tracks_menu = self._submenu(options_menu, "Pistas")
+        tracks_menu = self._submenu(options_menu, tr("Pistas"))
         self.track_toggle_actions = [
             add(tracks_menu, label, btn.click, shortcut)
             for label, shortcut, btn in (
-                ("Batería (mute/unmute)", "Alt+1", self.drums_btn),
-                ("Vocal (mute/unmute)", "Alt+2", self.vocals_btn),
-                ("Bajo (mute/unmute)", "Alt+3", self.bass_btn),
-                ("Otros (mute/unmute)", "Alt+4", self.other_btn),
+                (tr("Batería (mute/unmute)"), "Alt+1", self.drums_btn),
+                (tr("Vocal (mute/unmute)"), "Alt+2", self.vocals_btn),
+                (tr("Bajo (mute/unmute)"), "Alt+3", self.bass_btn),
+                (tr("Otros (mute/unmute)"), "Alt+4", self.other_btn),
             )
         ]
 
-        self.remote_action = add(options_menu, "Modo remoto (PlayIt Mobile)…",
+        self.remote_action = add(options_menu, tr("Modo remoto (PlayIt Mobile)…"),
                                  checkable=True)
         self.remote_action.toggled.connect(self.toggle_remote_mode)
-        add(options_menu, "Limpiar Cache", self.cleanup_resources_manual)
+        add(options_menu, tr("Limpiar Cache"), self.cleanup_resources_manual)
+
+        # Idioma: se guarda y aplica al reiniciar (la UI se construye una vez)
+        lang_menu = self._submenu(options_menu, tr("Idioma"))
+        lang_group = QActionGroup(self)
+        lang_group.setExclusive(True)
+        for code, name in SUPPORTED.items():
+            act = add(lang_menu, name, lambda _=False, c=code: self._set_language(c),
+                      checkable=True, checked=code == current_language())
+            lang_group.addAction(act)
 
         # Dependencias: Visual C++ solo en Windows; CUDA no existe en macOS
         # (Demucs usa MPS automáticamente ahí)
-        deps_menu = self._submenu(options_menu, "Dependencias")
-        self.install_python_action = add(deps_menu, "Instalar Python",
+        deps_menu = self._submenu(options_menu, tr("Dependencias"))
+        self.install_python_action = add(deps_menu, tr("Instalar Python"),
                                          self.deps.install_python)
         if IS_WINDOWS:
-            self.install_vc_action = add(deps_menu, "Instalar Visual C++",
+            self.install_vc_action = add(deps_menu, tr("Instalar Visual C++"),
                                          self.deps.install_vc)
-        self.install_ffmpeg_action = add(deps_menu, "Instalar FFmpeg",
+        self.install_ffmpeg_action = add(deps_menu, tr("Instalar FFmpeg"),
                                          self.deps.install_ffmpeg)
-        self.install_demucs_action = add(deps_menu, "Instalar Demucs",
+        self.install_demucs_action = add(deps_menu, tr("Instalar Demucs"),
                                          self.deps.install_demucs)
         if not IS_MAC:
-            self.install_cuda_action = add(deps_menu, "Instalar CUDA (GPU Nvidia necesario)",
+            self.install_cuda_action = add(deps_menu, tr("Instalar CUDA (GPU Nvidia necesario)"),
                                            self.deps.install_cuda)
         deps_menu.addSeparator()
-        self.install_ytdlp_action = add(deps_menu, "Instalar YT-DLP (Youtube → MP3)",
+        self.install_ytdlp_action = add(deps_menu, tr("Instalar YT-DLP (Youtube → MP3)"),
                                         self.deps.install_ytdlp)
         options_menu.addSeparator()
-        self.download_mp3_action = add(options_menu, "Descargar MP3...", self.download_mp3)
+        self.download_mp3_action = add(options_menu, tr("Descargar MP3..."), self.download_mp3)
         # Estado inicial (flags por defecto); `deps.changed` lo refresca
         # cuando termina el chequeo en segundo plano
         self._update_dependency_menus()
 
         # Ayuda
-        add(help_menu, "Sobre Playit", self.show_about_dialog)
-        add(help_menu, "Mostrar Queue", self.show_queue_dialog)
-        self.check_updates_action = add(help_menu, "Buscar actualizaciones...",
+        add(help_menu, tr("Sobre Playit"), self.show_about_dialog)
+        add(help_menu, tr("Mostrar Queue"), self.show_queue_dialog)
+        self.check_updates_action = add(help_menu, tr("Buscar actualizaciones..."),
                                         self.check_for_updates)
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2908,7 +2954,7 @@ class AudioPlayer(QMainWindow):
         self._status_ops: dict[str, str] = {}
         self.deps.op_started.connect(self.begin_status)
         self.deps.op_finished.connect(self.end_status)
-        self.status_bar.showMessage("Listo", 3000)
+        self.status_bar.showMessage(tr("Listo"), 3000)
         self.update_status()
 
     def show_status_message(self, text: str, ms: int = 5000):
@@ -2966,14 +3012,15 @@ class AudioPlayer(QMainWindow):
             after = self.get_cache_stats()
             freed = before['total_cached_items'] - after['total_cached_items']
             styled_message_box(
-                self, "Limpieza Completa",
-                f"Cache limpiado exitosamente.\n"
-                f"Elementos eliminados: {freed}\n"
-                f"Memoria liberada aproximada: {freed * 2:.1f}MB",
+                self, tr("Limpieza Completa"),
+                tr("Cache limpiado exitosamente.\n"
+                   "Elementos eliminados: {n}\n"
+                   "Memoria liberada aproximada: {mb:.1f}MB"
+                   ).format(n=freed, mb=freed * 2),
             )
         except Exception as e:
             styled_message_box(
-                self, "Error", f"Error durante la limpieza: {e}",
+                self, tr("Error"), tr("Error durante la limpieza: {error}").format(error=e),
                 QMessageBox.Icon.Warning,
             )
         self.update_status()
@@ -3008,7 +3055,7 @@ class AudioPlayer(QMainWindow):
             UpdateCheckWorker(), 'update_check_thread', 'update_check_worker',
             self._on_update_check_success,
             self._on_update_check_error,
-            "Buscando actualizaciones...",
+            tr("Buscando actualizaciones..."),
         )
 
     def _show_update_dialog(self, message: str, show_cancel: bool = False) -> int:
@@ -3018,30 +3065,32 @@ class AudioPlayer(QMainWindow):
 
     def _on_update_check_success(self, latest_version: str, html_url: str):
         self.check_updates_action.setEnabled(True)
-        self.end_status('update_check_thread', "Búsqueda de actualizaciones completa.")
+        self.end_status('update_check_thread', tr("Búsqueda de actualizaciones completa."))
 
         if __version__ == "dev":
             self._show_update_dialog(
-                f"Estás usando una build de desarrollo.\n"
-                f"Última versión publicada: {latest_version}"
+                tr("Estás usando una build de desarrollo.\n"
+                   "Última versión publicada: {version}").format(version=latest_version)
             )
             return
 
         if self._parse_version(latest_version) > self._parse_version(__version__):
             respuesta = self._show_update_dialog(
-                f"Hay una nueva versión disponible: {latest_version}\n"
-                f"Versión actual: {__version__}\n\n"
-                f"¿Abrir la página de descarga?",
+                tr("Hay una nueva versión disponible: {latest}\n"
+                   "Versión actual: {current}\n\n"
+                   "¿Abrir la página de descarga?"
+                   ).format(latest=latest_version, current=__version__),
                 show_cancel=True,
             )
             if respuesta == QDialog.DialogCode.Accepted and html_url:
                 QDesktopServices.openUrl(QUrl(html_url))
         else:
-            self._show_update_dialog(f"Ya tienes la última versión instalada ({__version__}).")
+            self._show_update_dialog(
+                tr("Ya tienes la última versión instalada ({version}).").format(version=__version__))
 
     def _on_update_check_error(self, msg: str):
         self.check_updates_action.setEnabled(True)
-        self.end_status('update_check_thread', "Error buscando actualizaciones.")
+        self.end_status('update_check_thread', tr("Error buscando actualizaciones."))
         self._show_update_dialog(msg)
 
     def show_search_dialog(self):
@@ -3067,7 +3116,7 @@ class AudioPlayer(QMainWindow):
             self._search_pos = -1
 
         if not self._search_matches:
-            self.show_status_message(f"Sin coincidencias para: {text}")
+            self.show_status_message(tr("Sin coincidencias para: {text}").format(text=text))
             return
 
         self._search_pos = (self._search_pos + 1) % len(self._search_matches)
@@ -3079,8 +3128,9 @@ class AudioPlayer(QMainWindow):
         )
         song = self.playlist[row]
         self.show_status_message(
-            f"Coincidencia {self._search_pos + 1}/{len(self._search_matches)}: "
-            f"{song['artist']} - {song['song']}"
+            tr("Coincidencia {pos}/{total}: {artist} - {song}").format(
+                pos=self._search_pos + 1, total=len(self._search_matches),
+                artist=song['artist'], song=song['song'])
         )
 
     # ──────────────────────────────────────────────────────────────────────

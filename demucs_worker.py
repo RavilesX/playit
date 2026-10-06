@@ -26,6 +26,7 @@ import mutagen
 from mutagen.flac import Picture
 from PIL import Image
 from PyQt6.QtCore import QObject, pyqtSignal
+from i18n import tr
 from platform_utils import (
     run_silent, get_python_cmd, get_data_dir,
     check_pytorch_mps, check_pytorch_cuda,
@@ -194,7 +195,7 @@ class DemucsWorker(QObject):
             self.progress.emit(100)
             self.finished.emit()
         except Exception as e:
-            self.error.emit(f"Error: {str(e)}")
+            self.error.emit(tr("Error: {error}").format(error=e))
 
     def _run_demucs(self):
         use_mps = check_pytorch_mps()
@@ -214,11 +215,12 @@ class DemucsWorker(QObject):
 
         if result.returncode != 0:
             self._log_failure(result, "Intento final falló")
-            error_msg = f"Demucs falló con código {result.returncode}"
+            error_msg = tr("Demucs falló con código {code}").format(code=result.returncode)
             detail = self._relevant_output(result)
             if detail:
                 error_msg += f"\n{detail}"
-            error_msg += f"\n\nLog completo en: {get_data_dir() / 'demucs_error.log'}"
+            error_msg += "\n\n" + tr("Log completo en: {ruta}").format(
+                ruta=get_data_dir() / 'demucs_error.log')
             raise RuntimeError(error_msg)
 
     def _exec_demucs(self, mps: bool):
@@ -300,7 +302,7 @@ class DemucsWorker(QObject):
             demucs_dir = self.base_path / "separated" / "htdemucs_ft" / self.song
             if not demucs_dir.exists():
                 raise FileNotFoundError(
-                    f"No se encontró la carpeta de Demucs en: {demucs_dir}"
+                    tr("No se encontró la carpeta de Demucs en: {ruta}").format(ruta=demucs_dir)
                 )
 
         target_dir = self.base_path / "separated"
@@ -309,7 +311,7 @@ class DemucsWorker(QObject):
         for stem in ("drums", "bass", "other", "vocals"):
             src = demucs_dir / f"{stem}.mp3"
             if not src.exists():
-                raise FileNotFoundError(f"Archivo no encontrado: {src}")
+                raise FileNotFoundError(tr("Archivo no encontrado: {ruta}").format(ruta=src))
             shutil.move(str(src), str(target_dir / f"{stem}.mp3"))
 
         # Limpiar carpeta temporal de Demucs

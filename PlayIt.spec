@@ -38,7 +38,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=qt_plugins,
-    datas=[('images', 'images'), ('fonts', 'fonts'), ('estilos.css', '.')],
+    datas=[('images', 'images'), ('fonts', 'fonts'), ('locales', 'locales'), ('estilos.css', '.')],
     hiddenimports=_remote_hidden,
     hookspath=[],
     hooksconfig={},

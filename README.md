@@ -34,6 +34,7 @@ PlayIt es un reproductor de audio de escritorio que separa canciones en cuatro p
 - **Playlists** `.mlst` con ordenamiento por artista/título y modo aleatorio.
 - **Información del archivo original**: metadata (artista, álbum, año, género, formato, kbps) guardada al separar y consultable desde la playlist.
 - **Instalador de dependencias integrado**: la app detecta e instala lo que falta desde su propio menú.
+- **Idioma de la interfaz**: español, inglés y portugués (Brasil), desde Opciones → Idioma. Se aplica al reiniciar y se guarda en `settings.json`; la primera vez usa el idioma del sistema (inglés si no es ninguno de los tres).
 
 ### Modo remoto (PlayIt Mobile)
 
@@ -222,6 +223,7 @@ PlayIt is a desktop audio player that splits songs into four independent stems (
 - **`.mlst` playlists** with artist/title sorting and a random mode.
 - **Source file info**: metadata (artist, album, year, genre, format, kbps) saved at split time and viewable from the playlist.
 - **Built-in dependency installer**: the app detects and installs what's missing from its own menu.
+- **Interface language**: Spanish, English and Portuguese (Brazil), from Options → Language ("Opciones → Idioma" in a Spanish UI). It applies on restart and is stored in `settings.json`; on first launch it follows the system language (English if it is none of the three).
 
 ### Remote mode (PlayIt Mobile)
 

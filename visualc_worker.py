@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from base_worker import BaseInstallWorker
+from i18n import tr
 from platform_utils import IS_WINDOWS, get_visualcpp_install_cmd
 
 
@@ -25,7 +26,7 @@ class VisualCWorker(BaseInstallWorker):
         return [
             {
                 'cmd': get_visualcpp_install_cmd(),
-                'error_msg': 'Error instalando Visual C++ Redistributable',
+                'error_msg': tr('Error instalando Visual C++ Redistributable'),
                 'timeout': 300,
             },
         ]

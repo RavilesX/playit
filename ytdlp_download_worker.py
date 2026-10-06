@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from PyQt6.QtCore import QObject, pyqtSignal
+from i18n import N_, tr
 from platform_utils import run_silent, get_data_dir
 
 
@@ -23,14 +24,14 @@ class YTDLPDownloadWorker(QObject):
     error = pyqtSignal(str)
 
     _ERROR_PATTERNS = {
-        "Video unavailable": "El video no existe o no está disponible. Revisa la URL.",
-        "Unsupported URL": "La URL no es válida o no es compatible con YouTube.",
-        "not a valid URL": "La URL no es válida o no es compatible con YouTube.",
-        "This video is private": "El video es privado y no se puede acceder.",
-        "Sign in to confirm your age": "El video tiene restricción de edad.",
-        "age-restricted": "El video tiene restricción de edad.",
-        "HTTP Error 404": "El video no fue encontrado (HTTP 404).",
-        "This live stream has ended": "La transmisión en vivo ha finalizado.",
+        "Video unavailable": N_("El video no existe o no está disponible. Revisa la URL."),
+        "Unsupported URL": N_("La URL no es válida o no es compatible con YouTube."),
+        "not a valid URL": N_("La URL no es válida o no es compatible con YouTube."),
+        "This video is private": N_("El video es privado y no se puede acceder."),
+        "Sign in to confirm your age": N_("El video tiene restricción de edad."),
+        "age-restricted": N_("El video tiene restricción de edad."),
+        "HTTP Error 404": N_("El video no fue encontrado (HTTP 404)."),
+        "This live stream has ended": N_("La transmisión en vivo ha finalizado."),
     }
 
     def __init__(self, url: str):
@@ -40,13 +41,13 @@ class YTDLPDownloadWorker(QObject):
     def _parse_ytdlp_error(self, stderr: str) -> str:
         for pattern, message in self._ERROR_PATTERNS.items():
             if pattern in stderr:
-                return message
+                return tr(message)
 
         lines = stderr.strip().split('\n')
         relevant = [ln for ln in lines if 'ERROR' in ln or 'WARNING' in ln]
         if relevant:
-            return "Error al descargar:\n" + "\n".join(relevant[-3:])
-        return f"Error en yt-dlp:\n{stderr[:300]}..."
+            return tr("Error al descargar:") + "\n" + "\n".join(relevant[-3:])
+        return tr("Error en yt-dlp:") + f"\n{stderr[:300]}..."
 
     def run(self):
         try:
@@ -64,9 +65,9 @@ class YTDLPDownloadWorker(QObject):
             result = run_silent(cmd, timeout=600)
 
             if result.returncode == 0:
-                self.finished.emit("Descarga completada correctamente.")
+                self.finished.emit(tr("Descarga completada correctamente."))
             else:
                 self.error.emit(self._parse_ytdlp_error(result.stderr))
 
         except Exception as e:
-            self.error.emit(f"Excepción durante la descarga: {str(e)}")
+            self.error.emit(tr("Excepción durante la descarga: {error}").format(error=e))

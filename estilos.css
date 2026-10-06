@@ -331,22 +331,6 @@ QPushButton#cancelar_btn:hover{
 }
 
 
-QPushButton#extract_name_btn{
-    background-color: transparent;
-    border-radius:30px;
-    padding:3px;
-}
-
-QPushButton#extract_name_btn:pressed{
-    padding:7px;
-    border:5px solid transparent;
-}
-
-QPushButton#extract_name_btn:hover{
-    border-radius:20px;
-    padding:5px;
-}
-
 QLineEdit{
     color: white;
     font-weight: bold;

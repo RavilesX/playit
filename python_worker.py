@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from base_worker import BaseInstallWorker
+from i18n import tr
 from platform_utils import get_python_install_cmd, get_pip_cmd
 
 
@@ -23,12 +24,12 @@ class PythonInstallWorker(BaseInstallWorker):
         return [
             {
                 'cmd': get_python_install_cmd(),
-                'error_msg': 'Error instalando Python',
+                'error_msg': tr('Error instalando Python'),
                 'timeout': 300,
             },
             {
                 'cmd': [*get_pip_cmd(), 'install', '--upgrade', 'pip'],
-                'error_msg': 'No se pudo actualizar pip',
+                'error_msg': tr('No se pudo actualizar pip'),
                 'timeout': 120,
                 'optional': True,  # No es crítico si falla
             },

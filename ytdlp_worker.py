@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from base_worker import BaseInstallWorker
+from i18n import tr
 from platform_utils import get_ytdlp_install_cmd
 
 
@@ -24,7 +25,7 @@ class YTDLPWorker(BaseInstallWorker):
         return [
             {
                 'cmd': get_ytdlp_install_cmd(),
-                'error_msg': 'Error instalando yt-dlp',
+                'error_msg': tr('Error instalando yt-dlp'),
                 'timeout': 300,
             },
         ]

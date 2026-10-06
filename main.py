@@ -18,11 +18,13 @@ import os
 os.environ["TORCH_LOAD_WEIGHTS_ONLY"] = "0"
 import sys
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QLibraryInfo, QTimer, QTranslator, Qt
 from PyQt6.QtGui import QPixmap
 from audio_player import AudioPlayer
 from resources import load_app_fonts, resource_path
 from platform_utils import configure_logging
+from i18n import detect_system_language, load_language, tr
+from settings import load_settings
 
 configure_logging()
 
@@ -38,11 +40,19 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     # Antes de cualquier QSS: estilos.css pide "Saira Stencil One" por nombre.
     load_app_fonts()
+    # Idioma elegido, o el del sistema (inglés si no es es/pt/en). Antes de
+    # construir cualquier widget: la UI se arma una sola vez.
+    lang = load_language(load_settings().get("language") or detect_system_language())
+    # Textos propios de Qt (Yes/No/Cancel, menú contextual, diálogos de archivo).
+    qt_translator = QTranslator()
+    qt_name = "qtbase_pt_BR" if lang == "pt" else f"qtbase_{lang}"  # Qt solo trae pt_BR
+    if qt_translator.load(qt_name, QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+        app.installTranslator(qt_translator)
 
     from PyQt6.QtWidgets import QSplashScreen
     splash = QSplashScreen(QPixmap(resource_path("images/main_window/splash.png")))
     splash.showMessage(
-        "Cargando…",
+        tr("Cargando…"),
         Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter,
         Qt.GlobalColor.white,
     )

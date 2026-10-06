@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from base_worker import BaseInstallWorker
+from i18n import tr
 from platform_utils import get_cuda_pytorch_install_cmd
 
 
@@ -23,7 +24,7 @@ class CudaInstallWorker(BaseInstallWorker):
         return [
             {
                 'cmd': get_cuda_pytorch_install_cmd(),
-                'error_msg': 'Error instalando PyTorch con CUDA',
+                'error_msg': tr('Error instalando PyTorch con CUDA'),
                 'timeout': 600,
             },
         ]

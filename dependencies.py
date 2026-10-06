@@ -26,6 +26,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox
 
 from base_worker import start_worker_thread
+from i18n import N_, tr
 from cuda_worker import CudaInstallWorker
 from demucs_install_worker import DemucsInstallWorker
 from ffmpeg_worker import FFmpegWorker
@@ -92,10 +93,10 @@ class DependencyManager(QObject):
     # ── Instalación (patrón genérico) ────────────────────────────────────
     def _confirm_install(self, description: str) -> bool:
         reply = styled_message_box(
-            self.parent(), "Confirmar instalación",
-            f"Se instalará {description}.\n"
-            "Esto puede tomar varios minutos y puede requerir permisos de administrador.\n\n"
-            "¿Desea continuar?",
+            self.parent(), tr("Confirmar instalación"),
+            tr("Se instalará {description}.\n"
+               "Esto puede tomar varios minutos y puede requerir permisos de administrador.\n\n"
+               "¿Desea continuar?").format(description=description),
             QMessageBox.Icon.Question,
             buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -108,28 +109,29 @@ class DependencyManager(QObject):
         if not IS_MAC or check_command_exists('brew'):
             return None
         return (
-            "Homebrew no encontrado",
-            "Esta instalación requiere Homebrew y no está instalado.\n"
-            "Instálelo desde https://brew.sh y vuelva a intentarlo.",
+            tr("Homebrew no encontrado"),
+            tr("Esta instalación requiere Homebrew y no está instalado.\n"
+               "Instálelo desde https://brew.sh y vuelva a intentarlo."),
             QMessageBox.Icon.Warning,
         )
 
-    def _guard_python_required(self, msg: str = "Instale Python primero."):
+    def _guard_python_required(self, msg: str = ""):
         if self.python_available:
             return None
-        return ("Python requerido", msg, QMessageBox.Icon.Warning)
+        return (tr("Python requerido"), msg or tr("Instale Python primero."),
+                QMessageBox.Icon.Warning)
 
     def _guard_gpu(self):
         if self.gpu_available:
             return None
-        return ("Sin GPU NVIDIA", "No se detectó tarjeta NVIDIA compatible.",
+        return (tr("Sin GPU NVIDIA"), tr("No se detectó tarjeta NVIDIA compatible."),
                 QMessageBox.Icon.Warning)
 
     def _guard_in_progress(self, progress_attr: str, label: str):
         if not getattr(self, progress_attr):
             return None
-        return ("Instalación en curso",
-                f"Ya hay una instalación de {label} en progreso.",
+        return (tr("Instalación en curso"),
+                tr("Ya hay una instalación de {label} en progreso.").format(label=label),
                 QMessageBox.Icon.Information)
 
     def _run_install(self, *, name: str, available_attr: str, already_msg: str,
@@ -141,13 +143,13 @@ class DependencyManager(QObject):
         parent = self.parent()
         if getattr(self, available_attr):
             return styled_message_box(
-                parent, f"{name} ya instalado", already_msg, QMessageBox.Icon.Information,
+                parent, tr("{name} ya instalado").format(name=name), tr(already_msg), QMessageBox.Icon.Information,
             )
         for guard in guards:
             blocked = guard()
             if blocked:
                 return styled_message_box(parent, *blocked)
-        if not self._confirm_install(package_desc):
+        if not self._confirm_install(tr(package_desc)):
             return
         if progress_attr:
             setattr(self, progress_attr, True)
@@ -160,69 +162,69 @@ class DependencyManager(QObject):
             lambda msg: self._on_install_error(name, msg, progress_attr=progress_attr),
         )
         self._running[name] = (thread, worker)
-        self.op_started.emit(name, f"Instalando {name}...")
+        self.op_started.emit(name, tr("Instalando {name}...").format(name=name))
 
     def _on_install_success(self, name: str, available_attr: str, message: str,
                             progress_attr: str | None = None, after=None):
         setattr(self, available_attr, True)
         if progress_attr:
             setattr(self, progress_attr, False)
-        self.op_finished.emit(name, f"{name} instalado correctamente.")
+        self.op_finished.emit(name, tr("{name} instalado correctamente.").format(name=name))
         if after:
             after()
         self.changed.emit()
         styled_message_box(
-            self.parent(), "Instalación completada", message, QMessageBox.Icon.Information
+            self.parent(), tr("Instalación completada"), tr(message), QMessageBox.Icon.Information
         )
 
     def _on_install_error(self, name: str, msg: str, progress_attr: str | None = None):
         if progress_attr:
             setattr(self, progress_attr, False)
-        self.op_finished.emit(name, f"Error instalando {name}.")
-        styled_message_box(self.parent(), "Error de instalación", msg, QMessageBox.Icon.Critical)
+        self.op_finished.emit(name, tr("Error instalando {name}.").format(name=name))
+        styled_message_box(self.parent(), tr("Error de instalación"), msg, QMessageBox.Icon.Critical)
 
     def install_python(self):
-        pkg = ("Python mediante winget" if IS_WINDOWS
-               else "Python mediante Homebrew" if IS_MAC else "Python")
+        pkg = (N_("Python mediante winget") if IS_WINDOWS
+               else N_("Python mediante Homebrew") if IS_MAC else "Python")
         self._run_install(
             name="Python", available_attr='python_available',
-            already_msg="Python ya está instalado.", package_desc=pkg,
+            already_msg=N_("Python ya está instalado."), package_desc=pkg,
             guards=(self._guard_brew,), worker_factory=PythonInstallWorker,
-            success_msg="Python se instaló correctamente.\n"
-                        "Es posible que necesite reiniciar la aplicación.",
+            success_msg=N_("Python se instaló correctamente.\n"
+                           "Es posible que necesite reiniciar la aplicación."),
         )
 
     def install_vc(self):
         self._run_install(
             name="Visual C++", available_attr='vc_available',
-            already_msg="Visual C++ Redistributable ya está instalado.",
-            package_desc="Microsoft Visual C++ Redistributable (x64) mediante winget",
+            already_msg=N_("Visual C++ Redistributable ya está instalado."),
+            package_desc=N_("Microsoft Visual C++ Redistributable (x64) mediante winget"),
             guards=(), worker_factory=VisualCWorker,
-            success_msg="Visual C++ Redistributable se instaló correctamente.",
+            success_msg=N_("Visual C++ Redistributable se instaló correctamente."),
         )
 
     def install_ffmpeg(self):
-        pkg = ("FFmpeg mediante winget" if IS_WINDOWS
-               else "FFmpeg mediante Homebrew" if IS_MAC else "FFmpeg")
+        pkg = (N_("FFmpeg mediante winget") if IS_WINDOWS
+               else N_("FFmpeg mediante Homebrew") if IS_MAC else "FFmpeg")
         self._run_install(
             name="FFmpeg", available_attr='ffmpeg_available',
-            already_msg="FFmpeg ya está instalado.", package_desc=pkg,
+            already_msg=N_("FFmpeg ya está instalado."), package_desc=pkg,
             guards=(self._guard_brew,), worker_factory=FFmpegWorker,
-            success_msg="FFmpeg se instaló correctamente.",
+            success_msg=N_("FFmpeg se instaló correctamente."),
         )
 
     def install_demucs(self):
         self._run_install(
             name="Demucs", available_attr='demucs_available',
-            already_msg="Demucs ya está instalado.",
-            package_desc="Demucs y el modelo htdemucs_ft (requiere internet)",
+            already_msg=N_("Demucs ya está instalado."),
+            package_desc=N_("Demucs y el modelo htdemucs_ft (requiere internet)"),
             guards=(
                 lambda: self._guard_python_required(
-                    "Debe instalar Python antes de instalar Demucs."),
+                    tr("Debe instalar Python antes de instalar Demucs.")),
                 lambda: self._guard_in_progress('demucs_install_in_progress', "Demucs"),
             ),
             worker_factory=DemucsInstallWorker,
-            success_msg="Demucs se instaló y el modelo htdemucs_ft está listo.",
+            success_msg=N_("Demucs se instaló y el modelo htdemucs_ft está listo."),
             progress_attr='demucs_install_in_progress',
             after=self.check_demucs,
         )
@@ -230,23 +232,23 @@ class DependencyManager(QObject):
     def install_cuda(self):
         self._run_install(
             name="CUDA", available_attr='pytorch_cuda_available',
-            already_msg="PyTorch+CUDA ya está instalado.",
-            package_desc="PyTorch 2.6.0 con soporte CUDA 11.8",
+            already_msg=N_("PyTorch+CUDA ya está instalado."),
+            package_desc=N_("PyTorch 2.6.0 con soporte CUDA 11.8"),
             guards=(
                 self._guard_python_required,
                 self._guard_gpu,
                 lambda: self._guard_in_progress('cuda_install_in_progress', "CUDA"),
             ),
             worker_factory=CudaInstallWorker,
-            success_msg="PyTorch con CUDA se instaló correctamente.",
+            success_msg=N_("PyTorch con CUDA se instaló correctamente."),
             progress_attr='cuda_install_in_progress',
         )
 
     def install_ytdlp(self):
         self._run_install(
             name="yt-dlp", available_attr='ytdlp_available',
-            already_msg="yt-dlp ya está instalado.", package_desc="yt-dlp",
+            already_msg=N_("yt-dlp ya está instalado."), package_desc="yt-dlp",
             guards=(), worker_factory=YTDLPWorker,
-            success_msg="yt-dlp se instaló correctamente.\n"
-                        "Ahora puede usar 'Descargar MP3...'.",
+            success_msg=N_("yt-dlp se instaló correctamente.\n"
+                           "Ahora puede usar 'Descargar MP3...'."),
         )

@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from base_worker import BaseInstallWorker
+from i18n import tr
 from platform_utils import (
     get_pip_cmd, get_python_cmd, IS_MAC,
     get_mac_venv_dir, get_mac_venv_python, get_mac_venv_create_cmd,
@@ -33,13 +34,13 @@ class DemucsInstallWorker(BaseInstallWorker):
             if not get_mac_venv_dir().exists():
                 venv_cmd = get_mac_venv_create_cmd()
                 if not venv_cmd:
-                    raise RuntimeError(
+                    raise RuntimeError(tr(
                         "No se encontró un Python arm64 nativo de Homebrew para crear "
                         "el entorno de Demucs. Instale Python desde el menú primero."
-                    )
+                    ))
                 commands.append({
                     'cmd': venv_cmd,
-                    'error_msg': 'No se pudo crear el entorno Python nativo (arm64) para Demucs',
+                    'error_msg': tr('No se pudo crear el entorno Python nativo (arm64) para Demucs'),
                     'timeout': 120,
                 })
             pip = [python, '-m', 'pip']
@@ -52,19 +53,19 @@ class DemucsInstallWorker(BaseInstallWorker):
         commands += [
             {
                 'cmd': [*pip, 'install', *demucs_pkgs],
-                'error_msg': 'Error instalando Demucs',
+                'error_msg': tr('Error instalando Demucs'),
                 'timeout': 600,
             },
             {
                 'cmd': [python, '-m', 'demucs', '--help'],
-                'error_msg': 'No se pudo ejecutar demucs después de la instalación',
+                'error_msg': tr('No se pudo ejecutar demucs después de la instalación'),
                 'timeout': 30,
                 'optional': True,
             },
             {
                 'cmd': [python, '-c',
                         'from demucs import pretrained; pretrained.get_model("htdemucs_ft")'],
-                'error_msg': 'Error descargando el modelo htdemucs_ft',
+                'error_msg': tr('Error descargando el modelo htdemucs_ft'),
                 'timeout': 600,
             },
         ]

@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from i18n import tr
 import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -34,7 +35,7 @@ class UpdateCheckWorker(QObject):
             version = tag[1:] if tag.startswith("v") else tag
             self.finished.emit(version, data.get("html_url", ""))
         except requests.exceptions.RequestException:
-            self.error.emit("No se pudo conectar con GitHub para buscar actualizaciones.\n"
-                             "Revisa tu conexión a internet.")
+            self.error.emit(tr("No se pudo conectar con GitHub para buscar actualizaciones.\n"
+                               "Revisa tu conexión a internet."))
         except Exception as e:
-            self.error.emit(f"Error buscando actualizaciones: {e}")
+            self.error.emit(tr("Error buscando actualizaciones: {error}").format(error=e))
