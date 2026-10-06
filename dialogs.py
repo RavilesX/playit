@@ -877,10 +877,10 @@ class SplitDialog(BaseDialog):
     dialog_closed = pyqtSignal()
 
     def __init__(self, parent=None):
-        # 560 de alto: los widgets nativos de macOS son más altos y con 440
-        # el botón MP3 quedaba pegado al textbox; la nota del lote y el botón
-        # de carpeta suman otras dos filas
-        super().__init__(parent, tr("Dividir Canción"), (360, 560))
+        # 470 de alto: archivo y carpeta comparten fila; el resto es margen
+        # para macOS, cuyos widgets nativos son más altos (el sobrante cae en
+        # el stretch de arriba de OK/X, no entre las filas del formulario)
+        super().__init__(parent, tr("Dividir Canción"), (360, 470))
         self._setup_split_ui()
 
     def _setup_split_ui(self):
@@ -895,10 +895,14 @@ class SplitDialog(BaseDialog):
         btn_layout = self._create_action_buttons()
 
         # Layout
-        self.main_layout.addWidget(file_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.main_layout.addWidget(
-                            self._create_folder_button(), alignment=Qt.AlignmentFlag.AlignCenter
-                        )
+        # Archivo(s) y carpeta: las dos entradas, lado a lado
+        entry_row = QHBoxLayout()
+        entry_row.setSpacing(24)
+        entry_row.addStretch()
+        entry_row.addWidget(file_btn)
+        entry_row.addWidget(self._create_folder_button())
+        entry_row.addStretch()
+        self.main_layout.addLayout(entry_row)
         self.main_layout.addSpacing(20)
         self.main_layout.addWidget(self.file_path)
         self.main_layout.addWidget(extract_btn, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -907,6 +911,9 @@ class SplitDialog(BaseDialog):
         self.main_layout.addWidget(QLabel(tr("Canción*")))
         self.main_layout.addWidget(self.song)
         self.main_layout.addWidget(self._create_timing_checkbox())
+        # El alto es fijo: sin esto el sobrante se repartía entre las filas
+        # del formulario (Autollenado quedaba lejos de "Artista*")
+        self.main_layout.addStretch()
 
         self.main_layout.addLayout(btn_layout)
 
@@ -935,9 +942,11 @@ class SplitDialog(BaseDialog):
         return self.timing_chk
 
     def _create_folder_button(self) -> QPushButton:
-        """La otra entrada al lote es el propio botón MP3 (ver _select_file)."""
-        btn = QPushButton(tr("Carpeta…"))
-        btn.setObjectName("playlistToolBtn")
+        """La otra entrada al lote es el botón de archivo (ver _select_file)."""
+        btn = QPushButton()
+        btn.setObjectName("file_btn")
+        btn.setFixedSize(120, 80)
+        bg_image(btn, "images/split_dialog/folder.png")
         btn.setToolTip(tr("Agrega a la cola el audio de una carpeta y sus subcarpetas"))
         btn.clicked.connect(self._select_batch_folder)
         return btn
@@ -1045,9 +1054,9 @@ class SplitDialog(BaseDialog):
     def _create_file_button(self) -> QPushButton:
         btn = QPushButton()
         btn.setObjectName("file_btn")
-        btn.setFixedSize(200, 100)
+        btn.setFixedSize(80, 80)
         btn.setToolTip(tr("Un archivo llena el formulario; varios arrancan el lote"))
-        bg_image(btn, "images/split_dialog/mp3.png")
+        bg_image(btn, "images/split_dialog/file.png")
         btn.clicked.connect(self._select_file)
         return btn
 
