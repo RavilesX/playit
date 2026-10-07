@@ -12,6 +12,32 @@
 
 [Español](#español) · [English](#english)
 
+<img src="screenshots/playit-main-playing.webp" width="800" alt="PlayIt reproduciendo una canción con letras sincronizadas · PlayIt playing a song with synced lyrics">
+
+</div>
+
+---
+
+## Capturas · Screenshots
+
+<div align="center">
+
+| Ventana principal · Main window | Letras en pantalla completa · Fullscreen lyrics |
+|:---:|:---:|
+| <img src="screenshots/playit-main-stop.webp" width="400" alt="Ventana principal · Main window"> | <img src="screenshots/playit-fullscreen.webp" width="400" alt="Letras en pantalla completa · Fullscreen lyrics"> |
+
+| Separar canción · Split song | Cola de separación · Split queue | Modo remoto · Remote mode |
+|:---:|:---:|:---:|
+| <img src="screenshots/playit-split.webp" width="260" alt="Separar canción · Split song"> | <img src="screenshots/playit-split-queue.webp" width="260" alt="Cola de separación · Split queue"> | <img src="screenshots/playit-remote_mode.webp" width="260" alt="Modo remoto · Remote mode"> |
+
+| Cola de reproducción · Playback queue | Acerca de · About |
+|:---:|:---:|
+| <img src="screenshots/playit-reproduction-queue.webp" width="480" alt="Cola de reproducción · Playback queue"> | <img src="screenshots/playit-about.webp" width="300" alt="Acerca de · About"> |
+
+| Buscar canción · Song search | Descarga de YouTube · YouTube download | Buscar actualizaciones · Check for updates |
+|:---:|:---:|:---:|
+| <img src="screenshots/playit-search.webp" width="260" alt="Buscar canción · Song search"> | <img src="screenshots/playit-mp3-downloader.webp" width="260" alt="Descarga de YouTube · YouTube download"> | <img src="screenshots/playit-check-for-updates.webp" width="260" alt="Buscar actualizaciones · Check for updates"> |
+
 </div>
 
 ---
