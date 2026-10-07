@@ -398,3 +398,38 @@ class TestBatchTimingDialog:
              "device": "CPU", "failed": False},
         ])
         assert "&amp; &lt;b&gt;" in text
+
+
+class TestRemove:
+    """remove saca un trabajo pendiente sin dejar la verificación final
+    esperando la carpeta de una canción que ya no se va a separar."""
+
+    def _llenar(self, dq, monkeypatch):
+        monkeypatch.setattr(dq, "_start_job", lambda job: setattr(dq, "_current_job", job))
+        dq.add_batch([
+            {"artist": "A", "song": "Uno", "file_path": "/m/1.mp3"},
+            {"artist": "B", "song": "Dos", "file_path": "/m/2.mp3"},
+            {"artist": "C", "song": "Tres", "file_path": "/m/3.mp3"},
+        ])
+
+    def test_quita_el_del_medio(self, dq, monkeypatch):
+        self._llenar(dq, monkeypatch)
+        dq.remove(0)
+        assert [j["song"] for j in dq.queue] == ["Tres"]
+        assert dq.last_in_queue == {"artist": "C", "song": "Tres"}
+
+    def test_quitar_el_ultimo_mueve_last_in_queue(self, dq, monkeypatch):
+        self._llenar(dq, monkeypatch)
+        dq.remove(1)
+        assert dq.last_in_queue == {"artist": "B", "song": "Dos"}
+        dq.remove(0)
+        assert dq.queue == []
+        # solo queda el que corre: ese es el que hay que verificar
+        assert dq.last_in_queue == {"artist": "A", "song": "Uno"}
+
+    def test_mover_al_principio(self, dq, monkeypatch):
+        self._llenar(dq, monkeypatch)
+        dq.move_to_front(1)
+        assert [j["song"] for j in dq.queue] == ["Tres", "Dos"]
+        # el último cambió: la verificación final debe esperar a "Dos"
+        assert dq.last_in_queue == {"artist": "B", "song": "Dos"}

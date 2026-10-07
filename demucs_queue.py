@@ -115,6 +115,25 @@ class DemucsQueue(QObject):
         self.processing_multiple = len(self.queue) > 1
         self._process_next_job()
 
+    def remove(self, index: int):
+        """Saca de la cola un trabajo pendiente (el que corre no está aquí)."""
+        del self.queue[index]
+        self._sync_last_in_queue()
+
+    def move_to_front(self, index: int):
+        """Pasa un trabajo pendiente al principio: es el siguiente en separarse."""
+        self.queue.insert(0, self.queue.pop(index))
+        self._sync_last_in_queue()
+
+    def _sync_last_in_queue(self):
+        # La verificación de fin de cola espera la carpeta de last_in_queue:
+        # si apuntara a un trabajo quitado (o que ya no es el último), esperaría
+        # 30 min por nada o terminaría antes de tiempo.
+        last = self.queue[-1] if self.queue else self._current_job
+        self.last_in_queue = ({"artist": last["artist"], "song": last["song"]}
+                              if last else {"artist": "", "song": ""})
+        self.changed.emit()
+
     # ── Ciclo de un trabajo ──────────────────────────────────────────────
     def _process_next_job(self):
         if not self.queue:

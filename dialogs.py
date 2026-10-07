@@ -19,7 +19,7 @@ from PyQt6.QtGui import QDesktopServices, QImage, QPixmap, QPainter, QPen, QColo
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTextEdit, QLabel, QPushButton, QLineEdit, QHBoxLayout,
     QFileDialog, QMessageBox, QCheckBox, QTableWidget, QTableWidgetItem,
-    QAbstractItemView, QMenu, QWidget, QCompleter,
+    QAbstractItemView, QMenu, QWidget, QCompleter, QListWidget, QListWidgetItem,
 )
 from demucs_worker import AUDIO_INPUT_EXTS, AUDIO_INPUT_FILTER
 from i18n import N_, tr
@@ -244,15 +244,18 @@ class QueueDialog(BaseDialog):
         self._setup_queue_display(audio_player)
 
     def _setup_queue_display(self, audio_player):
-        queue_html = self._generate_queue_html(audio_player.demucs.queue)
+        self.demucs = audio_player.demucs
 
-        queue_edit = QTextEdit()
-        queue_edit.setReadOnly(True)
-        queue_edit.setHtml(queue_html)
-        queue_edit.setObjectName("queue_text")
-        queue_edit.setStyleSheet("""
+        header = QLabel(tr('Artista - Canción'))
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.setStyleSheet("color: #3AABEF; font-size: 24px; font-weight: bold;")
+
+        # Lista (no texto) para poder actuar sobre un trabajo con clic derecho.
+        self.queue_list = QListWidget()
+        self.queue_list.setObjectName("queue_text")
+        self.queue_list.setStyleSheet("""
             #queue_text {
-                color: #7E54AF;
+                color: #b23c56;
                 background-color: qlineargradient(
                     spread:pad, x1:0, y1:0, x2:1, y2:0,
                     stop:0 rgba(0,0,0,0.5), stop:1 rgba(0,0,0,0.1)
@@ -261,24 +264,40 @@ class QueueDialog(BaseDialog):
                 padding-top: 2px;
                 font-size: 16px;
             }
+            #queue_text::item:selected { background: rgba(126,84,175,120); color: white; }
         """)
+        self.queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.queue_list.customContextMenuRequested.connect(self._show_item_menu)
+        self._reload_items()
 
-        self.main_layout.addWidget(queue_edit)
+        self.main_layout.addWidget(header)
+        self.main_layout.addWidget(self.queue_list)
 
-    def _generate_queue_html(self, queue: list) -> str:
-        html = f"""
-        <H1 style='color: #3AABEF;'><center>{tr('Artista - Canción')}</center></H1>
-        <style>
-        li{{color:#b23c56;}}
-        sub{{color:#c5c6c8;font-family: Arial, Helvetica, sans-serif;}}
-        </style><ul>
-        """
+    def _reload_items(self):
+        self.queue_list.clear()
+        for job in self.demucs.queue:
+            item = QListWidgetItem(f"{job['artist']} - {job['song']}")
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.queue_list.addItem(item)
 
-        for item in queue:
-            html += f"<li><center>{item['artist']} - {item['song']}</center></li>\n"
-
-        html += "</ul>"
-        return html
+    def _show_item_menu(self, pos):
+        row = self.queue_list.indexAt(pos).row()
+        if row == -1:
+            return
+        menu = QMenu(self.queue_list)
+        remove_action = menu.addAction(tr("Eliminar de la cola"))
+        front_action = menu.addAction(tr("Mover al principio"))
+        front_action.setEnabled(row > 0)
+        action = menu.exec(self.queue_list.mapToGlobal(pos))
+        # El trabajo pudo empezar mientras el menú estaba abierto (sale de la
+        # cola con pop(0) y corre la fila): fuera de rango = ya no se toca.
+        if action is None or row >= len(self.demucs.queue):
+            return
+        if action == remove_action:
+            self.demucs.remove(row)
+        elif action == front_action:
+            self.demucs.move_to_front(row)
+        self._reload_items()
 
 
 # Columnas y rol de datos de la tabla de PlaybackQueueDialog, a nivel de
@@ -462,7 +481,17 @@ class _TagLineEdit(QLineEdit):
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
-        self.focus_lost.emit()
+        # El dropdown del QCompleter no cuenta como "clic afuera".
+        if event.reason() != Qt.FocusReason.PopupFocusReason:
+            self.focus_lost.emit()
+
+    def keyPressEvent(self, event):
+        super().keyPressEvent(event)
+        # QLineEdit ignora Enter tras emitir returnPressed para que lo tome el
+        # botón default del diálogo; acá Enter solo confirma la tag (si no,
+        # disparaba "⇩" y abría el diálogo de guardar playlist).
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            event.accept()
 
 
 class _TagChip(QWidget):
@@ -540,8 +569,8 @@ class _TagChip(QWidget):
 
 class _AddTagChip(QWidget):
     """Chip "+ tag" al final de la fila: doble clic abre un campo vacío
-    para agregar una tag nueva sin afectar las existentes. Enter confirma;
-    un clic afuera se arrepiente y descarta lo escrito. Al abrir, muestra un
+    para agregar una tag nueva sin afectar las existentes. Enter o un clic
+    afuera confirman lo escrito (vacío = no agrega nada). Al abrir, muestra un
     dropdown con las 4 pistas (las que reconoce _apply_tag_mutes en
     audio_player.py) para elegir con un clic; sin seleccionar nada, el
     usuario puede escribir lo que quiera, tag sugerida o no."""
@@ -585,7 +614,7 @@ class _AddTagChip(QWidget):
         self.edit.setPlaceholderText(tr("nueva tag"))
         self.edit.hide()
         self.edit.returnPressed.connect(self._commit)
-        self.edit.focus_lost.connect(self._cancel)
+        self.edit.focus_lost.connect(self._commit)
 
         completer = QCompleter([tr(t) for t in self.TRACK_SUGGESTIONS], self.edit)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -619,14 +648,6 @@ class _AddTagChip(QWidget):
         self.label.show()
         if text:
             self.added.emit(text)
-
-    def _cancel(self):
-        if not self._editing:
-            return  # _commit ya lo cerró; focus_lost es solo su eco
-        self._editing = False
-        self.edit.clear()
-        self.edit.hide()
-        self.label.show()
 
 
 class _TagsCell(QWidget):
@@ -763,6 +784,7 @@ class PlaybackQueueDialog(BaseDialog):
             }
         """)
         export_btn.clicked.connect(self.audio_player.export_queue_mlst)
+        export_btn.setAutoDefault(False)  # Enter en la tabla no debe exportar
         toolbar.addWidget(export_btn)
 
         self.table = _QueueTable(on_change=self._sync_order)
