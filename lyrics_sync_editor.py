@@ -56,6 +56,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollBar,
+    QTextEdit,
     QWidget,
 )
 
@@ -753,6 +754,45 @@ class WaveformWidget(QWidget):
 # ──────────────────────────────────────────────────────────────────────
 # Diálogo principal del editor
 # ──────────────────────────────────────────────────────────────────────
+# Contenido del modal de ayuda (botón "?"): secciones con (atajo, qué hace).
+EDITOR_HELP = (
+    (N_("Reproducción"), (
+        (N_("Espacio"), N_("Reproducir / pausar")),
+        (N_("Clic"), N_("Mover el cursor de reproducción")),
+        (N_("Rueda del ratón"), N_("Desplazar la onda")),
+    )),
+    (N_("Líneas"), (
+        ("Ctrl+N", N_("Agregar línea en blanco")),
+        ("Ctrl+Shift+N", N_("Agregar línea con texto (o mantener presionado «＋ Línea» 1 s)")),
+        (N_("Supr"), N_("Borrar las líneas seleccionadas")),
+        ("Ctrl+A", N_("Unir las líneas contiguas seleccionadas")),
+        (N_("Doble clic"), N_("Editar el texto y el color de la línea")),
+        ("Ctrl+D", N_("Separar la línea en el cursor (dentro del cuadro de edición)")),
+        (N_("Arrastrar el borde"), N_("Ajustar el inicio de la línea")),
+        (N_("Ctrl+arrastrar el borde"),
+         N_("Mover en bloque: esa línea y las siguientes, o todas si «Desde el cursor» está sin marcar")),
+        ("« »", N_("Desplazar las líneas el offset indicado")),
+    )),
+    (N_("Selección"), (
+        (N_("Ctrl+clic"), N_("Agregar o quitar la línea de la selección")),
+        (N_("Shift+clic"), N_("Seleccionar un rango de líneas")),
+        ("Ctrl+Shift+←/→", N_("Extender o reducir la selección línea a línea")),
+        (N_("Ctrl+Shift+Inicio/Fin"), N_("Extender la selección hasta la primera / última línea")),
+    )),
+    (N_("Navegación y búsqueda"), (
+        ("Ctrl+F", N_("Ir al buscador")),
+        ("Enter", N_("Resultado siguiente")),
+        ("Ctrl+←/→", N_("Resultado anterior / siguiente; con el buscador vacío, línea anterior / siguiente")),
+        (N_("Ctrl+Inicio"), N_("Ir al inicio de la pista")),
+        (N_("Ctrl+Fin"), N_("Ir a la última línea de la letra")),
+    )),
+    (N_("Historial"), (
+        ("Ctrl+Z", N_("Deshacer")),
+        ("Ctrl+Shift+Z / Ctrl+Y", N_("Rehacer")),
+    )),
+)
+
+
 class LyricsSyncDialog(BaseDialog):
     """Ventana del editor de sincronización (mismo estilo que la app)."""
 
@@ -1037,9 +1077,15 @@ class LyricsSyncDialog(BaseDialog):
         actions = QHBoxLayout()
         actions.setContentsMargins(6, 4, 6, 6)
         actions.setSpacing(6)
-        self.hint = QLabel(tr("Espacio: play/pausa · Supr: borrar · Ctrl+Z/Ctrl+Shift+Z: deshacer/rehacer · Ctrl/Shift: multi-selección · arrastra el borde (Ctrl: en bloque) · doble-click edita"))
-        self.hint.setStyleSheet("color:#9aa; background: transparent; border: none;")
-        actions.addWidget(self.hint)
+        self.help_btn = QPushButton("?")
+        self.help_btn.setToolTip(tr("Atajos y opciones del editor"))
+        self.help_btn.setFixedSize(24, 24)
+        self.help_btn.setStyleSheet(
+            "QPushButton { color: #F88FFF; font-weight: bold; padding: 0;"
+            " border: 1px solid #F88FFF; border-radius: 12px; background: transparent; }"
+            "QPushButton:hover { color: #1a1a1a; background: #F88FFF; }"
+        )
+        actions.addWidget(self.help_btn)
         actions.addStretch(1)
         self.save_btn = QPushButton(tr("Guardar"))
         self.cancel_btn = QPushButton(tr("Cancelar"))
@@ -1055,7 +1101,7 @@ class LyricsSyncDialog(BaseDialog):
                     self.back_btn, self.fwd_btn, self.from_cursor_chk,
                     self.goto_start_btn, self.search_prev_btn,
                     self.search_next_btn, self.goto_end_btn,
-                    self.save_btn, self.cancel_btn):
+                    self.help_btn, self.save_btn, self.cancel_btn):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self._refresh_scroll_range()
@@ -1070,6 +1116,7 @@ class LyricsSyncDialog(BaseDialog):
 
     def _wire(self):
         self.play_btn.clicked.connect(self._toggle_play)
+        self.help_btn.clicked.connect(self._show_help)
         # Botón "＋ Línea": clic normal agrega línea en blanco; mantenerlo
         # presionado 1 s abre el diálogo de texto. Se usa un temporizador que
         # arranca al presionar; si dispara antes de soltar, abre el diálogo y
@@ -1475,6 +1522,35 @@ class LyricsSyncDialog(BaseDialog):
             self.player.play(line.start)
         self.waveform.update()
         # Foco a la waveform: que la barra espaciadora reproduzca de inmediato.
+        self.waveform.setFocus()
+
+    # ── Ayuda ──────────────────────────────────────────────────────────
+    @staticmethod
+    def _help_html() -> str:
+        rows = []
+        for section, items in EDITOR_HELP:
+            rows.append(
+                f'<tr><td colspan="2" style="color:#F88FFF; font-weight:bold;'
+                f' padding-top:10px;">{tr(section)}</td></tr>'
+            )
+            rows += [
+                f'<tr><td style="color:#fff; padding-right:14px; white-space:nowrap;">'
+                f'{tr(keys)}</td><td style="color:#c8ccd0;">{tr(desc)}</td></tr>'
+                for keys, desc in items
+            ]
+        return f'<table cellspacing="0" cellpadding="3">{"".join(rows)}</table>'
+
+    def _show_help(self):
+        """Modal con todos los atajos y gestos del editor (botón "?")."""
+        dlg = BaseDialog(self, tr("Atajos y opciones del editor"), (560, 600))
+        view = QTextEdit()
+        view.setReadOnly(True)
+        view.setHtml(self._help_html())
+        view.setStyleSheet(
+            "QTextEdit { background: rgba(0,0,0,0.8); border: 0; font-size: 13px; }"
+        )
+        dlg.main_layout.addWidget(view)
+        dlg.exec()
         self.waveform.setFocus()
 
     # ── Teclado ────────────────────────────────────────────────────────
