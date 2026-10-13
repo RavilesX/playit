@@ -58,6 +58,9 @@ class DependencyManager(QObject):
         self.gpu_available = False
         self.pytorch_cuda_available = False
         self.demucs_available = True
+        # False hasta que termina el primer chequeo: antes los flags de arriba
+        # son valores por defecto, no lo que hay instalado
+        self.checked = False
         self.demucs_install_in_progress = False
         self.cuda_install_in_progress = False
         # nombre → (thread, worker): sin referencia Python el QThread muere corriendo
@@ -79,6 +82,7 @@ class DependencyManager(QObject):
         self.ytdlp_available = check_command_exists('yt-dlp')
         self.gpu_available = detect_nvidia_gpu()
         self.pytorch_cuda_available = check_pytorch_cuda()
+        self.checked = True
         self.changed.emit()
 
     def check_demucs(self):

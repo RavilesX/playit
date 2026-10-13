@@ -214,6 +214,9 @@ class AudioPlayer(QMainWindow):
 
     def _update_dependency_menus(self):
         d = self.deps
+        # Sin chequeo terminado no se ofrece instalar nada: los flags aún no
+        # dicen qué hay en la máquina
+        self.deps_menu.setEnabled(d.checked)
         self.install_python_action.setEnabled(not d.python_available)
         self.install_ffmpeg_action.setEnabled(not d.ffmpeg_available)
         self.install_demucs_action.setEnabled(
@@ -2896,21 +2899,21 @@ class AudioPlayer(QMainWindow):
 
         # Dependencias: Visual C++ solo en Windows; CUDA no existe en macOS
         # (Demucs usa MPS automáticamente ahí)
-        deps_menu = self._submenu(options_menu, tr("Dependencias"))
-        self.install_python_action = add(deps_menu, tr("Instalar Python"),
+        self.deps_menu = self._submenu(options_menu, tr("Dependencias"))
+        self.install_python_action = add(self.deps_menu, tr("Instalar Python"),
                                          self.deps.install_python)
         if IS_WINDOWS:
-            self.install_vc_action = add(deps_menu, tr("Instalar Visual C++"),
+            self.install_vc_action = add(self.deps_menu, tr("Instalar Visual C++"),
                                          self.deps.install_vc)
-        self.install_ffmpeg_action = add(deps_menu, tr("Instalar FFmpeg"),
+        self.install_ffmpeg_action = add(self.deps_menu, tr("Instalar FFmpeg"),
                                          self.deps.install_ffmpeg)
-        self.install_demucs_action = add(deps_menu, tr("Instalar Demucs"),
+        self.install_demucs_action = add(self.deps_menu, tr("Instalar Demucs"),
                                          self.deps.install_demucs)
         if not IS_MAC:
-            self.install_cuda_action = add(deps_menu, tr("Instalar CUDA (GPU Nvidia necesario)"),
+            self.install_cuda_action = add(self.deps_menu, tr("Instalar CUDA (GPU Nvidia necesario)"),
                                            self.deps.install_cuda)
-        deps_menu.addSeparator()
-        self.install_ytdlp_action = add(deps_menu, tr("Instalar YT-DLP (Youtube → MP3)"),
+        self.deps_menu.addSeparator()
+        self.install_ytdlp_action = add(self.deps_menu, tr("Instalar YT-DLP (Youtube → MP3)"),
                                         self.deps.install_ytdlp)
         options_menu.addSeparator()
         self.download_mp3_action = add(options_menu, tr("Descargar MP3..."), self.download_mp3)

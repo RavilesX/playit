@@ -52,7 +52,9 @@ class DemucsInstallWorker(BaseInstallWorker):
 
         commands += [
             {
-                'cmd': [*pip, 'install', *demucs_pkgs],
+                # numpy explícito: demucs 4.1.0 lo importa pero ya no lo declara
+                # (antes llegaba vía openunmix); sin él falla al cargar el modelo.
+                'cmd': [*pip, 'install', *demucs_pkgs, 'numpy'],
                 'error_msg': tr('Error instalando Demucs'),
                 'timeout': 600,
             },

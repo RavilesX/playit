@@ -28,8 +28,12 @@ def start_worker_thread(worker, on_finished, on_error) -> QThread:
     thread.started.connect(worker.run)
     worker.finished.connect(on_finished)
     worker.error.connect(on_error)
-    worker.finished.connect(thread.quit)
-    worker.finished.connect(worker.deleteLater)
+    # `error` también termina el hilo: los workers emiten error *o* finished,
+    # y un QThread que sigue corriendo aborta la app en cuanto se suelta su
+    # referencia (p. ej. al reintentar la misma instalación tras un fallo).
+    for done in (worker.finished, worker.error):
+        done.connect(thread.quit)
+        done.connect(worker.deleteLater)
     thread.finished.connect(thread.deleteLater)
     thread.start()
     return thread

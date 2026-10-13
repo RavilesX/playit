@@ -20,6 +20,14 @@ class FakeWorker(QObject):
         self.finished.emit()
 
 
+class FailingWorker(QObject):
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def run(self):
+        self.error.emit("boom")  # como BaseInstallWorker: error y nada más
+
+
 @pytest.fixture
 def boxes(monkeypatch):
     """Registra los títulos de cada diálogo y confirma siempre con Sí."""
@@ -82,3 +90,23 @@ def test_instalacion_exitosa(deps, boxes, qtbot):
     assert deps.demucs_available
     assert not deps.demucs_install_in_progress
     assert boxes == ["Confirmar instalación", "Instalación completada"]
+
+
+def test_instalacion_fallida_termina_el_hilo(deps, boxes, qtbot, monkeypatch):
+    """Un worker que falla debe soltar su QThread: si quedaba corriendo, el
+    reintento pisaba la referencia en `_running` y Qt abortaba la app."""
+    monkeypatch.setattr(dependencies, "DemucsInstallWorker", FailingWorker)
+    deps.demucs_available = False
+    deps.python_available = True
+    with qtbot.waitSignal(deps.op_finished, timeout=3000):
+        deps.install_demucs()
+    thread = deps._running["Demucs"][0]
+
+    def terminado():
+        try:
+            return thread.isFinished()
+        except RuntimeError:  # ya borrado por deleteLater
+            return True
+
+    qtbot.waitUntil(terminado, timeout=3000)
+    assert not deps.demucs_available

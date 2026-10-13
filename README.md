@@ -6,7 +6,7 @@
 
 **Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-[![Versión](https://img.shields.io/badge/versión-2.4.0-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Versión](https://img.shields.io/badge/versión-2.4.3-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
 [![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
@@ -209,6 +209,12 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 
 ## Versión actual
 
+**v2.4.3** — **instalación de Demucs más robusta**: la versión nueva de Demucs (4.1.0) ya no trae `numpy`, y la instalación terminaba en error al descargar el modelo; ahora PlayIt lo instala junto con Demucs. Reintentar una instalación (o una descarga de YouTube) que había fallado ya no cierra la aplicación de golpe, y el menú **Dependencias** espera a que termine la comprobación inicial en vez de ofrecer por unos segundos instalar lo que ya está instalado.
+
+**v2.4.2** — **instalador de Python en Windows**: en un Windows recién instalado, **"Instalar Python"** aparecía deshabilitado aunque no hubiera Python —el alias `python.exe` de la Microsoft Store que trae winget se tomaba por una instalación real— y eso impedía instalar Demucs. Ahora se comprueba que Python de verdad funcione, y lo que se instala desde **Opciones → Dependencias** queda disponible sin tener que reiniciar PlayIt.
+
+**v2.4.1** — **ayuda en el editor de letras**: un botón **"?"** abre el resumen de todos los atajos y gestos del editor (reproducción, líneas, selección, navegación y búsqueda, historial). En la cola de separación, el clic derecho sobre un trabajo pendiente permite **eliminarlo de la cola** o **moverlo al principio**. Además, en "Administrar cola" Enter ya solo confirma la tag (antes abría el diálogo de guardar playlist) y elegir una sugerencia no descarta lo escrito.
+
 **v2.4.0** — **PlayIt en tres idiomas**: la interfaz ahora está en **español, inglés y portugués (Brasil)**, y se elige desde **Opciones → Idioma** (se aplica al reiniciar). La primera vez arranca en el idioma del sistema, o en inglés si no es ninguno de los tres; también se traducen los botones propios de Qt (Sí/No/Cancelar), la fecha de la barra de estado y las tags sugeridas de la cola, que el auto-mute entiende en cualquier idioma. El diálogo de dividir se renovó: **iconos de archivo y carpeta lado a lado** y un formulario más compacto. Además, los diálogos ya se pueden **mover fuera de la ventana principal**, el selector de archivos muestra los que tienen la extensión en mayúsculas (`.MP3`, `.WAV`…), y se corrigieron un cierre inesperado en el diálogo de la cola y el desplazamiento horizontal con la rueda del mouse.
 
 **v2.3.0** — **más fluida y liviana**: la reproducción ya no carga las pistas completas en memoria, las lee del disco mientras suenan. Cambiar de canción pasa de congelar la ventana ~1 s a ser instantáneo, cada canción deja de ocupar ~270 MB de RAM y arrastrar la barra de progreso responde al momento. Al terminar cada separación se agrega solo la canción nueva, sin re-escanear toda la biblioteca (con bibliotecas grandes eso también congelaba la ventana). La barra de estado muestra las operaciones largas —instalar una dependencia, descargar, buscar letras o actualizaciones— **mientras duran**, sin tapar el resto, y la hora ahora avanza sola. En el diálogo de dividir, **un solo botón** sirve para elegir uno o varios archivos (varios arrancan el lote). Por dentro, el código principal se reorganizó en módulos más chicos.
@@ -397,6 +403,12 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 ```
 
 ## Current version
+
+**v2.4.3** — **sturdier Demucs installation**: the new Demucs release (4.1.0) no longer pulls in `numpy`, so the installation ended with an error while downloading the model; PlayIt now installs it alongside Demucs. Retrying an installation (or a YouTube download) that had failed no longer makes the app close abruptly, and the **Dependencies** menu waits for the startup check to finish instead of briefly offering to install what is already there.
+
+**v2.4.2** — **Python installer on Windows**: on a fresh Windows install, **"Install Python"** showed up disabled even with no Python present —the Microsoft Store `python.exe` alias that ships with winget was mistaken for a real installation— which blocked installing Demucs. PlayIt now checks that Python actually runs, and whatever is installed from **Options → Dependencies** is available without restarting PlayIt.
+
+**v2.4.1** — **help in the lyrics editor**: a **"?"** button opens a summary of every editor shortcut and gesture (playback, lines, selection, navigation and search, history). In the separation queue, right-clicking a pending job lets you **remove it from the queue** or **move it to the front**. Also, in "Manage queue" Enter now only confirms the tag (it used to open the save-playlist dialog) and picking a suggestion no longer discards what was typed.
 
 **v2.4.0** — **PlayIt in three languages**: the interface is now available in **Spanish, English and Portuguese (Brazil)**, selectable from **Options → Language** (applies on restart). On first launch it follows the system language, or English if it is none of the three; Qt's own buttons (Yes/No/Cancel), the status bar date and the queue's suggested tags are translated too, and auto-mute understands those tags in any language. The split dialog was redesigned: **file and folder icons side by side** and a more compact form. Dialogs can now also be **moved outside the main window**, the file picker shows files with upper-case extensions (`.MP3`, `.WAV`…), and a crash in the queue dialog and horizontal mouse-wheel scrolling were fixed.
 
