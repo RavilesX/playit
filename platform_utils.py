@@ -123,6 +123,41 @@ def run_silent(cmd, *, timeout=300, check=False, **extra_kwargs) -> subprocess.C
     return subprocess.run(cmd, check=check, **kwargs)
 
 
+def _merge_path(fresh: str, current: str) -> str:
+    """`fresh` primero (manda el orden del registro) y después lo que el
+    proceso ya tenía y el registro no trae; sin repetidos."""
+    seen, parts = set(), []
+    for p in (fresh + os.pathsep + current).split(os.pathsep):
+        key = os.path.normcase(p.rstrip('\\/'))
+        if p and key not in seen:
+            seen.add(key)
+            parts.append(p)
+    return os.pathsep.join(parts)
+
+
+def refresh_path() -> None:
+    """Relee el PATH del registro de Windows. Un instalador (winget) lo
+    modifica ahí, pero este proceso sigue con la copia que heredó al arrancar:
+    sin esto lo recién instalado no se encuentra hasta reiniciar la app — y
+    `python` seguiría resolviendo al alias de la Store (ver check_python)."""
+    if sys.platform != 'win32':
+        return
+    import winreg
+    fresh = []
+    for root, key in (
+        (winreg.HKEY_LOCAL_MACHINE,
+         r'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'),
+        (winreg.HKEY_CURRENT_USER, 'Environment'),
+    ):
+        try:
+            with winreg.OpenKey(root, key) as k:
+                fresh.append(winreg.ExpandEnvironmentStrings(
+                    winreg.QueryValueEx(k, 'Path')[0]))
+        except OSError:
+            pass  # HKCU puede no tener Path
+    os.environ['PATH'] = _merge_path(os.pathsep.join(fresh), os.environ.get('PATH', ''))
+
+
 def check_command_exists(cmd: str) -> bool:
     locator = 'where' if IS_WINDOWS else 'which'
     try:
@@ -155,6 +190,17 @@ def get_python_cmd() -> str:
 def get_pip_cmd() -> list:
     python = get_python_cmd()
     return [python, '-m', 'pip']
+
+
+def check_python() -> bool:
+    # Se ejecuta en vez de usar check_command_exists: en Windows, App Installer
+    # (winget) deja en WindowsApps un alias python.exe que solo redirige a la
+    # Microsoft Store. `where python` lo encuentra aunque no haya Python; al
+    # ejecutarlo con argumentos sale con 9009.
+    try:
+        return run_silent([get_python_cmd(), '--version'], timeout=10).returncode == 0
+    except Exception:
+        return False
 
 
 # ──────────────────────────────────────────────────────────────────────────────

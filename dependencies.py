@@ -32,7 +32,7 @@ from demucs_install_worker import DemucsInstallWorker
 from ffmpeg_worker import FFmpegWorker
 from platform_utils import (
     IS_WINDOWS, IS_MAC,
-    run_silent, check_command_exists, get_python_cmd, get_data_dir,
+    run_silent, check_command_exists, check_python, get_python_cmd, get_data_dir,
     detect_nvidia_gpu, check_visual_cpp, check_pytorch_cuda,
 )
 from python_worker import PythonInstallWorker
@@ -72,7 +72,7 @@ class DependencyManager(QObject):
 
     def _check_all(self):
         self.check_demucs()
-        self.python_available = check_command_exists(get_python_cmd())
+        self.python_available = check_python()
         self.ffmpeg_available = check_command_exists('ffmpeg')
         if IS_WINDOWS:
             self.vc_available = check_visual_cpp()

@@ -16,7 +16,7 @@
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from i18n import tr
-from platform_utils import run_silent
+from platform_utils import run_silent, refresh_path
 
 
 def start_worker_thread(worker, on_finished, on_error) -> QThread:
@@ -72,6 +72,8 @@ class BaseInstallWorker(QObject):
                     if result.returncode != 0 and not optional:
                         self.error.emit(f"{error_msg}\n{result.stderr}")
                         return
+                    # el paso siguiente y la app ya ven lo recién instalado
+                    refresh_path()
                 except Exception as e:
                     if not optional:
                         self.error.emit(f"{error_msg}\n{str(e)}")

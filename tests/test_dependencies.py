@@ -1,10 +1,14 @@
 """Flujo de instalación de DependencyManager sin AudioPlayer: ya-instalado,
 guards y arranque del worker (reemplazado por uno falso, sin subprocesos)."""
+import os
+from types import SimpleNamespace
+
 import pytest
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
 import dependencies
+import platform_utils
 from dependencies import DependencyManager
 
 
@@ -37,6 +41,21 @@ def deps(qtbot, monkeypatch):
     monkeypatch.setattr(dependencies, "DemucsInstallWorker", FakeWorker)
     monkeypatch.setattr(mgr, "check_demucs", lambda: None)  # sin subproceso
     yield mgr  # yield, no return: si `parent` sale de alcance Qt borra también a mgr
+
+
+@pytest.mark.parametrize("returncode, esperado", [(0, True), (9009, False)])
+def test_check_python_ejecuta_el_comando(monkeypatch, returncode, esperado):
+    """9009 es lo que devuelve el alias de la Microsoft Store en Windows:
+    existe en el PATH pero no es Python."""
+    monkeypatch.setattr(platform_utils, "run_silent",
+                        lambda *a, **k: SimpleNamespace(returncode=returncode))
+    assert platform_utils.check_python() is esperado
+
+
+def test_merge_path_registro_primero_sin_repetidos():
+    sep = os.pathsep
+    merged = platform_utils._merge_path(f"py{sep}apps", f"apps{sep}extra")
+    assert merged == sep.join(["py", "apps", "extra"])
 
 
 def test_ya_instalado_no_arranca_worker(deps, boxes):
