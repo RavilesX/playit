@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 from demucs_worker import AUDIO_INPUT_EXTS, AUDIO_INPUT_FILTER
 from i18n import N_, tr
 from resources import resource_path, bg_image, styled_message_box, style_url
-from ui_components import DialogTitleBar, StyledButtons
+from ui_components import DialogTitleBar  # StyledButtons: solo lo usaba DownloadDialog (yt-dlp deshabilitado)
 from version import __version__
 import html
 import logging
@@ -1530,56 +1530,57 @@ class SongInfoDialog(BaseDialog):
         return html.escape(text) if text else tr(self.UNKNOWN)
 
 
-class DownloadDialog(BaseDialog):
-    download_requested = pyqtSignal(str)
+# yt-dlp deshabilitado: descargas inconsistentes
+# class DownloadDialog(BaseDialog):
+#     download_requested = pyqtSignal(str)
 
-    def __init__(self, parent=None):
-        super().__init__(parent, tr("Descargar MP3 de YouTube"), (400, 200))
-        self._setup_validation()
+#     def __init__(self, parent=None):
+#         super().__init__(parent, tr("Descargar MP3 de YouTube"), (400, 200))
+#         self._setup_validation()
 
-    def _setup_ui(self):
-        super()._setup_ui()
+#     def _setup_ui(self):
+#         super()._setup_ui()
 
-        # Ahora agregar nuestros widgets
-        label = QLabel(tr("Youtube URL:"))
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("color: #3AABEF; font-size: 14px; font-weight: bold;")
+#         # Ahora agregar nuestros widgets
+#         label = QLabel(tr("Youtube URL:"))
+#         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+#         label.setStyleSheet("color: #3AABEF; font-size: 14px; font-weight: bold;")
 
-        self.url_edit = QLineEdit()
-        self.url_edit.setPlaceholderText("https://www.youtube.com/watch?v=...")
-        self.url_edit.setStyleSheet("""
-            QLineEdit {
-                background: rgba(0,0,0,0.5);
-                color: white;
-                border: 1px solid #404040;
-                border-radius: 5px;
-                padding: 5px;
-                font-size: 12px;
-            }
-        """)
+#         self.url_edit = QLineEdit()
+#         self.url_edit.setPlaceholderText("https://www.youtube.com/watch?v=...")
+#         self.url_edit.setStyleSheet("""
+#             QLineEdit {
+#                 background: rgba(0,0,0,0.5);
+#                 color: white;
+#                 border: 1px solid #404040;
+#                 border-radius: 5px;
+#                 padding: 5px;
+#                 font-size: 12px;
+#             }
+#         """)
 
-        self.buttons = StyledButtons(self)
-        self.buttons.yes_btn.clicked.connect(self._accept)
-        self.buttons.no_btn.clicked.connect(self.reject)
+#         self.buttons = StyledButtons(self)
+#         self.buttons.yes_btn.clicked.connect(self._accept)
+#         self.buttons.no_btn.clicked.connect(self.reject)
 
-        self.main_layout.addWidget(label)
-        self.main_layout.addWidget(self.url_edit)
-        self.main_layout.addWidget(self.buttons, alignment=Qt.AlignmentFlag.AlignCenter)
+#         self.main_layout.addWidget(label)
+#         self.main_layout.addWidget(self.url_edit)
+#         self.main_layout.addWidget(self.buttons, alignment=Qt.AlignmentFlag.AlignCenter)
 
-    def _setup_validation(self):
-        self.url_edit.textChanged.connect(self._validate_url)
-        self._validate_url()  # estado inicial
+#     def _setup_validation(self):
+#         self.url_edit.textChanged.connect(self._validate_url)
+#         self._validate_url()  # estado inicial
 
-    def _validate_url(self):
-        url = self.url_edit.text().strip()
-        valid = (url.startswith('https://www.youtube.com') or
-                 url.startswith('https://youtu.be'))
-        self.buttons.setEnabled(valid)
+#     def _validate_url(self):
+#         url = self.url_edit.text().strip()
+#         valid = (url.startswith('https://www.youtube.com') or
+#                  url.startswith('https://youtu.be'))
+#         self.buttons.setEnabled(valid)
 
-    def _accept(self):
-        url = self.url_edit.text().strip()
-        self.download_requested.emit(url)
-        self.accept()
+#     def _accept(self):
+#         url = self.url_edit.text().strip()
+#         self.download_requested.emit(url)
+#         self.accept()
 
 
 def qr_pixmap(payload: str, size: int = 220) -> QPixmap | None:

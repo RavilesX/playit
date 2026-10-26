@@ -14,60 +14,61 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from PyQt6.QtCore import QObject, pyqtSignal
-from i18n import N_, tr
-from platform_utils import run_silent, get_data_dir
+# yt-dlp deshabilitado: descargas inconsistentes. Módulo completo comentado.
+# from PyQt6.QtCore import QObject, pyqtSignal
+# from i18n import N_, tr
+# from platform_utils import run_silent, get_data_dir
 
 
-class YTDLPDownloadWorker(QObject):
-    finished = pyqtSignal(str)
-    error = pyqtSignal(str)
+# class YTDLPDownloadWorker(QObject):
+#     finished = pyqtSignal(str)
+#     error = pyqtSignal(str)
 
-    _ERROR_PATTERNS = {
-        "Video unavailable": N_("El video no existe o no está disponible. Revisa la URL."),
-        "Unsupported URL": N_("La URL no es válida o no es compatible con YouTube."),
-        "not a valid URL": N_("La URL no es válida o no es compatible con YouTube."),
-        "This video is private": N_("El video es privado y no se puede acceder."),
-        "Sign in to confirm your age": N_("El video tiene restricción de edad."),
-        "age-restricted": N_("El video tiene restricción de edad."),
-        "HTTP Error 404": N_("El video no fue encontrado (HTTP 404)."),
-        "This live stream has ended": N_("La transmisión en vivo ha finalizado."),
-    }
+#     _ERROR_PATTERNS = {
+#         "Video unavailable": N_("El video no existe o no está disponible. Revisa la URL."),
+#         "Unsupported URL": N_("La URL no es válida o no es compatible con YouTube."),
+#         "not a valid URL": N_("La URL no es válida o no es compatible con YouTube."),
+#         "This video is private": N_("El video es privado y no se puede acceder."),
+#         "Sign in to confirm your age": N_("El video tiene restricción de edad."),
+#         "age-restricted": N_("El video tiene restricción de edad."),
+#         "HTTP Error 404": N_("El video no fue encontrado (HTTP 404)."),
+#         "This live stream has ended": N_("La transmisión en vivo ha finalizado."),
+#     }
 
-    def __init__(self, url: str):
-        super().__init__()
-        self.url = url
+#     def __init__(self, url: str):
+#         super().__init__()
+#         self.url = url
 
-    def _parse_ytdlp_error(self, stderr: str) -> str:
-        for pattern, message in self._ERROR_PATTERNS.items():
-            if pattern in stderr:
-                return tr(message)
+#     def _parse_ytdlp_error(self, stderr: str) -> str:
+#         for pattern, message in self._ERROR_PATTERNS.items():
+#             if pattern in stderr:
+#                 return tr(message)
 
-        lines = stderr.strip().split('\n')
-        relevant = [ln for ln in lines if 'ERROR' in ln or 'WARNING' in ln]
-        if relevant:
-            return tr("Error al descargar:") + "\n" + "\n".join(relevant[-3:])
-        return tr("Error en yt-dlp:") + f"\n{stderr[:300]}..."
+#         lines = stderr.strip().split('\n')
+#         relevant = [ln for ln in lines if 'ERROR' in ln or 'WARNING' in ln]
+#         if relevant:
+#             return tr("Error al descargar:") + "\n" + "\n".join(relevant[-3:])
+#         return tr("Error en yt-dlp:") + f"\n{stderr[:300]}..."
 
-    def run(self):
-        try:
-            download_dir = get_data_dir() / "mp3Downloads"
-            download_dir.mkdir(exist_ok=True)
+#     def run(self):
+#         try:
+#             download_dir = get_data_dir() / "mp3Downloads"
+#             download_dir.mkdir(exist_ok=True)
 
-            cmd = [
-                "yt-dlp", "-x", "--no-playlist",
-                "--audio-format", "mp3",
-                "--audio-quality", "0",
-                "-o", str(download_dir / "%(title)s.%(ext)s"),
-                self.url,
-            ]
+#             cmd = [
+#                 "yt-dlp", "-x", "--no-playlist",
+#                 "--audio-format", "mp3",
+#                 "--audio-quality", "0",
+#                 "-o", str(download_dir / "%(title)s.%(ext)s"),
+#                 self.url,
+#             ]
 
-            result = run_silent(cmd, timeout=600)
+#             result = run_silent(cmd, timeout=600)
 
-            if result.returncode == 0:
-                self.finished.emit(tr("Descarga completada correctamente."))
-            else:
-                self.error.emit(self._parse_ytdlp_error(result.stderr))
+#             if result.returncode == 0:
+#                 self.finished.emit(tr("Descarga completada correctamente."))
+#             else:
+#                 self.error.emit(self._parse_ytdlp_error(result.stderr))
 
-        except Exception as e:
-            self.error.emit(tr("Excepción durante la descarga: {error}").format(error=e))
+#         except Exception as e:
+#             self.error.emit(tr("Excepción durante la descarga: {error}").format(error=e))

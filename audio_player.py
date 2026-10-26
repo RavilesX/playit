@@ -42,7 +42,7 @@ from lyrics_api import LYRICS_NOT_FOUND_TEXT, LyricsFetchQueue, fetch_lyrics, no
 import shutil
 from base_worker import start_worker_thread
 from dependencies import DependencyManager
-from ytdlp_download_worker import YTDLPDownloadWorker
+# from ytdlp_download_worker import YTDLPDownloadWorker  # yt-dlp deshabilitado: descargas inconsistentes
 from update_check_worker import UpdateCheckWorker
 from version import __version__
 from i18n import N_, SUPPORTED, current_language, qlocale, tr
@@ -50,7 +50,7 @@ from settings import save_setting
 from resources import styled_message_box, bg_image, resource_path, style_url
 from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
 from dialogs import (
-    AboutDialog, QueueDialog, SplitDialog, DownloadDialog, SearchDialog,
+    AboutDialog, QueueDialog, SplitDialog, SearchDialog,  # DownloadDialog: yt-dlp deshabilitado: descargas inconsistentes
     UpdateDialog, CorrectSongDialog, SongInfoDialog, RemotePairDialog,
     PlaybackQueueDialog,
 )
@@ -222,8 +222,9 @@ class AudioPlayer(QMainWindow):
         self.install_demucs_action.setEnabled(
             d.python_available and d.ffmpeg_available and not d.demucs_available)
         self.split_action.setEnabled(d.demucs_available)
-        self.install_ytdlp_action.setEnabled(not d.ytdlp_available)
-        self.download_mp3_action.setEnabled(d.ytdlp_available)
+        # yt-dlp deshabilitado: descargas inconsistentes
+        # self.install_ytdlp_action.setEnabled(not d.ytdlp_available)
+        # self.download_mp3_action.setEnabled(d.ytdlp_available)
         # Visual C++ solo existe en Windows; CUDA no existe en macOS
         if IS_WINDOWS:
             self.install_vc_action.setEnabled(not d.vc_available)
@@ -2741,33 +2742,34 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     # ── Descarga MP3 ─────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
-    def download_mp3(self):
-        if not self.deps.ytdlp_available:
-            styled_message_box(
-                self, tr("yt-dlp no instalado"),
-                tr("Debe instalar yt-dlp primero desde Opciones > Dependencias."),
-                QMessageBox.Icon.Warning,
-            )
-            return
-        dialog = DownloadDialog(self)
-        bg_image(dialog, 'images/split_dialog/split.png')
-        dialog.download_requested.connect(self._start_ytdlp_download)
-        dialog.exec()
+    # yt-dlp deshabilitado: descargas inconsistentes
+    # def download_mp3(self):
+    #     if not self.deps.ytdlp_available:
+    #         styled_message_box(
+    #             self, tr("yt-dlp no instalado"),
+    #             tr("Debe instalar yt-dlp primero desde Opciones > Dependencias."),
+    #             QMessageBox.Icon.Warning,
+    #         )
+    #         return
+    #     dialog = DownloadDialog(self)
+    #     bg_image(dialog, 'images/split_dialog/split.png')
+    #     dialog.download_requested.connect(self._start_ytdlp_download)
+    #     dialog.exec()
 
-    def _start_ytdlp_download(self, url: str):
-        self._start_worker_thread(
-            YTDLPDownloadWorker(url), 'download_thread', 'download_worker',
-            self._on_download_finished, self._on_download_error,
-            tr("Descargando MP3..."),
-        )
+    # def _start_ytdlp_download(self, url: str):
+    #     self._start_worker_thread(
+    #         YTDLPDownloadWorker(url), 'download_thread', 'download_worker',
+    #         self._on_download_finished, self._on_download_error,
+    #         tr("Descargando MP3..."),
+    #     )
 
-    def _on_download_finished(self, message: str):
-        self.end_status('download_thread', tr("Descarga completada."))
-        styled_message_box(self, tr("Descarga finalizada"), message, QMessageBox.Icon.Information)
+    # def _on_download_finished(self, message: str):
+    #     self.end_status('download_thread', tr("Descarga completada."))
+    #     styled_message_box(self, tr("Descarga finalizada"), message, QMessageBox.Icon.Information)
 
-    def _on_download_error(self, msg: str):
-        self.end_status('download_thread', tr("Error en descarga."))
-        styled_message_box(self, tr("Error de descarga"), msg, QMessageBox.Icon.Critical)
+    # def _on_download_error(self, msg: str):
+    #     self.end_status('download_thread', tr("Error en descarga."))
+    #     styled_message_box(self, tr("Error de descarga"), msg, QMessageBox.Icon.Critical)
 
     # ──────────────────────────────────────────────────────────────────────
     # ── Menú ─────────────────────────────────────────────────────────────
@@ -2912,11 +2914,12 @@ class AudioPlayer(QMainWindow):
         if not IS_MAC:
             self.install_cuda_action = add(self.deps_menu, tr("Instalar CUDA (GPU Nvidia necesario)"),
                                            self.deps.install_cuda)
-        self.deps_menu.addSeparator()
-        self.install_ytdlp_action = add(self.deps_menu, tr("Instalar YT-DLP (Youtube → MP3)"),
-                                        self.deps.install_ytdlp)
-        options_menu.addSeparator()
-        self.download_mp3_action = add(options_menu, tr("Descargar MP3..."), self.download_mp3)
+        # yt-dlp deshabilitado: descargas inconsistentes
+        # self.deps_menu.addSeparator()
+        # self.install_ytdlp_action = add(self.deps_menu, tr("Instalar YT-DLP (Youtube → MP3)"),
+        #                                 self.deps.install_ytdlp)
+        # options_menu.addSeparator()
+        # self.download_mp3_action = add(options_menu, tr("Descargar MP3..."), self.download_mp3)
         # Estado inicial (flags por defecto); `deps.changed` lo refresca
         # cuando termina el chequeo en segundo plano
         self._update_dependency_menus()

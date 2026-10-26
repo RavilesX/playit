@@ -14,18 +14,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from base_worker import BaseInstallWorker
-from i18n import tr
-from platform_utils import get_ytdlp_install_cmd
+# yt-dlp deshabilitado: descargas inconsistentes. Módulo completo comentado.
+# from base_worker import BaseInstallWorker
+# from i18n import tr
+# from platform_utils import get_ytdlp_install_cmd
 
 
-class YTDLPWorker(BaseInstallWorker):
+# class YTDLPWorker(BaseInstallWorker):
 
-    def get_commands(self):
-        return [
-            {
-                'cmd': get_ytdlp_install_cmd(),
-                'error_msg': tr('Error instalando yt-dlp'),
-                'timeout': 300,
-            },
-        ]
+#     def get_commands(self):
+#         return [
+#             {
+#                 'cmd': get_ytdlp_install_cmd(),
+#                 'error_msg': tr('Error instalando yt-dlp'),
+#                 'timeout': 300,
+#             },
+#         ]

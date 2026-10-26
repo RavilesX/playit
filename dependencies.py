@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Dependencias externas (Python, FFmpeg, Demucs, CUDA, yt-dlp, Visual C++):
+"""Dependencias externas (Python, FFmpeg, Demucs, CUDA, Visual C++):
 chequeo en segundo plano e instalación con los workers de `base_worker`.
 
 AudioPlayer solo lee los flags `*_available` y refresca sus menús cuando
@@ -38,7 +38,7 @@ from platform_utils import (
 from python_worker import PythonInstallWorker
 from resources import styled_message_box
 from visualc_worker import VisualCWorker
-from ytdlp_worker import YTDLPWorker
+# from ytdlp_worker import YTDLPWorker  # yt-dlp deshabilitado: descargas inconsistentes
 
 
 class DependencyManager(QObject):
@@ -53,7 +53,7 @@ class DependencyManager(QObject):
         # vc_available=True fuera de Windows: Linux/macOS no necesitan Visual C++
         self.python_available = False
         self.vc_available = not IS_WINDOWS
-        self.ytdlp_available = False
+        # self.ytdlp_available = False  # yt-dlp deshabilitado: descargas inconsistentes
         self.ffmpeg_available = False
         self.gpu_available = False
         self.pytorch_cuda_available = False
@@ -79,7 +79,7 @@ class DependencyManager(QObject):
         self.ffmpeg_available = check_command_exists('ffmpeg')
         if IS_WINDOWS:
             self.vc_available = check_visual_cpp()
-        self.ytdlp_available = check_command_exists('yt-dlp')
+        # self.ytdlp_available = check_command_exists('yt-dlp')  # yt-dlp deshabilitado: descargas inconsistentes
         self.gpu_available = detect_nvidia_gpu()
         self.pytorch_cuda_available = check_pytorch_cuda()
         self.checked = True
@@ -248,11 +248,12 @@ class DependencyManager(QObject):
             progress_attr='cuda_install_in_progress',
         )
 
-    def install_ytdlp(self):
-        self._run_install(
-            name="yt-dlp", available_attr='ytdlp_available',
-            already_msg=N_("yt-dlp ya está instalado."), package_desc="yt-dlp",
-            guards=(), worker_factory=YTDLPWorker,
-            success_msg=N_("yt-dlp se instaló correctamente.\n"
-                           "Ahora puede usar 'Descargar MP3...'."),
-        )
+    # yt-dlp deshabilitado: descargas inconsistentes
+    # def install_ytdlp(self):
+    #     self._run_install(
+    #         name="yt-dlp", available_attr='ytdlp_available',
+    #         already_msg=N_("yt-dlp ya está instalado."), package_desc="yt-dlp",
+    #         guards=(), worker_factory=YTDLPWorker,
+    #         success_msg=N_("yt-dlp se instaló correctamente.\n"
+    #                        "Ahora puede usar 'Descargar MP3...'."),
+    #     )

@@ -352,11 +352,12 @@ def get_mac_venv_create_cmd() -> list:
     return [bootstrap, '-m', 'venv', str(get_mac_venv_dir())]
 
 
-def get_ytdlp_install_cmd() -> list:
-    if IS_WINDOWS:
-        return ['winget', 'install', 'yt-dlp', '--accept-source-agreements', '--accept-package-agreements']
-    else:
-        return [*get_pip_cmd(), 'install', 'yt-dlp']
+# yt-dlp deshabilitado: descargas inconsistentes
+# def get_ytdlp_install_cmd() -> list:
+#     if IS_WINDOWS:
+#         return ['winget', 'install', 'yt-dlp', '--accept-source-agreements', '--accept-package-agreements']
+#     else:
+#         return [*get_pip_cmd(), 'install', 'yt-dlp']
 
 
 def get_visualcpp_install_cmd() -> list:
