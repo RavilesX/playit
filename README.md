@@ -6,7 +6,7 @@
 
 **Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-[![Versión](https://img.shields.io/badge/versión-2.4.3-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Versión](https://img.shields.io/badge/versión-2.4.4-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
 [![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
@@ -34,9 +34,9 @@
 |:---:|:---:|
 | <img src="screenshots/playit-reproduction-queue.webp" width="480" alt="Cola de reproducción · Playback queue"> | <img src="screenshots/playit-about.webp" width="300" alt="Acerca de · About"> |
 
-| Buscar canción · Song search | Descarga de YouTube · YouTube download | Buscar actualizaciones · Check for updates |
-|:---:|:---:|:---:|
-| <img src="screenshots/playit-search.webp" width="260" alt="Buscar canción · Song search"> | <img src="screenshots/playit-mp3-downloader.webp" width="260" alt="Descarga de YouTube · YouTube download"> | <img src="screenshots/playit-check-for-updates.webp" width="260" alt="Buscar actualizaciones · Check for updates"> |
+| Buscar canción · Song search | Buscar actualizaciones · Check for updates |
+|:---:|:---:|
+| <img src="screenshots/playit-search.webp" width="260" alt="Buscar canción · Song search"> | <img src="screenshots/playit-check-for-updates.webp" width="260" alt="Buscar actualizaciones · Check for updates"> |
 
 </div>
 
@@ -54,7 +54,6 @@ PlayIt es un reproductor de audio de escritorio que separa canciones en cuatro p
 - **Reproducción multi-pista**: 4 stems sincronizados con control de volumen/mute individual.
 - **Letras sincronizadas (LRC)**: descarga automática, offset ajustable, colores por intérprete y editor visual de sincronización sobre la forma de onda de la voz.
 - **Auto-unmute**: reactiva la voz con fundido en las secciones sin letra (modo karaoke inteligente).
-- **Descarga desde YouTube** (yt-dlp) directa a MP3.
 - **Visualizador de audio** tipo CAVA renderizado en NumPy.
 - **Modo remoto**: controlá la reproducción y el mezclador de pistas desde el teléfono con [PlayIt Mobile](https://github.com/RavilesX/playit_mobile) por Wi-Fi (emparejamiento por QR, sin salir de la red local).
 - **Playlists** `.mlst` con ordenamiento por artista/título y modo aleatorio.
@@ -156,10 +155,9 @@ La app las detecta y ofrece instalarlas desde **Opciones → Dependencias**:
 
 | Dependencia | Para qué | Notas |
 |---|---|---|
-| Python 3.10+ | Demucs y yt-dlp | |
+| Python 3.10+ | Demucs | |
 | FFmpeg | Decodificar/convertir audio | |
 | Demucs (+ PyTorch) | Separación de pistas | En Apple Silicon se instala en un entorno nativo con MPS automáticamente |
-| yt-dlp | Descarga desde YouTube | Opcional |
 | CUDA (PyTorch) | Aceleración NVIDIA | Opcional; requiere GPU NVIDIA |
 | Visual C++ Redistributable | Solo Windows | |
 
@@ -209,6 +207,8 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 
 ## Versión actual
 
+**v2.4.4** — **el editor de letras abre donde ibas**: al abrir el editor de sincronización, el cursor y la vista quedan en la posición exacta de la reproducción, listos para continuar con la barra espaciadora. Además se **retira la descarga desde YouTube (yt-dlp)** por su inconsistencia (depende de un tercero que cambia seguido); los demás flujos no cambian.
+
 **v2.4.3** — **instalación de Demucs más robusta**: la versión nueva de Demucs (4.1.0) ya no trae `numpy`, y la instalación terminaba en error al descargar el modelo; ahora PlayIt lo instala junto con Demucs. Reintentar una instalación (o una descarga de YouTube) que había fallado ya no cierra la aplicación de golpe, y el menú **Dependencias** espera a que termine la comprobación inicial en vez de ofrecer por unos segundos instalar lo que ya está instalado.
 
 **v2.4.2** — **instalador de Python en Windows**: en un Windows recién instalado, **"Instalar Python"** aparecía deshabilitado aunque no hubiera Python —el alias `python.exe` de la Microsoft Store que trae winget se tomaba por una instalación real— y eso impedía instalar Demucs. Ahora se comprueba que Python de verdad funcione, y lo que se instala desde **Opciones → Dependencias** queda disponible sin tener que reiniciar PlayIt.
@@ -249,7 +249,6 @@ PlayIt is a desktop audio player that splits songs into four independent stems (
 - **Multi-stem playback**: 4 synchronized stems with individual volume/mute.
 - **Synced lyrics (LRC)**: automatic fetching, adjustable offset, per-singer colors, and a visual sync editor over the vocals waveform.
 - **Auto-unmute**: fades vocals back in during sections without lyrics (smart karaoke mode).
-- **YouTube download** (yt-dlp) straight to MP3.
 - **CAVA-style audio visualizer** rendered in NumPy.
 - **Remote mode**: control playback and the stem mixer from your phone with [PlayIt Mobile](https://github.com/RavilesX/playit_mobile) over Wi-Fi (QR pairing, never leaves the local network).
 - **`.mlst` playlists** with artist/title sorting and a random mode.
@@ -351,10 +350,9 @@ The app detects them and offers to install them from **Opciones → Dependencias
 
 | Dependency | Purpose | Notes |
 |---|---|---|
-| Python 3.10+ | Demucs and yt-dlp | |
+| Python 3.10+ | Demucs | |
 | FFmpeg | Audio decoding/conversion | |
 | Demucs (+ PyTorch) | Stem separation | On Apple Silicon it installs into a native venv with MPS automatically |
-| yt-dlp | YouTube download | Optional |
 | CUDA (PyTorch) | NVIDIA acceleration | Optional; requires an NVIDIA GPU |
 | Visual C++ Redistributable | Windows only | |
 
@@ -403,6 +401,8 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 ```
 
 ## Current version
+
+**v2.4.4** — **the lyrics editor opens where you were**: opening the sync editor now puts the cursor and the view at the exact playback position, ready to continue with the space bar. Also, **YouTube download (yt-dlp) was removed** because it was unreliable (it depends on a third party that changes often); everything else is unchanged.
 
 **v2.4.3** — **sturdier Demucs installation**: the new Demucs release (4.1.0) no longer pulls in `numpy`, so the installation ended with an error while downloading the model; PlayIt now installs it alongside Demucs. Retrying an installation (or a YouTube download) that had failed no longer makes the app close abruptly, and the **Dependencies** menu waits for the startup check to finish instead of briefly offering to install what is already there.
 

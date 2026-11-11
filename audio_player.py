@@ -2563,6 +2563,9 @@ class AudioPlayer(QMainWindow):
         dialog = LyricsSyncDialog(
             self, path / "separated" / "vocals.mp3", path / "lyrics.lrc",
         )
+        # Abrir con el cursor y la vista en el punto donde iba la reproducción.
+        if self._sr:
+            dialog._move_cursor_to(self._seek_position / self._sr)
         # El editor usa Ctrl+F (enfocar su buscador), Ctrl+D (separar línea) y
         # Ctrl+Shift+←/→ (extender selección de registros): deshabilitar las
         # acciones globales con esos atajos (pantalla completa de letras,
