@@ -6,7 +6,7 @@
 
 **Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-[![Versión](https://img.shields.io/badge/versión-2.4.4-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Versión](https://img.shields.io/badge/versión-2.5.0-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
 [![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
@@ -53,6 +53,7 @@ PlayIt es un reproductor de audio de escritorio que separa canciones en cuatro p
 - **Separación de pistas** con Demucs (modelo `htdemucs_ft`), con aceleración GPU (CUDA en NVIDIA, MPS en Apple Silicon) y cola de procesamiento, **de a una canción o por lote** (varios archivos sueltos o una carpeta entera). Acepta entrada en mp3, wav, flac, ogg, opus, m4a, aac, aiff, wma y wv; la salida siempre es mp3.
 - **Reproducción multi-pista**: 4 stems sincronizados con control de volumen/mute individual.
 - **Letras sincronizadas (LRC)**: descarga automática, offset ajustable, colores por intérprete y editor visual de sincronización sobre la forma de onda de la voz.
+- **Acordes**: detecta los acordes básicos y la tonalidad de cada canción a partir de las pistas separadas (bajo + otros) y los muestra en un carrusel en la esquina de las letras —anterior, actual y siguiente—, sincronizado con el audio. Notación americana (C, Am) o latina (Do, Lam).
 - **Auto-unmute**: reactiva la voz con fundido en las secciones sin letra (modo karaoke inteligente).
 - **Visualizador de audio** tipo CAVA renderizado en NumPy.
 - **Modo remoto**: controlá la reproducción y el mezclador de pistas desde el teléfono con [PlayIt Mobile](https://github.com/RavilesX/playit_mobile) por Wi-Fi (emparejamiento por QR, sin salir de la red local).
@@ -172,11 +173,11 @@ sudo apt update
 sudo apt install python3 python3-pip python3-venv ffmpeg portaudio19-dev libsndfile1 libxcb-cursor0
 git clone https://github.com/RavilesX/playit.git && cd playit
 python3 -m venv venv && source venv/bin/activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode onnxruntime
 python3 main.py
 ```
 
-`portaudio19-dev` y `libsndfile1` son el backend de audio de `sounddevice`/`soundfile`; en Windows y macOS los wheels de pip ya los incluyen. `qrcode` es opcional: sin él, el modo remoto se empareja escribiendo la dirección y el código a mano.
+`portaudio19-dev` y `libsndfile1` son el backend de audio de `sounddevice`/`soundfile`; en Windows y macOS los wheels de pip ya los incluyen. `qrcode` es opcional: sin él, el modo remoto se empareja escribiendo la dirección y el código a mano. `onnxruntime` también: sin él no se detectan acordes (un `chords.json` existente se sigue mostrando).
 
 **macOS**
 
@@ -184,7 +185,7 @@ python3 main.py
 brew install ffmpeg
 git clone https://github.com/RavilesX/playit.git && cd playit
 python3 -m venv venv && source venv/bin/activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode onnxruntime
 python3 main.py
 ```
 
@@ -193,7 +194,7 @@ python3 main.py
 ```powershell
 git clone https://github.com/RavilesX/playit.git; cd playit
 python -m venv venv; .\venv\Scripts\activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode onnxruntime
 python main.py
 ```
 
@@ -206,6 +207,8 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 ```
 
 ## Versión actual
+
+**v2.5.0** — **acordes junto a las letras**: al separar una canción, PlayIt detecta sus acordes básicos y su tonalidad a partir del bajo y los demás instrumentos (sin la batería ni la voz), y los muestra en un **carrusel en la esquina de la pantalla de letras** con el acorde anterior, el actual y el siguiente, sincronizado con el audio (también en pantalla completa). Las reglas de teoría musical simplifican el resultado: tríadas, nombres según la tonalidad (Sib en Fa mayor, no La#) y sin cambios fugaces. Se activa o desactiva desde **Opciones → Acordes**, donde también se elige la notación **americana (C, Am) o latina (Do, Lam)**. Las canciones separadas antes se analizan solas la primera vez que suenan (~2 s), y el clic derecho en la playlist ofrece **"Detectar acordes de nuevo"**. Usa el modelo ChordNet de [ChordMini](https://github.com/ptnghia-j/ChordMini) (MIT) con `onnxruntime`, incluido en los ejecutables; el resultado se guarda en `chords.json` junto a la letra.
 
 **v2.4.4** — **el editor de letras abre donde ibas**: al abrir el editor de sincronización, el cursor y la vista quedan en la posición exacta de la reproducción, listos para continuar con la barra espaciadora. Además se **retira la descarga desde YouTube (yt-dlp)** por su inconsistencia (depende de un tercero que cambia seguido); los demás flujos no cambian.
 
@@ -248,6 +251,7 @@ PlayIt is a desktop audio player that splits songs into four independent stems (
 - **Stem separation** with Demucs (`htdemucs_ft` model), GPU-accelerated (CUDA on NVIDIA, MPS on Apple Silicon), with a processing queue, **one song at a time or in batches** (many files or a whole folder). Input can be mp3, wav, flac, ogg, opus, m4a, aac, aiff, wma or wv; output is always mp3.
 - **Multi-stem playback**: 4 synchronized stems with individual volume/mute.
 - **Synced lyrics (LRC)**: automatic fetching, adjustable offset, per-singer colors, and a visual sync editor over the vocals waveform.
+- **Chords**: detects each song's basic chords and key from the separated stems (bass + other) and shows them in a carousel in the corner of the lyrics view —previous, current and next—, synced to the audio. American (C, Am) or Latin (Do, Lam) notation.
 - **Auto-unmute**: fades vocals back in during sections without lyrics (smart karaoke mode).
 - **CAVA-style audio visualizer** rendered in NumPy.
 - **Remote mode**: control playback and the stem mixer from your phone with [PlayIt Mobile](https://github.com/RavilesX/playit_mobile) over Wi-Fi (QR pairing, never leaves the local network).
@@ -367,11 +371,11 @@ sudo apt update
 sudo apt install python3 python3-pip python3-venv ffmpeg portaudio19-dev libsndfile1 libxcb-cursor0
 git clone https://github.com/RavilesX/playit.git && cd playit
 python3 -m venv venv && source venv/bin/activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode onnxruntime
 python3 main.py
 ```
 
-`portaudio19-dev` and `libsndfile1` are the audio backend for `sounddevice`/`soundfile`; on Windows and macOS the pip wheels already bundle them. `qrcode` is optional: without it, remote mode is paired by typing the address and code by hand.
+`portaudio19-dev` and `libsndfile1` are the audio backend for `sounddevice`/`soundfile`; on Windows and macOS the pip wheels already bundle them. `qrcode` is optional: without it, remote mode is paired by typing the address and code by hand. `onnxruntime` is optional too: without it chords are not detected (an existing `chords.json` is still shown).
 
 **macOS**
 
@@ -379,7 +383,7 @@ python3 main.py
 brew install ffmpeg
 git clone https://github.com/RavilesX/playit.git && cd playit
 python3 -m venv venv && source venv/bin/activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode onnxruntime
 python3 main.py
 ```
 
@@ -388,7 +392,7 @@ python3 main.py
 ```powershell
 git clone https://github.com/RavilesX/playit.git; cd playit
 python -m venv venv; .\venv\Scripts\activate
-pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode
+pip install PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics qrcode onnxruntime
 python main.py
 ```
 
@@ -401,6 +405,8 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 ```
 
 ## Current version
+
+**v2.5.0** — **chords next to the lyrics**: when a song is separated, PlayIt detects its basic chords and key from the bass and the other instruments (no drums or vocals) and shows them in a **carousel in the corner of the lyrics view** with the previous, current and next chord, synced to the audio (fullscreen too). Music-theory rules keep it simple: triads, names spelled for the key (Bb in F major, not A#) and no fleeting changes. Toggle it from **Options → Chords**, where you also pick **American (C, Am) or Latin (Do, Lam)** notation. Songs separated earlier are analyzed automatically the first time they play (~2 s), and right-clicking the playlist offers **"Detect chords again"**. It uses the ChordNet model from [ChordMini](https://github.com/ptnghia-j/ChordMini) (MIT) with `onnxruntime`, bundled in the binaries; the result is saved as `chords.json` next to the lyrics.
 
 **v2.4.4** — **the lyrics editor opens where you were**: opening the sync editor now puts the cursor and the view at the exact playback position, ready to continue with the space bar. Also, **YouTube download (yt-dlp) was removed** because it was unreliable (it depends on a third party that changes often); everything else is unchanged.
 

@@ -15,12 +15,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import math
-from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRect, QTimer, pyqtSignal
+from PyQt6.QtCore import (Qt, QEvent, QPoint, QPointF, QRectF, QSize, QRect, QTimer,
+                          QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QPixmap, QPainter, QIcon, QColor, QFont, QPalette
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton, QDial,
                              QApplication, QStyle, QStyledItemDelegate,
                              QStyleOptionViewItem)
 from resources import resource_path,bg_image
+from chords import chord_index_at, format_chord, format_key
 
 
 class TitleBar(QWidget):
@@ -376,3 +378,174 @@ class StyledButtons(QWidget):
     def setEnabled(self, on: bool):
         self.yes_btn.setEnabled(on)
         bg_image(self.yes_btn, self._yes_normal if on else self._yes_disabled)
+
+
+class ChordCarouselWidget(QWidget):
+    """Carrusel de acordes en la esquina superior izquierda de las letras:
+    anterior (atenuado), actual (grande) y siguiente, más una barra que se
+    llena hasta el próximo cambio y la tonalidad arriba.
+
+    Es hijo de `lyrics_container` colocado por geometría (fuera del layout,
+    como el aviso de pista), así que viaja solo al fullscreen; se recoloca y
+    reescala con cada resize del padre. Transparente al mouse para no robar
+    el doble clic que entra/sale del fullscreen. Pinta todo en `paintEvent`
+    con colores propios: el QSS que se re-aplica en fullscreen no le afecta.
+
+    Solo pinta: la posición la empuja `AudioPlayer` con `set_time`.
+    """
+
+    MARGIN = 14
+    SLIDE_MS = 160
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._starts: list[float] = []
+        self._labels: list[str] = []
+        self._duration = 0.0
+        self._key = ("", "major")
+        self._notation = "american"
+        self._idx = -1
+        self._t = 0.0
+        self._offset = 0.0  # 1 → 0 durante el deslizamiento
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(self.SLIDE_MS)
+        self._anim.setStartValue(1.0)
+        self._anim.setEndValue(0.0)
+        self._anim.valueChanged.connect(self._on_anim)
+        self._watched = None
+        self._watch(parent)
+        self.hide()
+
+    # ── API ──────────────────────────────────────────────────────────────
+    def set_chords(self, data: dict):
+        chords = (data or {}).get("chords") or []
+        self._starts = [c[0] for c in chords]
+        self._labels = [c[1] for c in chords]
+        self._duration = float((data or {}).get("duration") or 0.0)
+        self._key = ((data or {}).get("key") or "", (data or {}).get("mode") or "major")
+        self._idx = -1
+        self._t = 0.0
+        self._anim.stop()
+        self._offset = 0.0
+        self.update()
+
+    def has_chords(self) -> bool:
+        return bool(self._starts)
+
+    def set_notation(self, notation: str):
+        self._notation = notation
+        self.update()
+
+    def set_time(self, t: float):
+        idx = chord_index_at(self._starts, t)
+        if idx != self._idx:
+            # Deslizar solo al avanzar uno; un salto (seek) cambia de golpe
+            if idx == self._idx + 1 and self._idx >= 0:
+                self._anim.stop()
+                self._anim.start()
+            else:
+                self._anim.stop()
+                self._offset = 0.0
+            self._idx = idx
+        self._t = t
+        self.update()
+
+    def labels_at_current(self) -> tuple[str, str, str]:
+        """(anterior, actual, siguiente) como se muestran; "" si no hay."""
+        def lab(i):
+            if 0 <= i < len(self._labels):
+                return format_chord(self._labels[i], self._notation)
+            return ""
+        return lab(self._idx - 1), lab(self._idx), lab(self._idx + 1)
+
+    def progress(self) -> float:
+        """Fracción transcurrida del acorde actual (0..1)."""
+        i = self._idx
+        if not (0 <= i < len(self._starts)):
+            return 0.0
+        end = self._starts[i + 1] if i + 1 < len(self._starts) else self._duration
+        span = end - self._starts[i]
+        return min(1.0, max(0.0, (self._t - self._starts[i]) / span)) if span > 0 else 0.0
+
+    # ── Geometría ────────────────────────────────────────────────────────
+    def _watch(self, parent):
+        if self._watched is not None:
+            self._watched.removeEventFilter(self)
+        self._watched = parent
+        if parent is not None:
+            parent.installEventFilter(self)
+            self.reposition()
+
+    def eventFilter(self, obj, event):
+        if obj is self._watched and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self.reposition()
+        return False
+
+    def reposition(self):
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        h = int(min(220, max(78, parent.height() * 0.17)))
+        self.setGeometry(self.MARGIN, self.MARGIN, int(h * 2.5), h)
+        self.raise_()
+
+    def _on_anim(self, value):
+        self._offset = float(value)
+        self.update()
+
+    # ── Pintado ──────────────────────────────────────────────────────────
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(20, 16, 28, 175))
+        p.drawRoundedRect(QRectF(0, 0, w, h), 10, 10)
+
+        key_h = h * 0.2
+        bar_h = max(3.0, h * 0.04)
+        body = QRectF(0, key_h, w, h - key_h - bar_h * 3)
+
+        key_text = format_key(*self._key, self._notation)
+        if key_text:
+            f = QFont(self.font())
+            f.setPixelSize(max(9, int(key_h * 0.6)))
+            p.setFont(f)
+            p.setPen(QColor(200, 190, 220, 170))
+            p.drawText(QRectF(0, 0, w, key_h), Qt.AlignmentFlag.AlignCenter,
+                       f"♪ {key_text}")
+
+        # Casillas: anterior (izq), actual (centro), siguiente (der). Con el
+        # deslizamiento todo parte una casilla a la derecha y llega a su sitio.
+        slot_w = w / 3
+        shift = self._offset * slot_w
+        prev, cur, nxt = self.labels_at_current()
+        prevprev = (format_chord(self._labels[self._idx - 2], self._notation)
+                    if self._offset and self._idx >= 2 else "")
+        for text, slot, size, color in (
+            (prevprev, -1, 0.30, QColor(170, 160, 190, int(110 * self._offset))),
+            (prev, 0, 0.30, QColor(170, 160, 190, 130)),
+            (cur, 1, 0.52, QColor("#F88FFF")),
+            (nxt, 2, 0.38, QColor(235, 235, 245, 220)),
+        ):
+            if not text:
+                continue
+            f = QFont(self.font())
+            f.setBold(True)
+            f.setPixelSize(max(10, int(body.height() * size)))
+            p.setFont(f)
+            p.setPen(color)
+            rect = QRectF(slot * slot_w + shift, body.top(), slot_w, body.height())
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+
+        # Barra hasta el próximo cambio
+        bar = QRectF(w * 0.1, h - bar_h * 2, w * 0.8, bar_h)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(255, 255, 255, 40))
+        p.drawRoundedRect(bar, bar_h / 2, bar_h / 2)
+        frac = self.progress()
+        if frac > 0:
+            p.setBrush(QColor("#F88FFF"))
+            p.drawRoundedRect(QRectF(bar.left(), bar.top(), bar.width() * frac, bar_h),
+                              bar_h / 2, bar_h / 2)

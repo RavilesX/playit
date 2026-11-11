@@ -27,6 +27,7 @@ from mutagen.flac import Picture
 from PIL import Image
 from PyQt6.QtCore import QObject, pyqtSignal
 from i18n import tr
+from chords import chords_available, ensure_chords
 from platform_utils import (
     run_silent, get_python_cmd, get_data_dir,
     check_pytorch_mps, check_pytorch_cuda,
@@ -192,10 +193,24 @@ class DemucsWorker(QObject):
             self.progress.emit(83)
             self._organize_output()
 
+            self.progress.emit(92)
+            self._detect_chords()
+
             self.progress.emit(100)
             self.finished.emit()
         except Exception as e:
             self.error.emit(tr("Error: {error}").format(error=e))
+
+    def _detect_chords(self):
+        # Antes de `finished`: así chords.json ya existe cuando la canción
+        # entra a la playlist. Stems nuevos = análisis nuevo, por eso force
+        # (re-separar también reescribe data.json). Un fallo aquí solo se
+        # registra: nunca convierte en error una separación que salió bien.
+        try:
+            if chords_available():
+                ensure_chords(self.base_path, force=True)
+        except Exception as e:
+            logger.error("No se pudieron detectar acordes: %s", e)
 
     def _run_demucs(self):
         use_mps = check_pytorch_mps()

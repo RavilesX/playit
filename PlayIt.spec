@@ -34,12 +34,23 @@ try:
 except ImportError:
     _remote_hidden = []
 
+# onnxruntime (detección de acordes) también se importa perezosamente. Sin él
+# la app funciona y la detección se apaga; el modelo va igual en `models/`
+# porque un chords.json hecho a mano se muestra sin el motor.
+try:
+    __import__('onnxruntime')
+    _chords_hidden = collect_submodules('onnxruntime.capi')
+    _chords_bins = collect_dynamic_libs('onnxruntime')
+except ImportError:
+    _chords_hidden, _chords_bins = [], []
+
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=qt_plugins,
-    datas=[('images', 'images'), ('fonts', 'fonts'), ('locales', 'locales'), ('estilos.css', '.')],
-    hiddenimports=_remote_hidden,
+    binaries=qt_plugins + _chords_bins,
+    datas=[('images', 'images'), ('fonts', 'fonts'), ('locales', 'locales'), ('models', 'models'),
+           ('estilos.css', '.')],
+    hiddenimports=_remote_hidden + _chords_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

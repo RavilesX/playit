@@ -46,9 +46,11 @@ from dependencies import DependencyManager
 from update_check_worker import UpdateCheckWorker
 from version import __version__
 from i18n import N_, SUPPORTED, current_language, qlocale, tr
-from settings import save_setting
+from settings import load_settings, save_setting
 from resources import styled_message_box, bg_image, resource_path, style_url
-from ui_components import TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate
+from ui_components import (TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate,
+                           ChordCarouselWidget)
+from chords import ChordsQueue, chords_available, read_chords
 from dialogs import (
     AboutDialog, QueueDialog, SplitDialog, SearchDialog,  # DownloadDialog: yt-dlp deshabilitado: descargas inconsistentes
     UpdateDialog, CorrectSongDialog, SongInfoDialog, RemotePairDialog,
@@ -82,6 +84,7 @@ class AudioPlayer(QMainWindow):
     # permite crear QPixmap en el hilo de la GUI
     cover_loaded = pyqtSignal(QImage)
     lyrics_loaded = pyqtSignal(list)
+    chords_ready = pyqtSignal(str, bool)  # carpeta, escribió; desde ChordsQueue
     lyrics_error = pyqtSignal(str)
     lyrics_not_found = pyqtSignal()
     lyrics_refetched = pyqtSignal(str, bool)  # ruta de la canción, encontradas
@@ -374,6 +377,21 @@ class AudioPlayer(QMainWindow):
             if w is not None:
                 w.installEventFilter(self)
 
+        # Acordes: carrusel en la esquina, guiado por la posición del audio
+        # (no por el .lrc), con su propio timer: el de letras solo corre
+        # cuando hay letras.
+        prefs = load_settings()
+        self._chords_enabled = bool(prefs.get("chords_enabled", True))
+        self._chord_notation = prefs.get("chord_notation", "american")
+        self.chord_carousel = ChordCarouselWidget(self.lyrics_container)
+        self.chord_carousel.set_notation(self._chord_notation)
+        self._chords_timer = QTimer(self)
+        self._chords_timer.setInterval(100)
+        self._chords_timer.timeout.connect(self._update_chords_display)
+        self.chords_ready.connect(self._on_chords_ready)
+        self._chords_queue = ChordsQueue(self.chords_ready.emit)
+        self._forced_chords: set[str] = set()  # carpetas pedidas a mano
+
         self.tabs.addTab(self.lyrics_container, tr("Letras"))
         self.tabs.addTab(self.cover_label, tr("Portada"))
         # Portada visible al iniciar; al reproducir una canción se
@@ -546,6 +564,8 @@ class AudioPlayer(QMainWindow):
         correct_action.setShortcut(QKeySequence("F2"))
         correct_action.setShortcutVisibleInContextMenu(True)
         refetch_lyrics_action = menu.addAction(tr("Buscar letras de nuevo"))
+        redetect_chords_action = menu.addAction(tr("Detectar acordes de nuevo"))
+        redetect_chords_action.setEnabled(chords_available())
         info_action = menu.addAction(tr("Información"))
 
         copy_menu = menu.addMenu(tr("Copiar"))
@@ -572,6 +592,8 @@ class AudioPlayer(QMainWindow):
             self._correct_song(item)
         elif action == refetch_lyrics_action:
             self._force_fetch_lyrics(item)
+        elif action == redetect_chords_action:
+            self._force_detect_chords(item)
         elif action == info_action:
             self._show_song_info(item)
         elif action == copy_artist_action:
@@ -1087,6 +1109,7 @@ class AudioPlayer(QMainWindow):
             return
         self._restore_mute_states()
         self._update_metadata()
+        self._load_chords()
         self._update_playback_ui('Activa')
         self.set_volume(self.volume)
         self.update_lyrics_menu_state()
@@ -1300,6 +1323,8 @@ class AudioPlayer(QMainWindow):
         self.update_lyrics_menu_state()
         for w in (self.lyrics_header, self.lyrics_current, self.lyrics_next):
             w.clear()
+        self.chord_carousel.set_chords({})
+        self._refresh_chord_visibility()
         self.clear_song_highlight()
 
     def _control_channels(self, action: str):
@@ -2475,16 +2500,18 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     # ── Letras ───────────────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────────────
-    def update_lyrics_display(self):
-        if not self.lyrics or self.playback_state != "Activa":
-            return
+    def _playback_seconds(self) -> float:
         # Posición real de reproducción (frames escritos), no el slider:
         # el slider solo se refresca cada 1 s (self.timer), lo que provocaba
         # hasta ~1 s de retraso respecto al editor de sincronización.
         if self._track_paths:
-            current_time = self._seek_position / self._sr
-        else:
-            current_time = self.progress_song.value() / 1000.0
+            return self._seek_position / self._sr
+        return self.progress_song.value() / 1000.0
+
+    def update_lyrics_display(self):
+        if not self.lyrics or self.playback_state != "Activa":
+            return
+        current_time = self._playback_seconds()
         current_html = next_html = ""
         for i, (t, html) in enumerate(self.lyrics):
             if current_time >= t:
@@ -2511,6 +2538,66 @@ class AudioPlayer(QMainWindow):
             doc.setTextWidth(viewport.width())
         doc_h = int(doc.size().height())
         self.lyrics_next.setFixedHeight(max(LYRICS_NEXT_MIN_HEIGHT, doc_h + 8))
+
+    # ── Acordes ──────────────────────────────────────────────────────────
+    def _load_chords(self):
+        # Síncrono: chords.json son pocos KB y read_chords nunca lanza.
+        folder = Path(self.playlist[self.current_index]["path"])
+        data = read_chords(folder)
+        self.chord_carousel.set_chords(data)
+        self._refresh_chord_visibility()
+        # Canción separada antes de que existiera la detección: analizarla
+        # en segundo plano (~2 s); _on_chords_ready la muestra si sigue sonando.
+        if (not data and self._chords_enabled and chords_available()
+                and (folder / "separated" / "other.mp3").exists()):
+            self._chords_queue.put(folder)
+
+    def _on_chords_ready(self, folder: str, ok: bool):
+        # Solo la detección pedida a mano avisa; la automática es silenciosa.
+        if folder in self._forced_chords:
+            self._forced_chords.discard(folder)
+            self.show_status_message(
+                tr("Acordes detectados") if ok
+                else tr("No se pudieron detectar acordes"))
+        if not (0 <= self.current_index < len(self.playlist)):
+            return
+        if ok and Path(self.playlist[self.current_index]["path"]) == Path(folder) \
+                and self.playback_state != "Detenido":
+            self._load_chords()
+
+    def _force_detect_chords(self, item: QListWidgetItem):
+        folder = item.data(PlaylistItemDelegate.PATH_ROLE)
+        if not folder:
+            return
+        # str(Path(...)): misma forma que la que ChordsQueue devuelve
+        self._forced_chords.add(str(Path(folder)))
+        self._chords_queue.put(Path(folder), force=True)
+        self.show_status_message(tr("Detectando acordes…"))
+
+    def _refresh_chord_visibility(self):
+        visible = self._chords_enabled and self.chord_carousel.has_chords()
+        self.chord_carousel.setVisible(visible)
+        if visible:
+            self.chord_carousel.reposition()
+            self._update_chords_display(force=True)
+            self._chords_timer.start()
+        else:
+            self._chords_timer.stop()
+
+    def _update_chords_display(self, force: bool = False):
+        # En pausa se queda quieto; force pinta la posición al (re)aparecer.
+        if force or self.playback_state == "Activa":
+            self.chord_carousel.set_time(self._playback_seconds())
+
+    def _toggle_chords(self, checked: bool):
+        self._chords_enabled = checked
+        save_setting("chords_enabled", checked)
+        self._refresh_chord_visibility()
+
+    def _set_chord_notation(self, notation: str):
+        self._chord_notation = notation
+        save_setting("chord_notation", notation)
+        self.chord_carousel.set_notation(notation)
 
     def update_lyrics_menu_state(self):
         enabled = (
@@ -2876,6 +2963,19 @@ class AudioPlayer(QMainWindow):
         self.sync_editor_action = add(lyrics_menu, tr("Editor de sincronización (onda)…"),
                                       self.open_lyrics_sync_editor, "Ctrl+Shift+E",
                                       enabled=False)
+
+        chords_menu = self._submenu(options_menu, tr("Acordes"))
+        self.show_chords_action = add(chords_menu, tr("Mostrar acordes"), self._toggle_chords,
+                                      checkable=True, checked=self._chords_enabled)
+        notation_menu = self._submenu(chords_menu, tr("Notación"))
+        notation_group = QActionGroup(self)
+        notation_group.setExclusive(True)
+        for key, label in (("american", tr("Americana (C, Am)")),
+                           ("latin", tr("Latina (Do, Lam)"))):
+            act = add(notation_menu, label,
+                      lambda _=False, k=key: self._set_chord_notation(k),
+                      checkable=True, checked=key == self._chord_notation)
+            notation_group.addAction(act)
 
         tracks_menu = self._submenu(options_menu, tr("Pistas"))
         self.track_toggle_actions = [

@@ -30,7 +30,7 @@ set -e
 cd "$(dirname "$0")"
 
 docker run --rm -v "$PWD:/src" batonogov/pyinstaller-windows:latest \
-  "pip install --no-warn-script-location PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics && \
+  "pip install --no-warn-script-location PyQt6 sounddevice soundfile numpy requests mutagen Pillow psutil syncedlyrics onnxruntime && \
    pyinstaller --clean -y --dist ./dist --workpath /tmp PlayIt.spec && \
    chown -R --reference=. ./dist"
 
