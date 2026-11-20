@@ -73,8 +73,14 @@ _PC = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 # Tónicas (del relativo mayor) cuya armadura lleva bemoles
 _FLAT_KEYS = {5, 10, 3, 8, 1, 6}  # F Bb Eb Ab Db Gb
 
-# Calidades de salida: tríadas. Intervalos para el histograma de tonalidad.
-_TRIAD = {"": (0, 4, 7), "m": (0, 3, 7), "dim": (0, 3, 6), "aug": (0, 4, 8)}
+# Calidades de salida: tríadas y séptimas. Notas de cada una (histograma de
+# tonalidad, parecido entre vecinos).
+_TRIAD = {"": (0, 4, 7), "m": (0, 3, 7), "dim": (0, 3, 6), "aug": (0, 4, 8),
+          "7": (0, 4, 7, 10), "maj7": (0, 4, 7, 11), "m7": (0, 3, 7, 10),
+          "m7b5": (0, 3, 6, 10), "dim7": (0, 3, 6, 9)}
+# Tríada base de cada séptima: decide si el acorde es diatónico (G7 en Do
+# mayor lo es aunque el grado V sea "")
+_BASE = {"7": "", "maj7": "", "m7": "m", "m7b5": "dim", "dim7": "dim"}
 # Calidad de cada grado de la escala mayor (semitonos sobre la tónica)
 _MAJOR_DEGREES = {0: "", 2: "m", 4: "m", 5: "", 7: "", 9: "m", 11: "dim"}
 
@@ -155,8 +161,9 @@ def reduce_label(raw: str):
 
     Acepta la sintaxis de Harte que usan los modelos (`"C#:min7"`,
     `"Bb:sus4"`, `"A:hdim7"`, `"G"`, `"N"`, `"X"`) y también la corta
-    (`"F#m"`). Séptimas, sextas, novenas y extensiones caen a su tríada;
-    `sus` se devuelve como calidad `"sus"` para que `postprocess` le asigne
+    (`"F#m7"`). Las séptimas se conservan (`7`, `maj7`, `m7`, `m7b5`,
+    `dim7`); sextas, `minmaj7`, novenas y extensiones caen a su tríada o
+    séptima más cercana; `sus` se devuelve como calidad `"sus"` para que `postprocess` le asigne
     la del grado según la tonalidad (no tiene tercera que la decida).
     """
     raw = raw.strip()
@@ -170,15 +177,21 @@ def reduce_label(raw: str):
         return None
     root = parsed[0]
     qual = qual.split("/")[0].split("(")[0]  # inversión y notas añadidas fuera
-    if qual.startswith(("hdim", "dim")):
-        return root, "dim"
+    if qual.startswith("hdim"):
+        return root, "m7b5"
+    if qual.startswith("dim"):
+        return root, "dim7" if qual == "dim7" else "dim"
     if qual.startswith("aug"):
         return root, "aug"
     if qual.startswith("sus"):
         return root, "sus"
-    if qual.startswith("min"):  # min, min7, minmaj7, min6...
-        return root, "m"
-    return root, ""  # maj, maj7, 7, 9, 6, 13, vacío...
+    if qual.startswith("min"):  # min7/min9/min11 → m7; min, min6, minmaj7 → m
+        return root, "m7" if qual[3:] in ("7", "9", "11", "13") else "m"
+    if qual.startswith("maj") and qual[3:] in ("7", "9", "11", "13"):
+        return root, "maj7"
+    if qual in ("7", "9", "11", "13"):  # dominantes
+        return root, "7"
+    return root, ""  # maj, maj6, 6, vacío...
 
 
 def spell(root: int, quality: str, key_tonic: int | None = None,
@@ -217,24 +230,39 @@ def format_key(key: str, mode: str, notation: str = "american") -> str:
 # 0 = al aire). Abiertas para las que las tienen; el resto sale de formas
 # móviles con cejilla, transpuestas desde Mi (raíz en 6ª) o La (raíz en 5ª).
 _OPEN_VOICINGS = {
-    (0, ""): (-1, 3, 2, 0, 1, 0),   # C
-    (2, ""): (-1, -1, 0, 2, 3, 2),  # D
-    (2, "m"): (-1, -1, 0, 2, 3, 1),  # Dm
-    (7, ""): (3, 2, 0, 0, 0, 3),    # G
+    (0, ""): (-1, 3, 2, 0, 1, 0),      # C
+    (2, ""): (-1, -1, 0, 2, 3, 2),     # D
+    (2, "m"): (-1, -1, 0, 2, 3, 1),    # Dm
+    (7, ""): (3, 2, 0, 0, 0, 3),       # G
+    (0, "7"): (-1, 3, 2, 3, 1, 0),     # C7
+    (2, "7"): (-1, -1, 0, 2, 1, 2),    # D7
+    (7, "7"): (3, 2, 0, 0, 0, 1),      # G7
+    (11, "7"): (-1, 2, 1, 2, 0, 2),    # B7
+    (0, "maj7"): (-1, 3, 2, 0, 0, 0),  # Cmaj7
+    (2, "maj7"): (-1, -1, 0, 2, 2, 2),  # Dmaj7
+    (5, "maj7"): (-1, -1, 3, 2, 1, 0),  # Fmaj7
+    (7, "maj7"): (3, 2, 0, 0, 0, 2),   # Gmaj7
+    (2, "m7"): (-1, -1, 0, 2, 1, 1),   # Dm7
 }
-_MOVABLE = {  # calidad → [(cuerda de la raíz, forma en traste 0), ...]
+# calidad → [(raíz de la forma, trastes), ...]; se transpone a cualquier raíz
+_MOVABLE = {
     "": [(4, (0, 2, 2, 1, 0, 0)), (9, (-1, 0, 2, 2, 2, 0))],
     "m": [(4, (0, 2, 2, 0, 0, 0)), (9, (-1, 0, 2, 2, 1, 0))],
     "dim": [(9, (-1, 0, 1, 2, 1, -1))],
     "aug": [(4, (0, -1, 2, 1, 1, 0))],
+    "7": [(4, (0, 2, 0, 1, 0, 0)), (9, (-1, 0, 2, 0, 2, 0))],
+    "maj7": [(4, (0, 2, 1, 1, 0, 0)), (9, (-1, 0, 2, 1, 2, 0))],
+    "m7": [(4, (0, 2, 0, 0, 0, 0)), (9, (-1, 0, 2, 0, 1, 0))],
+    "m7b5": [(9, (-1, 0, 1, 0, 1, -1)), (7, (3, -1, 3, 3, 2, -1))],
+    "dim7": [(0, (-1, 3, 4, 2, 4, -1))],
 }
 
 
 def guitar_voicing(label: str):
     """`"F#m"` → `(2, 4, 4, 2, 2, 2)`; `None` sin acorde o etiqueta ilegible.
 
-    Solo tríadas (lo único que guarda `chords.json`); de las formas móviles
-    elige la de traste más bajo.
+    Tríadas y séptimas (lo que guarda `chords.json`); de las formas móviles
+    elige la de posición más baja (también bajando una octava si cabe).
     """
     parsed = parse_label(label) if label and label != NO_CHORD else None
     if parsed is None:
@@ -242,8 +270,13 @@ def guitar_voicing(label: str):
     if parsed in _OPEN_VOICINGS:
         return _OPEN_VOICINGS[parsed]
     root, quality = parsed
-    shift, shape = min(((root - base) % 12, shape) for base, shape in _MOVABLE[quality])
-    return tuple(f + shift if f >= 0 else -1 for f in shape)
+    options = []
+    for base, shape in _MOVABLE[quality]:
+        played = [f for f in shape if f >= 0]
+        for shift in ((root - base) % 12, (root - base) % 12 - 12):
+            if min(played) + shift >= 0:
+                options.append(tuple(f + shift if f >= 0 else -1 for f in shape))
+    return min(options, key=max)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -293,7 +326,7 @@ def postprocess(frames: list, hop_s: float, duration: float) -> dict:
     """Salida cruda por cuadro → datos listos para `write_chords`.
 
     `frames`: `[(etiqueta_cruda, confianza 0..1), ...]`, uno cada `hop_s`
-    segundos. Pasos: reducir a tríadas → segmentar → estimar tonalidad →
+    segundos. Pasos: reducir a tríadas o séptimas → segmentar → estimar tonalidad →
     resolver `sus` → fundir segmentos cortos y cromatismos dudosos →
     escribir con la ortografía de la tonalidad.
     """
@@ -326,7 +359,7 @@ def postprocess(frames: list, hop_s: float, duration: float) -> dict:
             return True
         if tonic is None or s[2] is None:
             return False
-        outside = diatonic_quality(s[2], tonic, mode) != s[3]
+        outside = diatonic_quality(s[2], tonic, mode) != _BASE.get(s[3], s[3])
         return (outside and dur < NONDIATONIC_MIN_S
                 and s[4] / s[5] < NONDIATONIC_MIN_CONF)
 

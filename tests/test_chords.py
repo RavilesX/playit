@@ -48,11 +48,13 @@ def test_chord_index_at_empty():
 
 # ── Etiquetas ────────────────────────────────────────────────────────────
 @pytest.mark.parametrize("raw, expected", [
-    ("C", (0, "")), ("C:maj", (0, "")), ("C:maj7", (0, "")), ("G:7", (7, "")),
-    ("A:min", (9, "m")), ("A:min7", (9, "m")), ("E:minmaj7", (4, "m")),
-    ("B:dim", (11, "dim")), ("B:hdim7", (11, "dim")), ("C:aug", (0, "aug")),
+    ("C", (0, "")), ("C:maj", (0, "")), ("C:maj7", (0, "maj7")), ("G:7", (7, "7")),
+    ("A:min", (9, "m")), ("A:min7", (9, "m7")), ("E:minmaj7", (4, "m")),
+    ("B:dim", (11, "dim")), ("B:hdim7", (11, "m7b5")), ("C:aug", (0, "aug")),
+    ("B:dim7", (11, "dim7")), ("C:maj6", (0, "")), ("A:min6", (9, "m")),
     ("D:sus4", (2, "sus")), ("Db:min", (1, "m")), ("C#:min", (1, "m")),
-    ("F:maj/3", (5, "")), ("G:7(b9)", (7, "")), ("F#m", (6, "m")),
+    ("F:maj/3", (5, "")), ("G:7(b9)", (7, "7")), ("F#m", (6, "m")),
+    ("F#m7", (6, "m7")), ("Bbmaj7", (10, "maj7")), ("Bm7b5", (11, "m7b5")),
     ("N", None), ("X", None), ("", None), ("H:min", None),
 ])
 def test_reduce_label(raw, expected):
@@ -105,9 +107,17 @@ def test_postprocess_basic_progression():
     frames = _frames(("N", 10), ("G:maj", 40), ("C:maj7", 30), ("D:7", 30), ("G", 40))
     res = postprocess(frames, hop, 15.0)
     assert res["key"] == "G" and res["mode"] == "major"
-    assert [c[1] for c in res["chords"]] == ["N", "G", "C", "D", "G"]
+    assert [c[1] for c in res["chords"]] == ["N", "G", "Cmaj7", "D7", "G"]
     assert res["chords"][1][0] == pytest.approx(1.0)
     assert res["duration"] == 15.0
+
+
+def test_postprocess_short_diatonic_seventh_is_kept():
+    # D7 en Sol mayor es el V7: diatónico aunque dure poco y el motor dude
+    frames = (_frames(("G", 40), ("C", 20)) + _frames(("D:7", 8), conf=0.3)
+              + _frames(("G", 40)))
+    labels = [c[1] for c in postprocess(frames, 0.1, 10.8)["chords"]]
+    assert "D7" in labels
 
 
 def test_postprocess_merges_short_flicker():
@@ -195,10 +205,15 @@ def test_guitar_voicing():
     assert guitar_voicing("Bdim") == (-1, 2, 3, 4, 3, -1)
     assert guitar_voicing("Caug") == (8, -1, 10, 9, 9, 8)
     assert guitar_voicing("Em") == (0, 2, 2, 0, 0, 0)
+    assert guitar_voicing("G7") == (3, 2, 0, 0, 0, 1)      # abierta
+    assert guitar_voicing("F#m7") == (2, 4, 2, 2, 2, 2)
+    assert guitar_voicing("Bbmaj7") == (-1, 1, 3, 2, 3, 1)
+    assert guitar_voicing("F#m7b5") == (2, -1, 2, 2, 1, -1)  # forma de Sol, una octava abajo
+    assert guitar_voicing("Bdim7") == (-1, 2, 3, 1, 3, -1)
     assert guitar_voicing("N") is None and guitar_voicing("") is None
     # Toda tríada que puede salir del motor tiene diagrama
     for root in ("C", "C#", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"):
-        for q in ("", "m", "dim", "aug"):
+        for q in ("", "m", "dim", "aug", "7", "maj7", "m7", "m7b5", "dim7"):
             frets = guitar_voicing(root + q)
             assert frets and len(frets) == 6 and max(frets) <= 14
 
