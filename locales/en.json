@@ -372,5 +372,8 @@
   "－ Línea": "－ Line",
   "Acordes detectados": "Chords detected",
   "No se pudieron detectar acordes": "Could not detect chords",
-  "Tonalidad": "Key"
+  "Tonalidad": "Key",
+  "Ocultar cambios rápidos": "Hide quick changes",
+  "No ocultar": "Don't hide",
+  "Menos de {s} s": "Shorter than {s} s"
 }

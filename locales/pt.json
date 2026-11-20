@@ -372,5 +372,8 @@
   "－ Línea": "－ Linha",
   "Acordes detectados": "Acordes detectados",
   "No se pudieron detectar acordes": "Não foi possível detectar os acordes",
-  "Tonalidad": "Tom"
+  "Tonalidad": "Tom",
+  "Ocultar cambios rápidos": "Ocultar mudanças rápidas",
+  "No ocultar": "Não ocultar",
+  "Menos de {s} s": "Menos de {s} s"
 }

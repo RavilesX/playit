@@ -132,6 +132,27 @@ def write_chords(folder, data: dict) -> None:
     os.replace(tmp, path)
 
 
+# Al mostrar: un acorde más corto que esto no da tiempo a cambiar de
+# posición en la guitarra (y suele ser un adorno del bajo, no un cambio real).
+DISPLAY_MIN_CHORD_S = 0.8
+# Opciones del menú Opciones → Acordes → Ocultar cambios rápidos (0 = no ocultar)
+CHORD_MIN_CHOICES = (0.0, 0.5, 0.8, 1.0, 1.5)
+
+
+def hide_short_chords(chords: list, duration: float,
+                      min_s: float = DISPLAY_MIN_CHORD_S) -> list:
+    """Quita los acordes que duran menos de `min_s`: el anterior se mantiene
+    sonando en su lugar. Solo para mostrar; `chords.json` no se toca."""
+    out = []
+    for i, (t, label) in enumerate(chords):
+        end = chords[i + 1][0] if i + 1 < len(chords) else duration
+        if end - t < min_s and (i + 1 < len(chords) or duration > t):  # min_s 0: nada
+            continue
+        if not out or out[-1][1] != label:
+            out.append([t, label])
+    return out
+
+
 def chord_index_at(starts: list, t: float) -> int:
     """Índice del acorde que suena en `t` segundos, -1 antes del primero.
 

@@ -16,14 +16,15 @@
 
 import math
 from PyQt6.QtCore import (Qt, QEvent, QPoint, QPointF, QRectF, QSize, QRect, QTimer,
-                          QVariantAnimation, pyqtSignal)
+                          pyqtSignal)
 from PyQt6.QtGui import (QPixmap, QPainter, QIcon, QColor, QFont, QPalette, QPen, QBrush,
                          QLinearGradient, QFontMetricsF)
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton, QDial,
                              QApplication, QStyle, QStyledItemDelegate,
                              QStyleOptionViewItem)
 from resources import resource_path,bg_image
-from chords import chord_index_at, format_chord, format_key, guitar_voicing
+from chords import (DISPLAY_MIN_CHORD_S, chord_index_at, format_chord, format_key,
+                    guitar_voicing, hide_short_chords)
 from i18n import tr
 
 
@@ -400,39 +401,41 @@ class ChordCarouselWidget(QWidget):
     MARGIN = 14
     MIN_H = 84
     MAX_H = 130
-    SLIDE_MS = 160
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._starts: list[float] = []
         self._labels: list[str] = []
+        self._raw: list = []  # tal como viene de chords.json, sin filtrar
+        self._min_s = DISPLAY_MIN_CHORD_S
         self._duration = 0.0
         self._key = ("", "major")
         self._notation = "american"
         self._idx = -1
         self._t = 0.0
-        self._offset = 0.0  # 1 → 0 durante el deslizamiento
-        self._anim = QVariantAnimation(self)
-        self._anim.setDuration(self.SLIDE_MS)
-        self._anim.setStartValue(1.0)
-        self._anim.setEndValue(0.0)
-        self._anim.valueChanged.connect(self._on_anim)
         self._watched = None
         self._watch(parent)
         self.hide()
 
     # ── API ──────────────────────────────────────────────────────────────
     def set_chords(self, data: dict):
-        chords = (data or {}).get("chords") or []
+        self._duration = float((data or {}).get("duration") or 0.0)
+        self._raw = (data or {}).get("chords") or []
+        self._key = ((data or {}).get("key") or "", (data or {}).get("mode") or "major")
+        self._t = 0.0
+        self._apply_filter()
+
+    def set_min_duration(self, min_s: float):
+        """Oculta los cambios más cortos que `min_s` (0 = mostrar todos)."""
+        self._min_s = min_s
+        self._apply_filter()
+
+    def _apply_filter(self):
+        chords = hide_short_chords(self._raw, self._duration, self._min_s)
         self._starts = [c[0] for c in chords]
         self._labels = [c[1] for c in chords]
-        self._duration = float((data or {}).get("duration") or 0.0)
-        self._key = ((data or {}).get("key") or "", (data or {}).get("mode") or "major")
-        self._idx = -1
-        self._t = 0.0
-        self._anim.stop()
-        self._offset = 0.0
+        self._idx = chord_index_at(self._starts, self._t)
         self.update()
 
     def has_chords(self) -> bool:
@@ -443,18 +446,16 @@ class ChordCarouselWidget(QWidget):
         self.update()
 
     def set_time(self, t: float):
-        idx = chord_index_at(self._starts, t)
-        if idx != self._idx:
-            # Deslizar solo al avanzar uno; un salto (seek) cambia de golpe
-            if idx == self._idx + 1 and self._idx >= 0:
-                self._anim.stop()
-                self._anim.start()
-            else:
-                self._anim.stop()
-                self._offset = 0.0
-            self._idx = idx
+        # Cambio instantáneo: un deslizamiento (antes 160 ms) hacía que el
+        # acorde nuevo llegara al centro después de oírse.
+        self._idx = chord_index_at(self._starts, t)
         self._t = t
         self.update()
+
+    def seconds_to_next(self, t: float) -> float | None:
+        """Segundos desde `t` hasta el próximo cambio; `None` si no hay."""
+        i = chord_index_at(self._starts, t) + 1
+        return self._starts[i] - t if i < len(self._starts) else None
 
     def labels_at_current(self) -> tuple[str, str, str]:
         """(anterior, actual, siguiente) como se muestran; "" si no hay."""
@@ -499,10 +500,6 @@ class ChordCarouselWidget(QWidget):
         h = int(min(self.MAX_H, max(self.MIN_H, parent.height() * 0.11)))
         w = min(parent.width() - 2 * self.MARGIN, h * 5)
         self.setFixedSize(max(0, w), h)
-
-    def _on_anim(self, value):
-        self._offset = float(value)
-        self.update()
 
     # ── Pintado ──────────────────────────────────────────────────────────
     def _font(self, px: float, bold: bool = True) -> QFont:
@@ -558,17 +555,8 @@ class ChordCarouselWidget(QWidget):
                 p.setPen(QPen(QColor(114, 95, 166, 135), 1))
             p.drawRoundedRect(rect, 11 * u, 11 * u)
 
-        # Textos: con el deslizamiento todo parte una casilla a la derecha y
-        # llega a su sitio; recortados al área de tarjetas.
-        p.save()
-        p.setClipRect(cards)
-        shift = self._offset * (cell + gap)
         prev, cur, nxt = self.labels_at_current()
-        prevprev = (format_chord(self._labels[self._idx - 2], self._notation)
-                    if self._offset and self._idx >= 2 else "")
-        fade = int(255 * self._offset)
         for text, slot, px, color in (
-            (prevprev, -1, 21 * u, QColor(182, 162, 210, fade)),
             (prev, 0, 21 * u, QColor("#b6a2d2")),
             (cur, 1, 30 * u, QColor("#ffffff")),
             (nxt, 2, 21 * u, QColor("#b6a2d2")),
@@ -581,10 +569,9 @@ class ChordCarouselWidget(QWidget):
                 font = self._font(px * cell * 0.88 / text_w)
             p.setFont(font)
             p.setPen(color)
-            rect = QRectF(cards.left() + slot * (cell + gap) + shift, cards.top(),
+            rect = QRectF(cards.left() + slot * (cell + gap), cards.top(),
                           cell, cards.height())
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
-        p.restore()
 
         bar = QRectF(cards.left(), h - pad - bar_h, cards.width(), bar_h)
         p.setPen(Qt.PenStyle.NoPen)

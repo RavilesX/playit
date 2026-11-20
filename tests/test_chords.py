@@ -179,6 +179,56 @@ def test_carousel_slots_follow_time(carousel):
     assert carousel.progress() == pytest.approx(0.5)
 
 
+def test_hide_short_chords():
+    from chords import hide_short_chords
+    c = [[0.0, "G"], [2.0, "A"], [2.3, "C"], [5.0, "D"]]
+    # A dura 0.3 s: se oculta y G sigue hasta C
+    assert hide_short_chords(c, 8.0) == [[0.0, "G"], [2.3, "C"], [5.0, "D"]]
+    # G-A-G corto: queda un solo G continuo
+    assert hide_short_chords([[0, "G"], [2, "A"], [2.3, "G"], [4, "C"]], 6) == \
+        [[0, "G"], [4, "C"]]
+    # Último acorde corto al final de la canción: también fuera
+    assert hide_short_chords([[0, "G"], [5.7, "C"]], 6.0) == [[0, "G"]]
+    # Sin duración conocida el último se respeta
+    assert hide_short_chords([[0, "G"], [5.7, "C"]], 0.0) == [[0, "G"], [5.7, "C"]]
+
+
+def test_carousel_hides_fast_changes(carousel):
+    carousel.set_chords({"duration": 6.0, "chords": [[0.0, "G"], [2.0, "A"], [2.3, "C"]]})
+    carousel.set_time(2.1)  # dentro del A fugaz: sigue mostrando G
+    assert carousel.labels_at_current() == ("", "G", "C")
+
+
+def test_carousel_min_duration_refilters_live(carousel):
+    carousel.set_chords({"duration": 6.0, "chords": [[0.0, "G"], [2.0, "A"], [2.3, "C"]]})
+    carousel.set_time(2.1)
+    carousel.set_min_duration(0.0)  # "No ocultar": el A fugaz vuelve, en su sitio
+    assert carousel.labels_at_current() == ("G", "A", "C")
+    carousel.set_min_duration(0.8)
+    assert carousel.labels_at_current() == ("", "G", "C")
+
+
+def test_player_chord_min_duration_setting(player, monkeypatch):
+    saved = {}
+    monkeypatch.setattr("audio_player.save_setting", lambda k, v: saved.update({k: v}))
+    player._set_chord_min_duration(1.5)
+    assert saved == {"chord_min_s": 1.5} and player.chord_carousel._min_s == 1.5
+
+
+def test_carousel_seconds_to_next(carousel):
+    assert carousel.seconds_to_next(5.5) == pytest.approx(0.5)   # G → C a los 6 s
+    assert carousel.seconds_to_next(-1.0) == pytest.approx(1.0)  # antes del primero
+    assert carousel.seconds_to_next(9.5) is None                 # último acorde
+
+
+def test_player_chords_compensate_output_latency(player, monkeypatch):
+    class FakeStream:
+        latency = 0.08
+    monkeypatch.setattr(player, "_sd_streams", [FakeStream()])
+    monkeypatch.setattr(player, "_playback_seconds", lambda: 2.0)
+    assert player._chord_seconds() == pytest.approx(1.92)
+
+
 def test_carousel_seek_back_and_notation(carousel):
     carousel.set_time(10.0)
     carousel.set_time(3.0)  # seek hacia atrás: sin estado pegado

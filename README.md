@@ -6,7 +6,7 @@
 
 **Reproductor de audio con separación de pistas integrada · Audio player with built-in stem separation**
 
-[![Versión](https://img.shields.io/badge/versión-2.6.0-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
+[![Versión](https://img.shields.io/badge/versión-2.6.1-blueviolet)](https://github.com/RavilesX/playit/releases/latest)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
 [![Plataformas](https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-informational)](#sistemas-soportados)
 
@@ -208,6 +208,8 @@ pyinstaller PlayIt.spec     # genera el ejecutable (PlayIt.app en macOS)
 
 ## Versión actual
 
+**v2.6.1** — **acordes mejor sincronizados y sin ruido**: el acorde nuevo ahora aparece en el carrusel justo cuando suena (se quitó la animación de deslizamiento y se compensa la latencia de la salida de audio). Los cambios de acorde demasiado rápidos para tocarlos —casi siempre adornos del bajo, no cambios reales— ya no se muestran: por defecto se ocultan los menores de 0.8 s, y el umbral se ajusta en **Opciones → Acordes → Ocultar cambios rápidos** (de "No ocultar" a 1.5 s). Funciona con las canciones ya analizadas, sin volver a detectar.
+
 **v2.6.0** — **carrusel de acordes renovado y con séptimas**: el carrusel deja la esquina —donde se encimaba con el título— y ocupa el lugar del encabezado de artista y canción (que ya se ven en la barra de título), más compacto, sobre todo en pantalla completa. Muestra la tonalidad, tarjetas para el acorde anterior, el actual y el siguiente, y un **diagrama de guitarra** del acorde que suena, con cejillas, cuerdas al aire y sin tocar. La detección ahora distingue **acordes con séptima** (G7, Cmaj7, Am7, Bm7b5, Bdim7), cada uno con su diagrama. Las canciones analizadas con la versión anterior conservan sus tríadas hasta usar **"Detectar acordes de nuevo"** en el clic derecho de la playlist.
 
 **v2.5.0** — **acordes junto a las letras**: al separar una canción, PlayIt detecta sus acordes básicos y su tonalidad a partir del bajo y los demás instrumentos (sin la batería ni la voz), y los muestra en un **carrusel en la esquina de la pantalla de letras** con el acorde anterior, el actual y el siguiente, sincronizado con el audio (también en pantalla completa). Las reglas de teoría musical simplifican el resultado: tríadas, nombres según la tonalidad (Sib en Fa mayor, no La#) y sin cambios fugaces. Se activa o desactiva desde **Opciones → Acordes**, donde también se elige la notación **americana (C, Am) o latina (Do, Lam)**. Las canciones separadas antes se analizan solas la primera vez que suenan (~2 s), y el clic derecho en la playlist ofrece **"Detectar acordes de nuevo"**. Usa el modelo ChordNet de [ChordMini](https://github.com/ptnghia-j/ChordMini) (MIT) con `onnxruntime`, incluido en los ejecutables; el resultado se guarda en `chords.json` junto a la letra.
@@ -407,6 +409,8 @@ pyinstaller PlayIt.spec     # builds the executable (PlayIt.app on macOS)
 ```
 
 ## Current version
+
+**v2.6.1** — **chords better in sync and less noisy**: the new chord now shows up in the carousel right as it sounds (the slide animation was removed and audio output latency is compensated). Chord changes too fast to play —mostly bass embellishments, not real changes— are no longer shown: changes shorter than 0.8 s are hidden by default, and the threshold is set in **Options → Chords → Hide quick changes** (from "Don't hide" to 1.5 s). It works with already-analyzed songs, no re-detection needed.
 
 **v2.6.0** — **redesigned chord carousel, now with sevenths**: the carousel leaves the corner —where it overlapped the title— and takes the place of the artist/song header (already shown in the title bar), more compact, especially in fullscreen. It shows the key, cards for the previous, current and next chord, and a **guitar diagram** of the chord being played, with barres, open and muted strings. Detection now tells apart **seventh chords** (G7, Cmaj7, Am7, Bm7b5, Bdim7), each with its own diagram. Songs analyzed with the previous version keep their triads until you use **"Detect chords again"** from the playlist's right-click menu.
 

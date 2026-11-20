@@ -50,7 +50,8 @@ from settings import load_settings, save_setting
 from resources import styled_message_box, bg_image, resource_path, style_url
 from ui_components import (TitleBar, CustomDial, SizeGrip, PlaylistItemDelegate,
                            ChordCarouselWidget)
-from chords import ChordsQueue, chords_available, read_chords
+from chords import (CHORD_MIN_CHOICES, DISPLAY_MIN_CHORD_S, ChordsQueue,
+                    chords_available, read_chords)
 from dialogs import (
     AboutDialog, QueueDialog, SplitDialog, SearchDialog,  # DownloadDialog: yt-dlp deshabilitado: descargas inconsistentes
     UpdateDialog, CorrectSongDialog, SongInfoDialog, RemotePairDialog,
@@ -381,11 +382,19 @@ class AudioPlayer(QMainWindow):
         self._chord_notation = prefs.get("chord_notation", "american")
         self.chord_carousel = ChordCarouselWidget(self.lyrics_container)
         self.chord_carousel.set_notation(self._chord_notation)
+        self._chord_min_s = float(prefs.get("chord_min_s", DISPLAY_MIN_CHORD_S))
+        self.chord_carousel.set_min_duration(self._chord_min_s)
         lyrics_layout.insertWidget(0, self.chord_carousel,
                                    alignment=Qt.AlignmentFlag.AlignHCenter)
         self._chords_timer = QTimer(self)
         self._chords_timer.setInterval(100)
         self._chords_timer.timeout.connect(self._update_chords_display)
+        # Disparo único justo en el próximo cambio: con solo el tick de 100 ms
+        # el acorde nuevo aparecía hasta 100 ms después de oírse.
+        self._chord_edge_timer = QTimer(self)
+        self._chord_edge_timer.setSingleShot(True)
+        self._chord_edge_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._chord_edge_timer.timeout.connect(self._update_chords_display)
         self.chords_ready.connect(self._on_chords_ready)
         self._chords_queue = ChordsQueue(self.chords_ready.emit)
         self._forced_chords: set[str] = set()  # carpetas pedidas a mano
@@ -2576,16 +2585,40 @@ class AudioPlayer(QMainWindow):
             self._chords_timer.start()
         else:
             self._chords_timer.stop()
+            self._chord_edge_timer.stop()
+
+    def _chord_seconds(self) -> float:
+        # _seek_position cuenta frames ya escritos al stream: va adelantado a
+        # lo que suena por la latencia de salida (~35 ms ALSA, más en Windows).
+        # Las letras toleran ir un poco antes; un músico nota el acorde fuera.
+        latency = 0.0
+        if self._sd_streams:
+            try:
+                latency = float(self._sd_streams[0].latency)
+            except Exception:  # stream ya cerrado
+                pass
+        return max(0.0, self._playback_seconds() - latency)
 
     def _update_chords_display(self, force: bool = False):
         # En pausa se queda quieto; force pinta la posición al (re)aparecer.
-        if force or self.playback_state == "Activa":
-            self.chord_carousel.set_time(self._playback_seconds())
+        if not (force or self.playback_state == "Activa"):
+            return
+        t = self._chord_seconds()
+        self.chord_carousel.set_time(t)
+        wait = self.chord_carousel.seconds_to_next(t)
+        if wait is not None and wait < self._chords_timer.interval() / 1000:
+            self._chord_edge_timer.start(max(1, round(wait * 1000)))
 
     def _toggle_chords(self, checked: bool):
         self._chords_enabled = checked
         save_setting("chords_enabled", checked)
         self._refresh_chord_visibility()
+
+    def _set_chord_min_duration(self, min_s: float):
+        self._chord_min_s = min_s
+        save_setting("chord_min_s", min_s)
+        self.chord_carousel.set_min_duration(min_s)
+        self._update_chords_display(force=True)
 
     def _set_chord_notation(self, notation: str):
         self._chord_notation = notation
@@ -2969,6 +3002,17 @@ class AudioPlayer(QMainWindow):
                       lambda _=False, k=key: self._set_chord_notation(k),
                       checkable=True, checked=key == self._chord_notation)
             notation_group.addAction(act)
+        # Cambios más cortos que esto no dan tiempo a mover la mano: se ocultan
+        fast_menu = self._submenu(chords_menu, tr("Ocultar cambios rápidos"))
+        fast_group = QActionGroup(self)
+        fast_group.setExclusive(True)
+        for secs in CHORD_MIN_CHOICES:
+            label = (tr("No ocultar") if not secs
+                     else tr("Menos de {s} s").format(s=f"{secs:g}"))
+            act = add(fast_menu, label,
+                      lambda _=False, v=secs: self._set_chord_min_duration(v),
+                      checkable=True, checked=secs == self._chord_min_s)
+            fast_group.addAction(act)
 
         tracks_menu = self._submenu(options_menu, tr("Pistas"))
         self.track_toggle_actions = [
