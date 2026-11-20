@@ -371,5 +371,6 @@
   "＋ Línea": "＋ Line",
   "－ Línea": "－ Line",
   "Acordes detectados": "Chords detected",
-  "No se pudieron detectar acordes": "Could not detect chords"
+  "No se pudieron detectar acordes": "Could not detect chords",
+  "Tonalidad": "Key"
 }

@@ -179,9 +179,35 @@ def test_carousel_seek_back_and_notation(carousel):
 def test_carousel_scales_with_parent(carousel):
     parent = carousel.parentWidget()
     small = carousel.height()
+    assert small == carousel.MIN_H  # 500 px de alto: tope inferior legible
     parent.resize(1600, 1000)
     assert carousel.height() > small
-    assert carousel.x() == carousel.MARGIN
+    parent.resize(300, 1000)  # panel angosto: nunca más ancho que el padre
+    assert carousel.width() <= 300
+
+
+def test_guitar_voicing():
+    from chords import guitar_voicing
+    assert guitar_voicing("C") == (-1, 3, 2, 0, 1, 0)      # abierta
+    assert guitar_voicing("F") == (1, 3, 3, 2, 1, 1)       # cejilla forma Mi
+    assert guitar_voicing("Bb") == (-1, 1, 3, 3, 3, 1)     # cejilla forma La
+    assert guitar_voicing("F#m") == guitar_voicing("Gbm") == (2, 4, 4, 2, 2, 2)
+    assert guitar_voicing("Bdim") == (-1, 2, 3, 4, 3, -1)
+    assert guitar_voicing("Caug") == (8, -1, 10, 9, 9, 8)
+    assert guitar_voicing("Em") == (0, 2, 2, 0, 0, 0)
+    assert guitar_voicing("N") is None and guitar_voicing("") is None
+    # Toda tríada que puede salir del motor tiene diagrama
+    for root in ("C", "C#", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"):
+        for q in ("", "m", "dim", "aug"):
+            frets = guitar_voicing(root + q)
+            assert frets and len(frets) == 6 and max(frets) <= 14
+
+
+def test_carousel_paints_every_state(carousel):
+    from PyQt6.QtGui import QPixmap
+    for t in (0.5, 4.0, 7.0, 10.5):  # N, G (abierta), C, D
+        carousel.set_time(t)
+        carousel.render(QPixmap(carousel.size()))  # sin excepciones en paintEvent
 
 
 def test_player_shows_carousel_only_with_chords(player, tmp_path, monkeypatch):

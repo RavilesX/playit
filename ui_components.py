@@ -17,12 +17,14 @@
 import math
 from PyQt6.QtCore import (Qt, QEvent, QPoint, QPointF, QRectF, QSize, QRect, QTimer,
                           QVariantAnimation, pyqtSignal)
-from PyQt6.QtGui import QPixmap, QPainter, QIcon, QColor, QFont, QPalette
+from PyQt6.QtGui import (QPixmap, QPainter, QIcon, QColor, QFont, QPalette, QPen, QBrush,
+                         QLinearGradient, QFontMetricsF)
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton, QDial,
                              QApplication, QStyle, QStyledItemDelegate,
                              QStyleOptionViewItem)
 from resources import resource_path,bg_image
-from chords import chord_index_at, format_chord, format_key
+from chords import chord_index_at, format_chord, format_key, guitar_voicing
+from i18n import tr
 
 
 class TitleBar(QWidget):
@@ -381,20 +383,23 @@ class StyledButtons(QWidget):
 
 
 class ChordCarouselWidget(QWidget):
-    """Carrusel de acordes en la esquina superior izquierda de las letras:
-    anterior (atenuado), actual (grande) y siguiente, más una barra que se
-    llena hasta el próximo cambio y la tonalidad arriba.
+    """Carrusel de acordes del panel de letras: tonalidad arriba, diagrama de
+    guitarra del acorde actual a la izquierda, tarjetas anterior / actual /
+    siguiente y debajo una barra que se llena hasta el próximo cambio.
 
-    Es hijo de `lyrics_container` colocado por geometría (fuera del layout,
-    como el aviso de pista), así que viaja solo al fullscreen; se recoloca y
-    reescala con cada resize del padre. Transparente al mouse para no robar
-    el doble clic que entra/sale del fullscreen. Pinta todo en `paintEvent`
-    con colores propios: el QSS que se re-aplica en fullscreen no le afecta.
+    Vive arriba del layout de `lyrics_container`, donde antes iba el
+    encabezado artista/título, así que viaja solo al fullscreen. Su tamaño sigue al del padre (`reposition`, vía
+    eventFilter): alto proporcional con mínimo legible, ancho tope 5:1.
+    Transparente al mouse para no robar el doble clic que entra/sale del
+    fullscreen. Pinta todo en `paintEvent` con colores propios: el QSS que se
+    re-aplica en fullscreen no le afecta.
 
     Solo pinta: la posición la empuja `AudioPlayer` con `set_time`.
     """
 
     MARGIN = 14
+    MIN_H = 84
+    MAX_H = 130
     SLIDE_MS = 160
 
     def __init__(self, parent: QWidget):
@@ -459,6 +464,10 @@ class ChordCarouselWidget(QWidget):
             return ""
         return lab(self._idx - 1), lab(self._idx), lab(self._idx + 1)
 
+    def current_label(self) -> str:
+        """Etiqueta cruda (americana) del acorde actual: la usa el diagrama."""
+        return self._labels[self._idx] if 0 <= self._idx < len(self._labels) else ""
+
     def progress(self) -> float:
         """Fracción transcurrida del acorde actual (0..1)."""
         i = self._idx
@@ -483,69 +492,172 @@ class ChordCarouselWidget(QWidget):
         return False
 
     def reposition(self):
+        """Ajusta el tamaño al del padre; la posición la pone el layout."""
         parent = self.parentWidget()
         if parent is None:
             return
-        h = int(min(220, max(78, parent.height() * 0.17)))
-        self.setGeometry(self.MARGIN, self.MARGIN, int(h * 2.5), h)
-        self.raise_()
+        h = int(min(self.MAX_H, max(self.MIN_H, parent.height() * 0.11)))
+        w = min(parent.width() - 2 * self.MARGIN, h * 5)
+        self.setFixedSize(max(0, w), h)
 
     def _on_anim(self, value):
         self._offset = float(value)
         self.update()
 
     # ── Pintado ──────────────────────────────────────────────────────────
+    def _font(self, px: float, bold: bool = True) -> QFont:
+        f = QFont(self.font())
+        f.setBold(bold)
+        f.setPixelSize(max(8, int(px)))
+        return f
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(20, 16, 28, 175))
-        p.drawRoundedRect(QRectF(0, 0, w, h), 10, 10)
+        u = h / 112  # medidas de diseño pensadas para 112 px de alto
 
-        key_h = h * 0.2
-        bar_h = max(3.0, h * 0.04)
-        body = QRectF(0, key_h, w, h - key_h - bar_h * 3)
+        bg = QLinearGradient(0, 0, w, 0)
+        bg.setColorAt(0, QColor("#081e33"))
+        bg.setColorAt(0.5, QColor("#16172e"))
+        bg.setColorAt(1, QColor("#2b1039"))
+        p.setPen(QPen(QColor(96, 143, 194, 125), 1))
+        p.setBrush(QBrush(bg))
+        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 14 * u, 14 * u)
 
+        pad = 10 * u
+        key_h = 18 * u
         key_text = format_key(*self._key, self._notation)
         if key_text:
-            f = QFont(self.font())
-            f.setPixelSize(max(9, int(key_h * 0.6)))
-            p.setFont(f)
-            p.setPen(QColor(200, 190, 220, 170))
-            p.drawText(QRectF(0, 0, w, key_h), Qt.AlignmentFlag.AlignCenter,
-                       f"♪ {key_text}")
+            p.setFont(self._font(12 * u))
+            p.setPen(QColor("#a1b5d8"))
+            p.drawText(QRectF(pad + 3 * u, 6 * u, w - 2 * pad, key_h),
+                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                       f"♪  {tr('Tonalidad')}: {key_text}")
 
-        # Casillas: anterior (izq), actual (centro), siguiente (der). Con el
-        # deslizamiento todo parte una casilla a la derecha y llega a su sitio.
-        slot_w = w / 3
-        shift = self._offset * slot_w
+        top = 6 * u + key_h + 4 * u
+        diag = QRectF(pad, top, 68 * u, h - pad - top)
+        self._draw_diagram(p, diag, u)
+
+        # Tarjetas + barra de progreso del acorde, a la derecha del diagrama
+        bar_h = max(3.0, 4 * u)
+        cards = QRectF(diag.right() + 8 * u, top,
+                       w - pad - diag.right() - 8 * u, h - pad - top - bar_h - 6 * u)
+        gap = 7 * u
+        cell = (cards.width() - 2 * gap) / 3
+        for i in range(3):
+            rect = QRectF(cards.left() + i * (cell + gap), cards.top(), cell, cards.height())
+            if i == 1:
+                fill = QLinearGradient(rect.topLeft(), rect.bottomRight())
+                fill.setColorAt(0, QColor("#8d279d"))
+                fill.setColorAt(1, QColor("#392457"))
+                p.setBrush(QBrush(fill))
+                p.setPen(QPen(QColor("#df65ef"), max(1.5, 2 * u)))
+            else:
+                p.setBrush(QColor(33, 34, 65, 215))
+                p.setPen(QPen(QColor(114, 95, 166, 135), 1))
+            p.drawRoundedRect(rect, 11 * u, 11 * u)
+
+        # Textos: con el deslizamiento todo parte una casilla a la derecha y
+        # llega a su sitio; recortados al área de tarjetas.
+        p.save()
+        p.setClipRect(cards)
+        shift = self._offset * (cell + gap)
         prev, cur, nxt = self.labels_at_current()
         prevprev = (format_chord(self._labels[self._idx - 2], self._notation)
                     if self._offset and self._idx >= 2 else "")
-        for text, slot, size, color in (
-            (prevprev, -1, 0.30, QColor(170, 160, 190, int(110 * self._offset))),
-            (prev, 0, 0.30, QColor(170, 160, 190, 130)),
-            (cur, 1, 0.52, QColor("#F88FFF")),
-            (nxt, 2, 0.38, QColor(235, 235, 245, 220)),
+        fade = int(255 * self._offset)
+        for text, slot, px, color in (
+            (prevprev, -1, 21 * u, QColor(182, 162, 210, fade)),
+            (prev, 0, 21 * u, QColor("#b6a2d2")),
+            (cur, 1, 30 * u, QColor("#ffffff")),
+            (nxt, 2, 21 * u, QColor("#b6a2d2")),
         ):
             if not text:
                 continue
-            f = QFont(self.font())
-            f.setBold(True)
-            f.setPixelSize(max(10, int(body.height() * size)))
-            p.setFont(f)
+            font = self._font(px)
+            text_w = QFontMetricsF(font).horizontalAdvance(text)
+            if text_w > cell * 0.88:  # "C#dim" en panel angosto: encoger
+                font = self._font(px * cell * 0.88 / text_w)
+            p.setFont(font)
             p.setPen(color)
-            rect = QRectF(slot * slot_w + shift, body.top(), slot_w, body.height())
+            rect = QRectF(cards.left() + slot * (cell + gap) + shift, cards.top(),
+                          cell, cards.height())
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        p.restore()
 
-        # Barra hasta el próximo cambio
-        bar = QRectF(w * 0.1, h - bar_h * 2, w * 0.8, bar_h)
+        bar = QRectF(cards.left(), h - pad - bar_h, cards.width(), bar_h)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(255, 255, 255, 40))
         p.drawRoundedRect(bar, bar_h / 2, bar_h / 2)
         frac = self.progress()
         if frac > 0:
-            p.setBrush(QColor("#F88FFF"))
+            p.setBrush(QColor("#d75ce9"))
             p.drawRoundedRect(QRectF(bar.left(), bar.top(), bar.width() * frac, bar_h),
                               bar_h / 2, bar_h / 2)
+        p.end()
+
+    def _draw_diagram(self, p: QPainter, area: QRectF, u: float):
+        """Diagrama de guitarra del acorde actual: 6 cuerdas, ventana de 4
+        trastes, × / ○ sobre la cejuela y barra cuando es cejilla."""
+        p.save()
+        p.setPen(QPen(QColor(118, 110, 182, 135), 1))
+        p.setBrush(QColor(35, 37, 72, 200))
+        p.drawRoundedRect(area, 10 * u, 10 * u)
+        frets = guitar_voicing(self.current_label())
+        if frets is None:  # "N" o sin acorde: caja vacía
+            p.restore()
+            return
+
+        x0, x1 = area.left() + 14 * u, area.right() - 8 * u
+        xstep = (x1 - x0) / 5
+        y0 = area.top() + 16 * u
+        fstep = (area.bottom() - 6 * u - y0) / 4
+        pressed = [f for f in frets if f > 0]
+        start = 1 if max(pressed, default=0) <= 4 else min(pressed)
+
+        p.setPen(QPen(QColor("#99a8c7"), 1))
+        for i in range(6):
+            x = x0 + i * xstep
+            p.drawLine(QPointF(x, y0), QPointF(x, y0 + 4 * fstep))
+        for i in range(5):
+            y = y0 + i * fstep
+            nut = i == 0 and start == 1
+            p.setPen(QPen(QColor("#d0c8ef"), max(2.0, 3 * u) if nut else 1))
+            p.drawLine(QPointF(x0, y), QPointF(x1, y))
+        if start > 1:
+            p.setFont(self._font(9 * u, bold=False))
+            p.setPen(QColor("#c7b1ea"))
+            p.drawText(QRectF(area.left(), y0, x0 - area.left() - 2 * u, fstep),
+                       Qt.AlignmentFlag.AlignCenter, str(start))
+
+        dot = min(xstep, fstep) * 0.36
+        played = [i for i, f in enumerate(frets) if f >= 0]
+        first = played[0] if played else 5
+        # Cejilla: la primera cuerda tocada y la 1ª aguda en el mismo traste,
+        # sin cuerdas al aire (G abierto empieza y acaba en 3 pero no lo es).
+        barre = frets[first] if (frets[first] > 0 and frets[first] == frets[5]
+                                 and 0 not in frets) else 0
+        p.setBrush(QColor("#df61ef"))
+        p.setPen(Qt.PenStyle.NoPen)
+        if barre:
+            y = y0 + (barre - start + 0.5) * fstep
+            p.drawRoundedRect(QRectF(x0 + first * xstep - dot, y - dot,
+                                     (5 - first) * xstep + 2 * dot, 2 * dot), dot, dot)
+        mark_y = y0 - 8 * u
+        for i, f in enumerate(frets):
+            x = x0 + i * xstep
+            if f == -1:
+                p.setPen(QColor("#9ba7bf"))
+                p.setFont(self._font(10 * u, bold=False))
+                p.drawText(QRectF(x - 6 * u, mark_y - 6 * u, 12 * u, 12 * u),
+                           Qt.AlignmentFlag.AlignCenter, "×")
+            elif f == 0:
+                p.setPen(QPen(QColor("#d6b8f4"), 1.3))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawEllipse(QPointF(x, mark_y), 3.2 * u, 3.2 * u)
+            elif f != barre:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor("#df61ef"))
+                p.drawEllipse(QPointF(x, y0 + (f - start + 0.5) * fstep), dot, dot)
+        p.restore()

@@ -334,11 +334,6 @@ class AudioPlayer(QMainWindow):
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cover_label.setPixmap(QPixmap(resource_path('images/main_window/none.png')))
 
-        self.lyrics_header = QTextEdit()
-        self.lyrics_header.setReadOnly(True)
-        self.lyrics_header.setFixedHeight(100)
-        self.lyrics_header.setObjectName("lyrics_header")
-
         self.lyrics_current = QTextEdit()
         self.lyrics_current.setReadOnly(True)
         self.lyrics_current.setObjectName("lyrics_current")
@@ -351,8 +346,8 @@ class AudioPlayer(QMainWindow):
         self.lyrics_next.setStyleSheet("background: transparent; border: none;")
 
         lyrics_layout = QVBoxLayout()
-        lyrics_layout.setContentsMargins(0, 0, 0, 0)
-        for w in (self.lyrics_header, self.lyrics_current, self.lyrics_next):
+        lyrics_layout.setContentsMargins(0, 8, 0, 0)
+        for w in (self.lyrics_current, self.lyrics_next):
             lyrics_layout.addWidget(w)
 
         self.lyrics_container = QWidget()
@@ -371,13 +366,14 @@ class AudioPlayer(QMainWindow):
         esc.activated.connect(self._exit_lyrics_fullscreen)
         self._lyrics_click_areas = tuple(
             w.viewport() for w in
-            (self.lyrics_header, self.lyrics_current, self.lyrics_next)
+            (self.lyrics_current, self.lyrics_next)
         ) + (self.lyrics_container,)
         for w in self._lyrics_click_areas:
             if w is not None:
                 w.installEventFilter(self)
 
-        # Acordes: carrusel en la esquina, guiado por la posición del audio
+        # Acordes: carrusel arriba de las letras, donde antes iba el
+        # encabezado artista/título (ya está en la barra de título), guiado por la posición del audio
         # (no por el .lrc), con su propio timer: el de letras solo corre
         # cuando hay letras.
         prefs = load_settings()
@@ -385,6 +381,8 @@ class AudioPlayer(QMainWindow):
         self._chord_notation = prefs.get("chord_notation", "american")
         self.chord_carousel = ChordCarouselWidget(self.lyrics_container)
         self.chord_carousel.set_notation(self._chord_notation)
+        lyrics_layout.insertWidget(0, self.chord_carousel,
+                                   alignment=Qt.AlignmentFlag.AlignHCenter)
         self._chords_timer = QTimer(self)
         self._chords_timer.setInterval(100)
         self._chords_timer.timeout.connect(self._update_chords_display)
@@ -1075,11 +1073,6 @@ class AudioPlayer(QMainWindow):
 
         if not (0 <= self.current_index < len(self.playlist)):
             return
-        song = self.playlist[self.current_index]
-        self.lyrics_header.setHtml(
-            f'<H1 style="color: #3AABEF;"><center>{song["artist"]}</center></H1>'
-            f'<H2 style="color: #7E54AF;"><center>{song["song"]}</center></H2>'
-        )
         self.lyrics_next.clear()
 
         if not hasattr(self, 'lyrics_timer'):
@@ -1321,7 +1314,7 @@ class AudioPlayer(QMainWindow):
         self.lyrics = []
         self._last_progress_seconds = -1
         self.update_lyrics_menu_state()
-        for w in (self.lyrics_header, self.lyrics_current, self.lyrics_next):
+        for w in (self.lyrics_current, self.lyrics_next):
             w.clear()
         self.chord_carousel.set_chords({})
         self._refresh_chord_visibility()
@@ -2753,7 +2746,7 @@ class AudioPlayer(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
     def _update_metadata(self):
         try:
-            for w in (self.lyrics_header, self.lyrics_current, self.lyrics_next):
+            for w in (self.lyrics_current, self.lyrics_next):
                 w.clear()
             song = self.playlist[self.current_index]
             path = Path(song["path"])

@@ -1,9 +1,3 @@
-QTextEdit#lyrics_header{
-	font-family: "Saira Stencil One";
-	border: none;
-    font-size: 12px;
-}
-
 QTextEdit#lyrics_current{
 	font-family: "Righteous";
     font-size: 62px;

@@ -213,6 +213,39 @@ def format_key(key: str, mode: str, notation: str = "american") -> str:
     return format_chord(key + ("m" if mode == "minor" else ""), notation)
 
 
+# Digitaciones de guitarra (cuerdas Mi grave → Mi aguda; -1 = no tocar,
+# 0 = al aire). Abiertas para las que las tienen; el resto sale de formas
+# móviles con cejilla, transpuestas desde Mi (raíz en 6ª) o La (raíz en 5ª).
+_OPEN_VOICINGS = {
+    (0, ""): (-1, 3, 2, 0, 1, 0),   # C
+    (2, ""): (-1, -1, 0, 2, 3, 2),  # D
+    (2, "m"): (-1, -1, 0, 2, 3, 1),  # Dm
+    (7, ""): (3, 2, 0, 0, 0, 3),    # G
+}
+_MOVABLE = {  # calidad → [(cuerda de la raíz, forma en traste 0), ...]
+    "": [(4, (0, 2, 2, 1, 0, 0)), (9, (-1, 0, 2, 2, 2, 0))],
+    "m": [(4, (0, 2, 2, 0, 0, 0)), (9, (-1, 0, 2, 2, 1, 0))],
+    "dim": [(9, (-1, 0, 1, 2, 1, -1))],
+    "aug": [(4, (0, -1, 2, 1, 1, 0))],
+}
+
+
+def guitar_voicing(label: str):
+    """`"F#m"` → `(2, 4, 4, 2, 2, 2)`; `None` sin acorde o etiqueta ilegible.
+
+    Solo tríadas (lo único que guarda `chords.json`); de las formas móviles
+    elige la de traste más bajo.
+    """
+    parsed = parse_label(label) if label and label != NO_CHORD else None
+    if parsed is None:
+        return None
+    if parsed in _OPEN_VOICINGS:
+        return _OPEN_VOICINGS[parsed]
+    root, quality = parsed
+    shift, shape = min(((root - base) % 12, shape) for base, shape in _MOVABLE[quality])
+    return tuple(f + shift if f >= 0 else -1 for f in shape)
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # ── Teoría musical ───────────────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────────────────────
