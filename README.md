@@ -12,7 +12,7 @@
 
 [Español](#español) · [English](#english)
 
-<img src="screenshots/playit-main-playing.webp" width="800" alt="PlayIt reproduciendo una canción con letras sincronizadas · PlayIt playing a song with synced lyrics">
+<img src="screenshots/playit-main-playing-v2.webp" width="800" alt="PlayIt reproduciendo una canción con letras sincronizadas · PlayIt playing a song with synced lyrics">
 
 </div>
 
